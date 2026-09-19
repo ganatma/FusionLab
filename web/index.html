@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FusionLab</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="importmap">{"imports":{"three":"/static/vendor/three.module.min.js"}}</script>
+  <script src="/static/vendor/plotly.min.js" defer></script>
+  <script type="module" src="/static/vessel3d.js"></script>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/replay.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>FUSIONLAB<span class="dim"> · open-data tokamak twin</span></h1>
+    </div>
+    <div class="prov" title="Every panel in the replay says where its content comes from">
+      <span class="tag meas">measured</span> FAIR-MAST data
+      <span class="tag model">model</span> published laws
+      <span class="tag learn">learned</span> PhysicsNeMo
+      <span class="tag comp">computed</span> from the data
+    </div>
+    <nav class="tabs">
+      <button type="button" data-tab="replay">Replay a real shot</button>
+      <button type="button" data-tab="db">Shot database</button>
+      <button type="button" data-tab="sandbox" class="active">What-if sandbox</button>
+    </nav>
+  </header>
+
+  <section id="tab-replay" hidden></section>
+  <section id="tab-db" hidden></section>
+
+  <section id="tab-sandbox">
+    <div class="grid">
+      <div class="panel">
+        <h2>Device</h2>
+        <select id="device" aria-label="Device"></select>
+        <p id="device-blurb" class="muted small"></p>
+        <h2>Controls</h2>
+        <div class="control"><label for="Ip"><span>Plasma current I<sub>p</sub></span> <output id="Ip-out"></output></label>
+          <input type="range" id="Ip" step="0.01"></div>
+        <div class="control"><label for="B"><span>Toroidal field B</span> <output id="B-out"></output></label>
+          <input type="range" id="B" step="0.01"></div>
+        <div class="control"><label for="n"><span>Density n</span> <output id="n-out"></output></label>
+          <input type="range" id="n" step="0.001"></div>
+        <div class="control"><label for="P_aux"><span>Heating P<sub>aux</sub></span> <output id="P_aux-out"></output></label>
+          <input type="range" id="P_aux" step="0.1"></div>
+        <div class="control"><label for="H"><span>Confinement multiplier H</span> <output id="H-out"></output></label>
+          <input type="range" id="H" min="0.5" max="2" step="0.01" value="1"></div>
+        <div class="control"><label for="Zeff"><span>Impurity content Z<sub>eff</sub></span> <output id="Zeff-out"></output></label>
+          <input type="range" id="Zeff" min="1" max="4" step="0.05" value="1.7"></div>
+      </div>
+
+      <div class="panel wide stack">
+        <div>
+          <h2>Steady state (reduced 0D model) <span id="status" class="status">…</span></h2>
+          <div class="grid tight">
+            <div class="readout"><span class="label">Temperature T</span><span class="value" id="r-T">–</span><span class="unit">keV</span></div>
+            <div class="readout"><span class="label">Fusion power P<sub>fus</sub></span><span class="value" id="r-Pfus">–</span><span class="unit">MW</span></div>
+            <div class="readout"><span class="label">Gain Q</span><span class="value" id="r-Q">–</span></div>
+            <div class="readout"><span class="label">Mode</span><span class="value" id="r-mode">–</span></div>
+            <div class="readout"><span class="label">Confinement time τ<sub>E</sub></span><span class="value" id="r-tau">–</span><span class="unit">s</span></div>
+          </div>
+        </div>
+        <div>
+          <h2>Operating limits (1.0 = disruption)</h2>
+          <div class="gauge-row"><span>Greenwald density</span><div class="gauge"><div class="bar" id="g-greenwald"></div></div><span class="num" id="g-greenwald-num">–</span></div>
+          <div class="gauge-row"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="g-troyon"></div></div><span class="num" id="g-troyon-num">–</span></div>
+          <div class="gauge-row"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="g-kink"></div></div><span class="num" id="g-kink-num">–</span></div>
+        </div>
+        <div>
+          <h2>Operating map: Q over density × heating</h2>
+          <div id="map" class="plot"></div>
+          <div class="muted small">Red shading: the reduced model flags a disruption or radiative collapse. White line: a stability limit reaches 1.0. Dot: current operating point.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Educational reduced model (0D power balance with published scaling laws, see docs/PHYSICS.md). It shows trends and does not forecast real machine performance.</footer>
+</body>
+</html>

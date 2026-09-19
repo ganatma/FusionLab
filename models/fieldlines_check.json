@@ -1,0 +1,180 @@
+{
+  "what": "Field lines of the EFIT reconstruction (axisymmetric) traced with NVIDIA Warp; q at psi_N = 0.95 from the traced lines vs EFIT q95, per cached FAIR-MAST shot. Relative errors are |q_traced - q95| / q95.",
+  "date": "2026-09-19T12:22:43-05:00",
+  "warp_version": "1.17.0",
+  "device": "cuda:2",
+  "gpu_name": "NVIDIA GeForce RTX 3090",
+  "first_launch": {
+    "cuda:2_cold_s": 2.636091727006715,
+    "cuda:2_cached_s": 0.22080762998666614,
+    "cpu_cold_s": 3.17994516401086,
+    "cpu_cached_s": 0.11420152499340475
+  },
+  "interpolation": "bicubic Catmull-Rom on the 65x65 EFIT grid, analytic gradient",
+  "integrator": "RK4 in toroidal angle, float32, 512 steps per turn for q, 256 for the USD lines",
+  "q_check": {
+    "29823": {
+      "n_slices": 37,
+      "n_compared": 37,
+      "median_rel_err": 0.0011119342349837971,
+      "p95_rel_err": 0.004567807123648363,
+      "max_rel_err": 0.0061444094684315696,
+      "median_signed_rel_err": 0.0005129218606009657,
+      "psi_n_drift_max": 0.0005599260330200195,
+      "psi_n_drift_median": 2.6941299438476562e-05,
+      "min_poloidal_transits": 12,
+      "n_turns": 107,
+      "steps_per_turn": 512,
+      "lines_x_steps": 2027008,
+      "launch_s": 0.12786905298708007
+    },
+    "30166": {
+      "n_slices": 71,
+      "n_compared": 71,
+      "median_rel_err": 0.0021947738509446703,
+      "p95_rel_err": 0.003557910815534529,
+      "max_rel_err": 0.003869920424166792,
+      "median_signed_rel_err": 0.0019608158191787585,
+      "psi_n_drift_max": 0.00038677453994750977,
+      "psi_n_drift_median": 6.54458999633789e-05,
+      "min_poloidal_transits": 12,
+      "n_turns": 144,
+      "steps_per_turn": 512,
+      "lines_x_steps": 5234688,
+      "launch_s": 0.21402319899061695
+    },
+    "30192": {
+      "n_slices": 52,
+      "n_compared": 52,
+      "median_rel_err": 0.0015780262875300288,
+      "p95_rel_err": 0.005126331672446016,
+      "max_rel_err": 0.006229631936214604,
+      "median_signed_rel_err": 0.0013968846318593224,
+      "psi_n_drift_max": 0.0002892613410949707,
+      "psi_n_drift_median": 6.0617923736572266e-05,
+      "min_poloidal_transits": 12,
+      "n_turns": 139,
+      "steps_per_turn": 512,
+      "lines_x_steps": 3700736,
+      "launch_s": 0.16100138699403033
+    },
+    "30420": {
+      "n_slices": 49,
+      "n_compared": 49,
+      "median_rel_err": 0.001593682603836432,
+      "p95_rel_err": 0.002364158189521417,
+      "max_rel_err": 0.003638200299813502,
+      "median_signed_rel_err": 0.0015869037445865068,
+      "psi_n_drift_max": 0.00021523237228393555,
+      "psi_n_drift_median": 4.178285598754883e-05,
+      "min_poloidal_transits": 12,
+      "n_turns": 138,
+      "steps_per_turn": 512,
+      "lines_x_steps": 3462144,
+      "launch_s": 0.16410159599035978
+    }
+  },
+  "convergence_shot": 30166,
+  "convergence": {
+    "128": {
+      "median_rel_err": 0.002715018472544292,
+      "p95_rel_err": 0.006398451026245379,
+      "max_rel_err": 0.012653551873717816,
+      "psi_n_drift_max": 0.003225982189178467,
+      "launch_s": 0.05134114297106862
+    },
+    "256": {
+      "median_rel_err": 0.0021426181057641333,
+      "p95_rel_err": 0.004707909976705411,
+      "max_rel_err": 0.007697009692976717,
+      "psi_n_drift_max": 0.001570284366607666,
+      "launch_s": 0.10137085802853107
+    },
+    "512": {
+      "median_rel_err": 0.0021947738509446703,
+      "p95_rel_err": 0.003557910815534529,
+      "max_rel_err": 0.003869920424166792,
+      "psi_n_drift_max": 0.00038677453994750977,
+      "launch_s": 0.20191376603906974
+    },
+    "1024": {
+      "median_rel_err": 0.0022237426544180964,
+      "p95_rel_err": 0.003279573503347108,
+      "max_rel_err": 0.0038826027877720422,
+      "psi_n_drift_max": 8.231401443481445e-05,
+      "launch_s": 0.4026844770414755
+    }
+  },
+  "benchmark": {
+    "gpu": {
+      "device": "cuda:2",
+      "device_name": "NVIDIA GeForce RTX 3090",
+      "n_lines": 4096,
+      "n_turns": 20,
+      "steps_per_turn": 256,
+      "store_every": 1,
+      "steps": 20971520,
+      "lines_stopped_early": 0,
+      "launch_s_best": 0.01539776602294296,
+      "launch_s_all": [
+        0.01539776602294296,
+        0.015495217987336218,
+        0.015461347007658333
+      ],
+      "steps_per_s": 1361984587.1636212
+    },
+    "gpu_large": {
+      "device": "cuda:2",
+      "device_name": "NVIDIA GeForce RTX 3090",
+      "n_lines": 65536,
+      "n_turns": 20,
+      "steps_per_turn": 256,
+      "store_every": 16,
+      "steps": 335544320,
+      "lines_stopped_early": 0,
+      "launch_s_best": 0.045289017958566546,
+      "launch_s_all": [
+        0.045289017958566546,
+        0.046591797028668225,
+        0.04650915402453393
+      ],
+      "steps_per_s": 7408955528.843187
+    },
+    "cpu": {
+      "device": "cpu",
+      "device_name": "x86_64",
+      "n_lines": 256,
+      "n_turns": 20,
+      "steps_per_turn": 256,
+      "store_every": 1,
+      "steps": 1310720,
+      "lines_stopped_early": 0,
+      "launch_s_best": 0.2907597019802779,
+      "launch_s_all": [
+        0.2907597019802779
+      ],
+      "steps_per_s": 4507914.92449977
+    }
+  },
+  "usd": {
+    "path": "out/mast_30166_fieldlines.usdc",
+    "size_MB": 6.625719,
+    "n_curves": 5,
+    "vertices_per_curve": 321,
+    "time_samples": 71,
+    "psi_n_start": [
+      0.3,
+      0.6,
+      0.9,
+      1.02,
+      1.02
+    ],
+    "direction": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      -1.0
+    ]
+  }
+}

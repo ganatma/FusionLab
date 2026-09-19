@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/*
+!data/README.md
+!data/shots/
+!data/mast_db.npz
+models/*.pt
+!models/.gitkeep
+!models/surrogate.pt
+!models/eq_surrogate.pt
+out/
+.DS_Store

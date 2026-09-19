@@ -1,0 +1,205 @@
+{
+ "data": "UKAEA FAIR-MAST shot table, cpf_* scalars at peak current (CC BY-SA 4.0)",
+ "n_shots": 6353,
+ "target": "ln(tau_E measured / tau_E IPB98(y,2)); tau_E = W_mhd / (P_ohm + P_nbi - dW/dt), W includes beam fast ions",
+ "inputs": [
+  "Ip_MA",
+  "B_T",
+  "n_e20",
+  "P_loss_MW",
+  "R_m",
+  "a_m",
+  "kappa_a",
+  "f_nbi"
+ ],
+ "model": "physicsnemo.models.mlp.FullyConnected 8-32-32-1, SiLU, input noise 0.1 sigma, weight decay 1e-2",
+ "n_params": 1377,
+ "device": "NVIDIA GeForce RTX 3090",
+ "split_by_session_block": {
+  "n_train": 4916,
+  "n_val": 647,
+  "n_test": 790,
+  "rmse_ln_tau": {
+   "ipb98": 0.7891074385242208,
+   "ipb98_x_H": 0.6846472800827667,
+   "power_law": 0.52796311515058,
+   "power_law+f_nbi": 0.45077869500602874,
+   "hybrid_physicsnemo": 0.32574925525114706
+  },
+  "H_fit": 0.6311964481103418,
+  "train_seconds": 3.6,
+  "power_law_exponents": {
+   "Ip_MA": {
+    "value": 1.158,
+    "std_err": 0.041
+   },
+   "B_T": {
+    "value": -0.859,
+    "std_err": 0.111
+   },
+   "n_e20": {
+    "value": 0.188,
+    "std_err": 0.011
+   },
+   "P_loss_MW": {
+    "value": -0.381,
+    "std_err": 0.011
+   },
+   "R_m": {
+    "value": 2.741,
+    "std_err": 0.182
+   },
+   "a_m": {
+    "value": -0.108,
+    "std_err": 0.178
+   },
+   "kappa_a": {
+    "value": -1.614,
+    "std_err": 0.09
+   }
+  }
+ },
+ "split_temporal_M9_held_out": {
+  "n_train": 5140,
+  "n_val": 497,
+  "n_test": 716,
+  "rmse_ln_tau": {
+   "ipb98": 0.6749299287914696,
+   "ipb98_x_H": 0.6908242740722315,
+   "power_law": 0.5360832479610507,
+   "power_law+f_nbi": 0.48919180879812707,
+   "hybrid_physicsnemo": 0.5399033606545449
+  },
+  "H_fit": 0.6175274381154018,
+  "train_seconds": 3.43,
+  "power_law_exponents": {
+   "Ip_MA": {
+    "value": 1.19,
+    "std_err": 0.041
+   },
+   "B_T": {
+    "value": -1.004,
+    "std_err": 0.111
+   },
+   "n_e20": {
+    "value": 0.181,
+    "std_err": 0.011
+   },
+   "P_loss_MW": {
+    "value": -0.403,
+    "std_err": 0.011
+   },
+   "R_m": {
+    "value": 3.175,
+    "std_err": 0.189
+   },
+   "a_m": {
+    "value": -0.564,
+    "std_err": 0.181
+   },
+   "kappa_a": {
+    "value": -1.613,
+    "std_err": 0.095
+   }
+  }
+ },
+ "block_size": 100,
+ "held_out_blocks": [
+  133,
+  142,
+  157,
+  159,
+  161,
+  188,
+  203,
+  207,
+  210,
+  211,
+  212,
+  231,
+  240,
+  249,
+  262,
+  267,
+  268,
+  272,
+  274,
+  293,
+  298,
+  301,
+  304
+ ],
+ "exponents": {
+  "ipb98": {
+   "Ip_MA": 0.93,
+   "B_T": 0.15,
+   "n_e20": 0.41,
+   "P_loss_MW": -0.69
+  },
+  "valovic_2009_mast": {
+   "Ip_MA": 0.59,
+   "B_T": 1.4,
+   "n_e20": 0.0,
+   "P_loss_MW": -0.73
+  },
+  "power_law_refit": {
+   "Ip_MA": {
+    "value": 1.158,
+    "std_err": 0.041
+   },
+   "B_T": {
+    "value": -0.859,
+    "std_err": 0.111
+   },
+   "n_e20": {
+    "value": 0.188,
+    "std_err": 0.011
+   },
+   "P_loss_MW": {
+    "value": -0.381,
+    "std_err": 0.011
+   }
+  },
+  "hybrid_mean_local": {
+   "Ip_MA": 1.088,
+   "B_T": -5.071,
+   "n_e20": 0.529,
+   "P_loss_MW": -0.824
+  }
+ },
+ "ranges": {
+  "Ip_MA": [
+   0.43,
+   0.922
+  ],
+  "B_T": [
+   0.399,
+   0.496
+  ],
+  "n_e20": [
+   0.118,
+   0.385
+  ],
+  "P_loss_MW": [
+   0.5,
+   3.975
+  ],
+  "R_m": [
+   0.728,
+   0.873
+  ],
+  "a_m": [
+   0.522,
+   0.613
+  ],
+  "kappa_a": [
+   1.305,
+   1.682
+  ]
+ },
+ "best_on_session_split": "hybrid_physicsnemo",
+ "hybrid_gain_vs_power_law_same_inputs": {
+  "session_block": 0.277,
+  "temporal_M9": -0.104
+ }
+}

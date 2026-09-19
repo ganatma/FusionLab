@@ -1,0 +1,610 @@
+{
+ "what": "Surrogate of EFIT's equilibrium reconstruction on MAST: magnetic measurements -> psi(R,Z) on EFIT's 65x65 grid. Target and inputs are EFIT's own stored arrays (FAIR-MAST level 2, group 'equilibrium'). EFIT is a fit to these same magnetics, so low error means the surrogate reproduces EFIT; it is not validated against anything else and is not predictive.",
+ "date": "2026-09-19T12:49:08-05:00",
+ "gpu": "NVIDIA GeForce RTX 3090",
+ "data": {
+  "source": "UKAEA FAIR-MAST level 2 (CC BY-SA 4.0), s3://mast/level2/shots/{id}.zarr",
+  "campaigns": {
+   "M8": 1049,
+   "M9": 715
+  },
+  "slice_filter": "finite q95, |EFIT ip| > 1e5 A, psi finite on the whole grid, finite measured ip",
+  "plasma_current_input": "ip_measured (the measurement), not EFIT's fitted ip",
+  "split": "by blocks of 100 consecutive shot numbers (never by time slice), 80/10/10 of blocks, seed 0",
+  "test": {
+   "n_shots": 176,
+   "n_slices": 12662,
+   "n_shot_number_blocks": 4
+  },
+  "val": {
+   "n_shots": 159,
+   "n_slices": 12763,
+   "n_shot_number_blocks": 4
+  },
+  "train": {
+   "n_shots": 1429,
+   "n_slices": 115611,
+   "n_shot_number_blocks": 31
+  },
+  "n_slices_dropped_without_ip_measured": 0,
+  "psi_units": "Wb/rad (as archived)",
+  "grid": "65 x 65, axes (Z, R); R 0.060 to 1.980 m, Z -2.000 to 2.000 m"
+ },
+ "inputs": {
+  "rule": "input = sensor finite and (for probes/flux loops) non-zero in >= 90% of training slices, with non-zero spread; remaining dropouts (NaN, or exactly 0 on a probe/loop) are imputed with the training mean; EFIT weights are never network inputs",
+  "n_inputs": 93,
+  "probes_kept": 56,
+  "flux_loops_kept": 15,
+  "pf_currents_kept": 21,
+  "ip_kept": 1,
+  "kept_inputs_with_mean_efit_weight_below_0.5": 38,
+  "mean_efit_weight_of_all_flux_loops_train": 0.0,
+  "imputed_fraction_of_kept_train_values": 0.002279055375074534
+ },
+ "input_names": [
+  "b_field_pol_probe_0",
+  "b_field_pol_probe_2",
+  "b_field_pol_probe_3",
+  "b_field_pol_probe_4",
+  "b_field_pol_probe_6",
+  "b_field_pol_probe_7",
+  "b_field_pol_probe_8",
+  "b_field_pol_probe_9",
+  "b_field_pol_probe_10",
+  "b_field_pol_probe_11",
+  "b_field_pol_probe_12",
+  "b_field_pol_probe_13",
+  "b_field_pol_probe_14",
+  "b_field_pol_probe_15",
+  "b_field_pol_probe_16",
+  "b_field_pol_probe_17",
+  "b_field_pol_probe_18",
+  "b_field_pol_probe_19",
+  "b_field_pol_probe_21",
+  "b_field_pol_probe_23",
+  "b_field_pol_probe_24",
+  "b_field_pol_probe_25",
+  "b_field_pol_probe_26",
+  "b_field_pol_probe_27",
+  "b_field_pol_probe_28",
+  "b_field_pol_probe_29",
+  "b_field_pol_probe_30",
+  "b_field_pol_probe_32",
+  "b_field_pol_probe_33",
+  "b_field_pol_probe_35",
+  "b_field_pol_probe_36",
+  "b_field_pol_probe_37",
+  "b_field_pol_probe_38",
+  "b_field_pol_probe_39",
+  "b_field_pol_probe_42",
+  "b_field_pol_probe_43",
+  "b_field_pol_probe_44",
+  "b_field_pol_probe_45",
+  "b_field_pol_probe_48",
+  "b_field_pol_probe_50",
+  "b_field_pol_probe_56",
+  "b_field_pol_probe_57",
+  "b_field_pol_probe_59",
+  "b_field_pol_probe_62",
+  "b_field_pol_probe_63",
+  "b_field_pol_probe_64",
+  "b_field_pol_probe_66",
+  "b_field_pol_probe_67",
+  "b_field_pol_probe_68",
+  "b_field_pol_probe_70",
+  "b_field_pol_probe_71",
+  "b_field_pol_probe_72",
+  "b_field_pol_probe_73",
+  "b_field_pol_probe_74",
+  "b_field_pol_probe_75",
+  "b_field_pol_probe_76",
+  "flux_loop_2",
+  "flux_loop_3",
+  "flux_loop_4",
+  "flux_loop_6",
+  "flux_loop_8",
+  "flux_loop_14",
+  "flux_loop_17",
+  "flux_loop_21",
+  "flux_loop_22",
+  "flux_loop_28",
+  "flux_loop_36",
+  "flux_loop_39",
+  "flux_loop_40",
+  "flux_loop_43",
+  "flux_loop_44",
+  "pf_current_0",
+  "pf_current_1",
+  "pf_current_2",
+  "pf_current_3",
+  "pf_current_4",
+  "pf_current_5",
+  "pf_current_6",
+  "pf_current_7",
+  "pf_current_8",
+  "pf_current_9",
+  "pf_current_10",
+  "pf_current_11",
+  "pf_current_12",
+  "pf_current_13",
+  "pf_current_14",
+  "pf_current_15",
+  "pf_current_16",
+  "pf_current_17",
+  "pf_current_18",
+  "pf_current_19",
+  "pf_current_20",
+  "ip_measured"
+ ],
+ "pca": {
+  "k": 64,
+  "explained_variance_train": 0.9999997534843055
+ },
+ "architecture": {
+  "chosen": "mlp_direct",
+  "class": "physicsnemo.models.mlp.FullyConnected",
+  "in_features": 93,
+  "layer_size": 512,
+  "num_layers": 4,
+  "activation_fn": "silu",
+  "skip_connections": true,
+  "k": 64,
+  "residual": false,
+  "input_noise": 0.0,
+  "decoder": "linear PCA decoder (fixed)",
+  "n_parameters": 868928,
+  "optimiser": "AdamW lr 0.001 wd 1e-05, cosine schedule, batch 512, psi-space MSE, early stopping on val (patience 60)"
+ },
+ "training": {
+  "max_epochs": 60,
+  "epochs_run": 60,
+  "best_epoch": 58,
+  "train_time_s": 28.0
+ },
+ "candidates": {
+  "mlp_direct": {
+   "val_rel_l2_median": 0.015983112156391144,
+   "test_rel_l2": {
+    "median": 0.016546720638871193,
+    "p95": 0.05931918043643235,
+    "mean": 0.023264961161502985
+   },
+   "train_time_s": 28.0,
+   "best_epoch": 58
+  },
+  "ridge_plus_mlp_residual": {
+   "val_rel_l2_median": 0.018479544669389725,
+   "test_rel_l2": {
+    "median": 0.018202561885118484,
+    "p95": 0.06291604749858379,
+    "mean": 0.02459908386171763
+   },
+   "train_time_s": 28.1,
+   "best_epoch": 9
+  }
+ },
+ "selection": "candidate with the lowest validation median relative L2; test shots were never used to choose",
+ "metrics_definition": {
+  "rel_l2": "per test slice ||psi_hat - psi_efit||_2 / ||psi_efit||_2 over the 65x65 grid",
+  "rel_l2_offset_removed": "the same after subtracting each map's grid mean from error and reference (the field depends on grad psi only, so a uniform offset of psi has no effect on B)",
+  "psi_n_rmse_in_plasma": "psi_N = (psi - psi_axis)/(psi_boundary - psi_axis) with EFIT's psi_axis/psi_boundary for both maps; grid points with EFIT psi_N <= 1 inside the bounding box of EFIT's LCFS",
+  "axis_error_cm": "distance between EFIT magnetic_axis_r/z and the extremum of predicted psi (max of psi*sign(ip)*+1) inside R (0.3, 1.5) m, Z (-0.8, 0.8) m, parabolic sub-grid refinement; grid spacing is 3.0 cm in R, 6.25 cm in Z",
+  "efit_psi_axis_finder_floor_cm": "the same axis finder applied to EFIT's own psi: the error of the finder itself"
+ },
+ "caveats": [
+  "Surrogate of EFIT's reconstruction: the target is EFIT output, so this measures agreement with EFIT, not with the plasma.",
+  "Held-out shots come from the same two campaigns (M8, M9) and the same machine; nothing here says how it does elsewhere.",
+  "The test set is a small number of shot-number blocks (see n_shot_number_blocks), so the numbers move with the split seed.",
+  "EFIT's own fitted plasma current is NOT an input. The ablation that feeds it shows a much lower error: most of the remaining error is tied to how EFIT's fit departs from the measured current, which these inputs do not determine.",
+  "No run-time comparison with EFIT is made: EFIT was not run here."
+ ],
+ "test_metrics": {
+  "mean": {
+   "rel_l2": {
+    "median": 0.4336666762828827,
+    "p95": 1.953394281864166,
+    "mean": 0.6280083174735914
+   },
+   "rel_l2_offset_removed": {
+    "median": 0.32596659660339355,
+    "p95": 1.3791103720664968,
+    "mean": 0.42660226829289977
+   },
+   "uniform_offset_share_of_squared_error": 0.7804998755455017,
+   "psi_n_rmse_in_plasma": {
+    "pooled": 0.9645865559577942,
+    "per_slice": {
+     "median": 0.30800312757492065,
+     "p95": 2.953909492492673,
+     "mean": 0.7222939875671798
+    },
+    "n_slices": 12662
+   },
+   "axis_error_cm": {
+    "median": 8.969281196594238,
+    "p95": 24.99459953308105,
+    "mean": 11.575688859897095
+   }
+  },
+  "efit_psi_axis_finder_floor_cm": {
+   "median": 0.02083791419863701,
+   "p95": 0.15824475064873691,
+   "mean": 0.04139833234753939
+  },
+  "pca_truncation_floor_k64": {
+   "rel_l2": {
+    "median": 0.0002323749358765781,
+    "p95": 0.0006947495625354348,
+    "mean": 0.0002986411675099239
+   },
+   "rel_l2_offset_removed": {
+    "median": 0.00028924952493980527,
+    "p95": 0.00112785460660234,
+    "mean": 0.000424414553556238
+   },
+   "uniform_offset_share_of_squared_error": 6.299504457274452e-05,
+   "psi_n_rmse_in_plasma": {
+    "pooled": 0.000963791215326637,
+    "per_slice": {
+     "median": 0.00030075895483605564,
+     "p95": 0.0023593636811710876,
+     "mean": 0.0006500781795634437
+    },
+    "n_slices": 12662
+   },
+   "axis_error_cm": {
+    "median": 0.07014616578817368,
+    "p95": 0.6978200912475576,
+    "mean": 0.22175847751971547
+   }
+  },
+  "ridge": {
+   "rel_l2": {
+    "median": 0.026365360245108604,
+    "p95": 0.097421624138951,
+    "mean": 0.036947746834236066
+   },
+   "rel_l2_offset_removed": {
+    "median": 0.030293583869934082,
+    "p95": 0.11381300427019594,
+    "mean": 0.042393139484229604
+   },
+   "uniform_offset_share_of_squared_error": 0.313752144575119,
+   "psi_n_rmse_in_plasma": {
+    "pooled": 0.07679425179958344,
+    "per_slice": {
+     "median": 0.03194507583975792,
+     "p95": 0.18715617284178726,
+     "mean": 0.05646852086996328
+    },
+    "n_slices": 12662
+   },
+   "axis_error_cm": {
+    "median": 2.164374351501465,
+    "p95": 12.350122833251925,
+    "mean": 3.9633284009751235
+   },
+   "lambda": 0.0001
+  },
+  "physicsnemo": {
+   "rel_l2": {
+    "median": 0.016546720638871193,
+    "p95": 0.05931918043643235,
+    "mean": 0.023264961161502985
+   },
+   "rel_l2_offset_removed": {
+    "median": 0.018823666498064995,
+    "p95": 0.07017613686621185,
+    "mean": 0.026355236580878478
+   },
+   "uniform_offset_share_of_squared_error": 0.3632781207561493,
+   "psi_n_rmse_in_plasma": {
+    "pooled": 0.05103774741292,
+    "per_slice": {
+     "median": 0.02096698433160782,
+     "p95": 0.10668814033269881,
+     "mean": 0.03498961651870272
+    },
+    "n_slices": 12662
+   },
+   "axis_error_cm": {
+    "median": 1.2134748697280884,
+    "p95": 5.090654373168945,
+    "mean": 1.8250943120180119
+   }
+  }
+ },
+ "beats_linear": true,
+ "beats_linear_basis": "median relative L2 of psi on the test shots, PhysicsNeMo model vs ridge regression",
+ "throughput": {
+  "batch_size": 4096,
+  "slices_per_s": 3482115,
+  "batch_ms": 1.176,
+  "single_slice_ms": 0.319,
+  "note": "GPU-resident float32 inputs -> psi on the GPU, torch.cuda.synchronize around the timed loop, eager mode. No comparison with EFIT run time: EFIT was not run here."
+ },
+ "test_shot_ids": [
+  26600,
+  26602,
+  26603,
+  26604,
+  26606,
+  26612,
+  26613,
+  26614,
+  26615,
+  26620,
+  26626,
+  26627,
+  26630,
+  26632,
+  26633,
+  26635,
+  26637,
+  26638,
+  26640,
+  26641,
+  26642,
+  26643,
+  26646,
+  26648,
+  26651,
+  26652,
+  26654,
+  26660,
+  26671,
+  27200,
+  27201,
+  27202,
+  27203,
+  27207,
+  27208,
+  27211,
+  27217,
+  27218,
+  27219,
+  27220,
+  27221,
+  27222,
+  27223,
+  27224,
+  27225,
+  27226,
+  27227,
+  27229,
+  27230,
+  27231,
+  27233,
+  27236,
+  27238,
+  27239,
+  27241,
+  27242,
+  27247,
+  27248,
+  27249,
+  27250,
+  27251,
+  27252,
+  27253,
+  27254,
+  27256,
+  27257,
+  27258,
+  27268,
+  27269,
+  27270,
+  27271,
+  27273,
+  27274,
+  27275,
+  27276,
+  27277,
+  27278,
+  27279,
+  27280,
+  27282,
+  27285,
+  27286,
+  27287,
+  27288,
+  27291,
+  27293,
+  27294,
+  27295,
+  28200,
+  28201,
+  28202,
+  28203,
+  28204,
+  28206,
+  28207,
+  28210,
+  28211,
+  28213,
+  28214,
+  28216,
+  28219,
+  28223,
+  28227,
+  28237,
+  28240,
+  28241,
+  28242,
+  28243,
+  28244,
+  28246,
+  28247,
+  28252,
+  28258,
+  28259,
+  28261,
+  28264,
+  28268,
+  28269,
+  28270,
+  28272,
+  28274,
+  28275,
+  28276,
+  28277,
+  28278,
+  28279,
+  28280,
+  28281,
+  28282,
+  28283,
+  28285,
+  28286,
+  28287,
+  28288,
+  28289,
+  28290,
+  28291,
+  28292,
+  28299,
+  28300,
+  28301,
+  28302,
+  28303,
+  28304,
+  28306,
+  28307,
+  28308,
+  28309,
+  28310,
+  28311,
+  28313,
+  28314,
+  28315,
+  28318,
+  28319,
+  28320,
+  28321,
+  28322,
+  28323,
+  28325,
+  28326,
+  28327,
+  28328,
+  28329,
+  28330,
+  28337,
+  28341,
+  28342,
+  28344,
+  28345,
+  28347,
+  28348,
+  28349,
+  28350,
+  28351,
+  28352
+ ],
+ "ablations": {
+  "ablation_efit_fitted_ip_as_input": {
+   "plasma_current_input": "EFIT's fitted ip (ABLATION ONLY: leaks an EFIT output into the inputs)",
+   "inputs": {
+    "n_inputs": 93,
+    "probes_kept": 56,
+    "flux_loops_kept": 15,
+    "pf_currents_kept": 21,
+    "ip_kept": 1,
+    "kept_inputs_with_mean_efit_weight_below_0.5": 38,
+    "imputed_fraction_of_kept_train_values": 0.002279055375074534
+   },
+   "same_test_shots_as_headline": true,
+   "date": "2026-09-19T12:39:39-05:00",
+   "physicsnemo_test": {
+    "rel_l2": {
+     "median": 0.003198591759428382,
+     "p95": 0.019760208204388615,
+     "mean": 0.0058880252515320095
+    },
+    "rel_l2_offset_removed": {
+     "median": 0.003453002078458667,
+     "p95": 0.02252921834588051,
+     "mean": 0.007042805212913583
+    },
+    "axis_error_cm": {
+     "median": 0.30021610856056213,
+     "p95": 3.23362934589386,
+     "mean": 0.8027833476740601
+    }
+   },
+   "ridge_test_rel_l2": {
+    "median": 0.021519074216485023,
+    "p95": 0.07559696435928326,
+    "mean": 0.030010287782342528
+   }
+  },
+  "ablation_only_sensors_efit_used": {
+   "plasma_current_input": "ip_measured (the measurement), not EFIT's fitted ip",
+   "inputs": {
+    "n_inputs": 55,
+    "probes_kept": 33,
+    "flux_loops_kept": 0,
+    "pf_currents_kept": 21,
+    "ip_kept": 1,
+    "kept_inputs_with_mean_efit_weight_below_0.5": 0,
+    "imputed_fraction_of_kept_train_values": 1.2424108747122992e-05
+   },
+   "same_test_shots_as_headline": true,
+   "date": "2026-09-19T12:37:38-05:00",
+   "physicsnemo_test": {
+    "rel_l2": {
+     "median": 0.020738666877150536,
+     "p95": 0.06655375659465788,
+     "mean": 0.027924118361483934
+    },
+    "rel_l2_offset_removed": {
+     "median": 0.02250228077173233,
+     "p95": 0.07519919797778127,
+     "mean": 0.031114227590127594
+    },
+    "axis_error_cm": {
+     "median": 1.4525879621505737,
+     "p95": 6.212300682067863,
+     "mean": 2.200624239154009
+    }
+   },
+   "ridge_test_rel_l2": {
+    "median": 0.044908542186021805,
+    "p95": 0.13430379331111902,
+    "mean": 0.056669509437278234
+   }
+  }
+ },
+ "schedule_sweep_mlp_direct": {
+  "e_ep120": {
+   "epochs_run": 112,
+   "val_rel_l2_median": 0.01686604507267475,
+   "test_rel_l2_median": 0.01782022789120674,
+   "same_test_shots_as_headline": true
+  },
+  "e_ep30": {
+   "epochs_run": 30,
+   "val_rel_l2_median": 0.01791755110025406,
+   "test_rel_l2_median": 0.018541354686021805,
+   "same_test_shots_as_headline": true
+  },
+  "e_ep400": {
+   "epochs_run": 112,
+   "val_rel_l2_median": 0.017091214656829834,
+   "test_rel_l2_median": 0.01826365478336811,
+   "same_test_shots_as_headline": true
+  },
+  "e_ep45": {
+   "epochs_run": 45,
+   "val_rel_l2_median": 0.016961704939603806,
+   "test_rel_l2_median": 0.017590753734111786,
+   "same_test_shots_as_headline": true
+  },
+  "e_ep60": {
+   "epochs_run": 60,
+   "val_rel_l2_median": 0.015983112156391144,
+   "test_rel_l2_median": 0.016546720638871193,
+   "same_test_shots_as_headline": true
+  }
+ }
+}

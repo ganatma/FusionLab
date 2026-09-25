@@ -25,8 +25,10 @@ const COS = new Float32Array(NPHI + 1), SIN = new Float32Array(NPHI + 1);
 
 let S = null;          // { el, renderer, scene, camera, controls, groups..., materials... }
 let shot = null, view = 'cutaway', auto = true, t0 = 0;
-let extent = { r: 1.9, h: 1.85 };
-let last = { i: null, lines: null, glow: 0 };      // what is on screen, so a view change can restyle it                 // vessel radius and half height [m], from the wall contour
+let extent = { r: 1.9, h: 1.85 };                  // vessel radius and half height [m], from the wall contour
+let last = { i: null, lines: null, glow: 0 };      // what is on screen, so a view change can restyle it
+let hl = null;         // guided study: the part held up while the rest is dimmed (wall | coils | plasma | lines)
+const RIM_GAIN = 0.55, DIMMED = 0.14;
 
 // Surface of revolution of an (R, Z) polyline. Data is z-up; three is y-up: (x, y, z) -> (x, z, -y), a proper rotation.
 // flat: every profile segment keeps its own normal (sharp machined corners). smooth: closed curve, averaged normals.
@@ -186,7 +188,7 @@ function mount(el) {
   const copper = new THREE.MeshStandardMaterial({ color: 0xa8683a, metalness: 0.9, roughness: 0.42, side: THREE.DoubleSide, envMapIntensity: 0.8 });
   const rim = new THREE.ShaderMaterial({ vertexShader: RIM_VERT, fragmentShader: RIM_FRAG, transparent: true, depthWrite: false,
     side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-    uniforms: { uColor: { value: TE_COLD.clone() }, uPower: { value: 2.4 }, uGain: { value: 0.55 }, uBase: { value: 0.025 } } });
+    uniforms: { uColor: { value: TE_COLD.clone() }, uPower: { value: 2.4 }, uGain: { value: RIM_GAIN }, uBase: { value: 0.025 } } });
   const lineMat = LINE_COLORS.map(c => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false,
     blending: THREE.AdditiveBlending }));
 
@@ -201,6 +203,7 @@ function mount(el) {
     S.raf = requestAnimationFrame(loop);
     if (!el.clientWidth || !el.clientHeight) return;   // hidden tab (display:none): no work
     if (auto) place(now);
+    if (hl) pulse(now);
     controls.update();
     renderer.render(scene, camera);
   };
@@ -243,6 +246,7 @@ function setView(name) {
   S.glow.forEach(l => { l.intensity = last.glow * v.glow; });
   S.lineMat.forEach(m => { m.opacity = v.lineOpacity; });
   if (last.lines) buildLines(last.lines);
+  highlight(hl);
   auto = true; t0 = performance.now(); place(t0); draw();
 }
 
@@ -313,5 +317,26 @@ function resize() {
   draw();
 }
 
-window.Vessel3D = { mount, setShot, setSlice, setView, resize };
+// Hold one part up and dim the rest (guided study); highlight(null) restores the normal look. The meshes are rebuilt on
+// every slice but share these materials, so the choice survives scrubbing; setView resets line opacity and re-applies it.
+function highlight(part) {
+  hl = ['wall', 'coils', 'plasma', 'lines'].includes(part) ? part : null;
+  if (!S) return;
+  for (const [m, p] of [[S.steel, 'wall'], [S.copper, 'coils']]) {
+    const dim = !!hl && hl !== p;
+    if (m.transparent !== dim) { m.transparent = dim; m.needsUpdate = true; }
+    m.opacity = dim ? DIMMED : 1; m.depthWrite = !dim;
+    m.emissive.setHex(hl === p ? (p === 'wall' ? 0x2c3a4d : 0x6a3512) : 0x000000);
+  }
+  pulse(performance.now()); draw();
+}
+
+function pulse(now) {
+  const k = hl ? 0.7 + 0.3 * Math.sin(now * 4e-3) : 0, v = VIEWS[view];
+  S.steel.emissiveIntensity = hl === 'wall' ? k : 0; S.copper.emissiveIntensity = hl === 'coils' ? k : 0;
+  S.rim.uniforms.uGain.value = !hl ? RIM_GAIN : hl === 'plasma' ? RIM_GAIN + 0.4 * k : DIMMED;
+  S.lineMat.forEach(m => { m.opacity = !hl ? v.lineOpacity : hl === 'lines' ? Math.min(1, v.lineOpacity + 0.25 * k) : 0.06; });
+}
+
+window.Vessel3D = { mount, setShot, setSlice, setView, resize, highlight };
 document.dispatchEvent(new CustomEvent('vessel3d:ready'));

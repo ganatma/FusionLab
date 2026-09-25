@@ -202,8 +202,13 @@ def _warm_up():
     _eq_psi(30166)
 
 
-# importing torch takes ~5 s; do it while the server starts so the first replay request is not the one that pays
-threading.Thread(target=_warm_up, daemon=True).start()
+def start_warm_up():
+    """Importing torch takes ~5 s; do it while the server starts so the first replay request is not the one that pays.
+
+    Called from the app's lifespan (api.py), never at import: a thread importing torch and Warp while pytest imports
+    them on the main thread crashed or hung about one test run in eight.
+    """
+    threading.Thread(target=_warm_up, daemon=True).start()
 
 
 @router.get("/eq_surrogate")

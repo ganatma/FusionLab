@@ -1,4 +1,4 @@
-.PHONY: setup dev test data train bench usd fieldlines
+.PHONY: setup dev test data train bench usd fieldlines validate-virtual
 
 PORT ?= 8000
 # One GPU for everything this Makefile starts (server, training, Warp, tests).
@@ -7,6 +7,7 @@ export CUDA_VISIBLE_DEVICES ?= 0
 
 setup:            ## install everything
 	uv sync
+	git config core.hooksPath .githooks
 	@test -f .env || cp .env.example .env
 
 dev:              ## run the app at http://localhost:$(PORT)
@@ -23,6 +24,9 @@ train:            ## PhysicsNeMo correction to IPB98 on the real shot table -> m
 
 bench:            ## timings -> paste into README
 	uv run python scripts/bench.py
+
+validate-virtual: ## virtual shot gates: re-fly held-out shots (fetches ~120 from FAIR-MAST, resumable) + matched pairs -> models/virtual_metrics.json
+	uv run python scripts/validate_virtual.py
 
 usd:              ## OpenUSD export (Omniverse-compatible) of a cached shot -> out/
 	uv run python -m fusionlab.usd_export 30166

@@ -1,11 +1,13 @@
 import json
 import math
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from fusionlab.api import app
 
 client = TestClient(app)
+WEB = Path(__file__).resolve().parents[1] / "web"
 
 
 def test_health_and_devices():
@@ -62,7 +64,25 @@ def test_static_assets_served():
     assert client.get("/static/vendor/plotly.min.js").status_code == 200
     html = client.get("/").text
     assert 'id="tab-replay"' in html and 'id="tab-db"' in html and 'id="tab-sandbox"' in html
-    assert "cdn.plot.ly" not in html and "cdn.jsdelivr" not in html and "unpkg" not in html   # the demo never needs the network
+    # the demo never needs the network: no CDN in the page or in any script of ours (vendored libraries aside)
+    ours = [html] + [p.read_text() for p in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.json"))]
+    for text in ours:
+        assert not any(cdn in text for cdn in ("cdn.plot.ly", "cdn.jsdelivr", "unpkg.com", "cdnjs."))
+
+
+def test_reactivity_curve_for_the_first_lesson():
+    j = client.get("/reactivity", params={"n": 40}).json()
+    T, sv = j["T_keV"], j["sigmav_m3_s"]
+    assert len(T) == len(sv) == 40 and T[0] == 1.0 and abs(T[-1] - 100.0) < 1e-9
+    assert 50 < T[sv.index(max(sv))] < 80 and sv[0] < 1e-3 * max(sv)   # peaks near 65 keV, negligible at 1 keV
+
+
+def test_guided_study_hooks_are_in_place():
+    """The guided study drives the app through these and nothing else (web/guide.js)."""
+    app, replay, vessel = (client.get(f"/static/{f}").text for f in ("app.js", "replay.js", "vessel3d.js"))
+    assert "fusionlab:sim" in app and "window.FusionLab" in app
+    assert "fusionlab:shot" in replay and "fusionlab:slice" in replay and "loadSeq" in replay
+    assert "highlight" in vessel.split("window.Vessel3D =")[1]
 
 
 # ---- replay of real MAST shots (reads the committed cache, no network)

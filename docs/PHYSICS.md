@@ -81,6 +81,53 @@ Why a spherical tokamak is a useful test of IPB98(y,2): Valovič et al., *Nucl. 
 as W ∝ Ip^0.59 B_T^1.4 P_L^0.27 (N = 97), against IPB98(y,2)'s Ip^0.93 B_T^0.15; the same paper notes the *magnitudes*
 broadly agree. See also Kaye et al., *Nucl. Fusion* 46 (2006) 848 (NSTX) and Buxton et al., *PPCF* 61 (2019) 035006.
 
+## Virtual shot: a what-if anchored on a real shot (`fusionlab/virtual.py`)
+
+The replay asks what a law gives for the power a real plasma was losing. The virtual shot asks the next question: what
+would the stored energy have done had the programme been different? It is a teaching what-if, not a prediction.
+
+```
+dW/dt = P_heat(t) − P_loss,     τ_E = W / P_loss = K(t) · P_loss^−α    ⇒    P_loss = (W / K)^(1/(1−α))
+```
+
+so the energy balance is explicit in W. It is integrated with backward Euler and Newton at 1 ms (EFIT slices are 5 ms
+apart and the effective relaxation time (1−α)·τ_E is a few ms on MAST, so the loss term is stiff). Every what-if of a
+batch advances together as arrays; the only Python loop is over time steps. `tests/test_virtual.py` checks the
+integrator against W = P·τ·(1 − e^(−t/τ)) and its first-order convergence.
+
+**Level from the shot, response from published exponents.** Two baselines are run and both are shown:
+
+* *blind*: K = IPB98(y,2) × the PhysicsNeMo correction, evaluated once on the measured inputs. Nothing about W is used,
+  so its distance from the measured W(t) is a fair test. (ITER89-P and plain IPB98 are the alternative closures.)
+* *anchored*: K(t) is set so that the unedited programme reproduces the measured W(t).
+
+An edit never goes through the network's own derivatives: its training range in B_T is 0.40–0.50 T and its mean local
+B_T exponent is −5, which would turn a 10% field edit into a 38% change in τ_E. An edit acts as
+`τ' = τ_base(t) · r_Ip^e_Ip · r_B^e_B · r_n^e_n · (P_loss'/P_loss,base)^−α`, with the exponents of a response law:
+IPB98(y,2) (0.93, 0.15, 0.41, α = 0.69), Valovič 2009 for MAST (0.59, 1.4, 0.00, α = 0.73), and this project's refit
+power law on the 6,353-shot table. The spread between laws, and between the two baselines, is drawn as the answer's width.
+
+**Ohmic power and limits are scaled from the measurement**, because Spitzer without the neoclassical correction comes
+out ~5× low on MAST: `P_ohm' = P_ohm · r_Ip² · (T'/T)^−3/2` with `T ∝ W/(n V)` (Wesson, *Tokamaks*, resistivity ∝ T^−3/2),
+`β_N' = β_N · (W'/W)/(r_B r_Ip)`, `q95' = q95 · r_B/r_Ip`, `f_GW' = f_GW · r_n/r_Ip`. The beam is the logged box, scaled and shifted.
+
+**Two gates decide what the UI may offer** (`scripts/validate_virtual.py` → `models/virtual_metrics.json`, `make validate-virtual`):
+
+1. *Re-fly.* Shots from sessions the correction never saw are re-flown blind with each closure and compared with the
+   measured W(t), on the flat top and separately in the 50 ms after beam-on (a quasi-static flat top cannot see the
+   integrator). The closure that wins is the default.
+2. *Matched pairs.* Holdout error on whole shots does not test an *edit*. Pairs of shots in the same 100-shot block with
+   one input differing by > 20% and the other six within 5% are the closest thing the archive has to a controlled scan.
+   A law is admissible for an actuator when the pairs do not contradict it (RMSE of Δln τ_E within 5% of "nothing
+   changes", or better). A slider exists only with ≥ 30 pairs and an admissible law, the server refuses other edits, and
+   no band member uses a contradicted exponent. On MAST this removes IPB98's n^0.41 (the pairs give n^0.05, as Valovič
+   found) and leaves plasma current (14 pairs) and toroidal field (3 pairs) without sliders.
+
+Not modelled: L–H transitions, fast-ion slowing down, the ~30 ms after a beam edge, the equilibrium's response to
+pressure, and any causal claim: "would cross the Troyon limit at t = …" is a distance to a limit, never a forecast of a
+disruption. Slices outside the correction's training range (ramps, large edits) are flagged per slice. For a timing edit
+the anchored band is drawn faint, because K(t) keeps the real shot's events at their original times.
+
 ## Field lines (`fusionlab/fieldlines.py`, NVIDIA Warp)
 
 Axisymmetric field from the EFIT flux map: B_R = −(1/R) ∂ψ/∂Z, B_Z = (1/R) ∂ψ/∂R, B_φ = F(ψ_N)/R, with ψ in Wb/rad
@@ -100,5 +147,6 @@ Scope: these are the field lines of EFIT's axisymmetric reconstruction. No islan
   volume-average density and replay feeds line-average. NBI power is a box, not a trace, with no shine-through or
   orbit-loss correction.
 * T_e = T_i, and there is no beam-target fusion, so JET's D-T records are underpredicted (~10×).
-* No time dependence, current drive, bootstrap current, pedestal model, or divertor heat-flux limit.
+* No time dependence in the sandbox (`simulate`); the virtual shot above is the only time-dependent path, and it is 0D.
+  No current drive, bootstrap current, pedestal model, or divertor heat-flux limit.
 * Device geometry is approximate public data; the "SPARC-class" entry is not an official CFS design.

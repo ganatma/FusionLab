@@ -1,0 +1,227 @@
+{
+  "_about": "The guided study, as data. web/guide.js runs it; tests/test_guide.py checks it; docs/CURRICULUM.md gives objectives and sources. Body text: [[word|term]] or [[term]] links the glossary. 'focus' lists data-guide names to light; everything else in the tab is dimmed. A check is {event, all:[{path, op, value}]} on the detail of a fusionlab:* event, or {named}. Numbers quoted here come from the cached shots and from physics.simulate; test_guide.py re-derives the ones that matter.",
+  "version": 1,
+  "chapters": [
+    { "n": 0, "title": "The goal" },
+    { "n": 1, "title": "The magnetic bottle" },
+    { "n": 2, "title": "The knobs" },
+    { "n": 3, "title": "The limits" },
+    { "n": 4, "title": "Reading the instruments" },
+    { "n": 5, "title": "A real shot, start to finish" },
+    { "n": 6, "title": "When it goes wrong" },
+    { "n": 7, "title": "Models vs reality" },
+    { "n": 8, "title": "Into the lab" }
+  ],
+  "panel_help": { "eq": "4.2", "traces": "4.6", "state": "4.5", "machine": "1.1", "readouts": "2.2", "sb-gauges": "3.1", "map": "3.2", "holdout": "7.3" },
+  "steps": [
+    { "id": "0.1", "ch": 0, "title": "A star in a jar, for a third of a second",
+      "tab": "replay", "shot": 30166, "slice": 0, "play": true, "focus": [],
+      "body": "What is playing is not a simulation. It is shot #30166 of MAST, a UK [[tokamak]], recorded in 2013 and published as open data. For about a third of a second a [[plasma]] as hot as the centre of the Sun floated inside that steel vessel, held only by magnetic fields. Right now this screen is a wall of jargon. In about fifteen minutes you will be able to read every panel on it.",
+      "task": { "text": "Let the shot play once, then press Next.", "check": { "event": "fusionlab:slice", "all": [{ "path": "playing", "op": "==", "value": true }, { "path": "t_s", "op": ">=", "value": 0.3 }] } } },
+
+    { "id": "0.2", "ch": 0, "title": "What fusion is", "stage": "reaction", "focus": [],
+      "body": "Squeeze two light nuclei together and they fuse into a heavier one, releasing energy. The easiest pair is deuterium and tritium ([[D-T|dt]]). The catch: nuclei are positively charged and repel each other. Only when the fuel is extremely hot do enough of them collide hard enough to fuse. Temperature here is measured in [[keV|kev]]: 1 keV is about 11.6 million °C.",
+      "task": { "text": "Drag the temperature up until the fuel reaches 10 keV.", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "reaction" }, { "path": "T_keV", "op": ">=", "value": 10 }] } },
+      "deeper": "D + T → ⁴He (3.5 MeV) + n (14.1 MeV). The curve is the D-T [[reactivity]] ⟨σv⟩ from the Bosch–Hale fit, the same function the sandbox uses (<code>physics.sigmav_dt</code>). It peaks near 65 keV, but a reactor runs around 10–20 keV, where fusion power for a given plasma pressure is highest." },
+
+    { "id": "0.3", "ch": 0, "title": "Three things at once", "stage": "triple", "focus": [],
+      "body": "Hot is not enough. The fuel must be <b>hot</b> (temperature T), <b>dense</b> enough for collisions to be frequent (density n), and it must <b>hold its heat</b> long enough (the [[energy confinement time|tau-e]] τ<sub>E</sub>). Multiply the three and you get the [[triple product]], the single number that says how close a plasma is to sustaining itself.",
+      "task": { "text": "Load the ITER preset, then the MAST one, and compare.", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "triple" }, { "path": "preset", "op": "==", "value": "mast" }] } },
+      "deeper": "Ignition needs roughly n·T·τ<sub>E</sub> ≳ 3 × 10²¹ m⁻³·keV·s (Wesson, <i>Tokamaks</i>). The ITER preset is this app's sandbox baseline; the MAST preset is the peak of shot #30166. The gap of about a thousand is mostly confinement time, and confinement time is mostly size." },
+
+    { "id": "0.4", "ch": 0, "title": "The score, and an honest note", "stage": "triple", "focus": [],
+      "body": "The score of a fusion machine is its [[gain Q|q-gain]]: fusion power out divided by heating power in. Q = 1 is breakeven. JET reached about two thirds in 1997. ITER is built for Q = 10. <b>MAST never tried.</b> It ran on deuterium only and made no fusion power to speak of. Its job was to study the bottle, not the fire: how well a compact, [[spherical tokamak|spherical-tokamak]] holds heat and where it goes unstable. That is what its data can teach you." },
+
+    { "id": "1.1", "ch": 1, "title": "No wall can hold it",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway", "highlight": "wall", "focus": ["machine"],
+      "body": "This is MAST's real vessel wall, revolved from the outline in the archive, cut open so you can see inside. It is steel, and it only holds the vacuum. It must never hold the plasma: a plasma at millions of degrees that touches a wall cools instantly and damages the wall. So the plasma has to float. A plasma is made of charged particles, and charged particles are steered by magnetic fields. The bottle is the field.",
+      "deeper": "Only what the open data contains is drawn: the limiter outline and the [[poloidal field coils|pf-coils]], both axisymmetric. Ports, the outer tank and the toroidal field coils are not in FAIR-MAST level 2, so they are not shown." },
+
+    { "id": "1.2", "ch": 1, "title": "The plasma", "highlight": "plasma", "focus": ["machine", "bar"],
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway",
+      "body": "The glowing shell is the edge of the confined plasma at this instant, the [[last closed flux surface|lcfs]], reconstructed from measurements. Its colour follows the measured core temperature. The vessel is about 3.7 m tall inside; the plasma fills it like a cored apple.",
+      "task": { "text": "Drag the time slider back before 0.1 s and watch the plasma form.", "check": { "event": "fusionlab:slice", "all": [{ "path": "t_s", "op": "<", "value": 0.1 }] } } },
+
+    { "id": "1.3", "ch": 1, "title": "Field lines, and the twist", "highlight": "lines", "mini": "twist", "focus": ["machine"],
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway",
+      "body": "Each coloured line is a magnetic [[field line|field-line]], traced through this shot's real field on the GPU. Particles spiral tightly along them. Notice that a line does not just circle the ring: it also creeps the short way round, a slow helix. That twist is essential. Without it particles drift straight out. It comes from two fields: the main [[toroidal field|bt]] from external coils, and the field made by a large [[current in the plasma itself|ip]].",
+      "deeper": "Blue lines lie on closed [[flux surfaces|flux-surface]] at 30 %, 60 % and 90 % of the way out. The yellow ones start just outside the boundary, in the [[scrape-off layer|sol]], and run down to the [[divertor]]." },
+
+    { "id": "1.4", "ch": 1, "title": "The safety factor q", "highlight": "lines", "mini": "twist", "focus": ["machine", "q-chips"],
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway",
+      "body": "The amount of twist has a name: the [[safety factor|safety-factor]] q. It counts trips the long way round per trip the short way round. Here q near the edge (q95) is about 5.8. Low q means a tightly twisted field, and below about 2 the plasma column [[kinks|kink]] like an over-wound rope. The two chips compare q counted along our traced lines with EFIT's own value: the same number by a different route, which checks the whole chain from archive to integrator.",
+      "task": { "text": "In the sketch, drag q down to 2.", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "twist" }, { "path": "q", "op": "<=", "value": 2.05 }] } } },
+
+    { "id": "1.5", "ch": 1, "title": "The coils", "highlight": "coils", "focus": ["machine"],
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway",
+      "body": "The copper rings are the [[poloidal field coils|pf-coils]]. They shape the plasma and hold it in position, continuously corrected by a feedback system. Down the centre column runs the [[solenoid]]: it drives the plasma current the way a transformer drives its secondary, by changing its own current steadily. When that swing runs out, the shot is over. That is why a tokamak shot is a <i>pulse</i>, and why MAST's lasted about half a second." },
+
+    { "id": "1.6", "ch": 1, "title": "Step inside", "highlight": null, "focus": ["machine", "view"],
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 },
+      "body": "You have the pieces: a vacuum vessel, coils, a twisted field, and a plasma floating on it. Now stand where a camera port would be.",
+      "task": { "text": "Switch to Inside the vessel, then drag to look around.", "check": { "event": "fusionlab:view", "all": [{ "path": "view", "op": "==", "value": "port" }] } },
+      "deeper": "The glow is a rendering choice: rim light on the real boundary, coloured by measured core T<sub>e</sub>. It is not a synthetic camera image. MAST is a [[spherical tokamak|spherical-tokamak]]: with such a narrow centre column the plasma is nearly as wide as the machine, which lets it hold more pressure for the field you pay for." },
+
+    { "id": "2.1", "ch": 2, "title": "A leaky bathtub", "stage": "bathtub", "focus": [],
+      "body": "Before touching the controls, one picture. A plasma is a bathtub with a leak. The <b>tap</b> is [[heating power|heating]]. The <b>water level</b> is the [[stored energy|stored-energy]] W. The <b>leak</b> is heat escaping across the field. The [[confinement time|tau-e]] τ<sub>E</sub> is how long the tub would take to drain. At steady state, in equals out: W = P × τ<sub>E</sub>. Here is the cruel part: in a tokamak the leak gets <i>worse</i> the harder you run the tap.",
+      "task": { "text": "Double the tap. Did the level double?", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "bathtub" }, { "path": "P", "op": ">=", "value": 1.95 }] } },
+      "deeper": "The figure uses the power exponent of the [[IPB98(y,2)|ipb98]] law, τ<sub>E</sub> ∝ P<sup>−0.69</sup>, so W ∝ P<sup>0.31</sup>: doubling the power raises the stored energy by only about 24 %. Units in the figure are arbitrary; the exponent is not." },
+
+    { "id": "2.2", "ch": 2, "title": "The operator's panel",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": [], "focus": ["knob-Ip", "knob-B", "knob-n", "knob-P_aux", "knob-H", "knob-Zeff", "readouts"],
+      "body": "This is a reduced model of ITER, the reactor-scale experiment being built in France. It is a teaching model built on published formulas: it shows trends and forecasts nothing. On the left are the things an operator sets. On the right is everything that follows: temperature, fusion power, the [[gain Q|q-gain]], the [[confinement time|tau-e]]. We will unlock the knobs one at a time." },
+
+    { "id": "2.3", "ch": 2, "title": "Heating: lighting the fire",
+      "tab": "sandbox", "device": "iter", "reset": true, "set": { "P_aux": 20 }, "lock": ["P_aux"], "focus": ["knob-P_aux", "readouts"],
+      "body": "We have turned the [[heating|heating]] down to 20 MW. The plasma sits near 1 keV and Q is almost zero: everything you put in leaks or radiates away. Fusion makes its own heat, though. Each reaction's helium nucleus stays in the plasma and warms it. Past a threshold that self-heating takes over and the plasma jumps to a hot, burning state.",
+      "task": { "text": "Raise the heating until the plasma lights (Q above 5).", "check": { "event": "fusionlab:sim", "all": [{ "path": "result.Q", "op": ">", "value": 5 }] } } },
+
+    { "id": "2.4", "ch": 2, "title": "The cruel part",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["P_aux"], "focus": ["knob-P_aux", "readouts"],
+      "body": "The plasma is burning at 50 MW of heating, with a confinement time of about 3.8 s. Now push the heating to its maximum.",
+      "predict": { "q": "Heating goes from 50 to 73 MW. What happens to the confinement time τ_E?", "options": ["It rises", "It stays about the same", "It falls"], "answer": 2,
+                   "reveal": "It falls, from about 3.8 s to 2.6 s. Fusion power went up, but so did the bill: Q barely moved. This is the bathtub's worsening leak, τ<sub>E</sub> ∝ P<sup>−0.69</sup>, and it is the central frustration of tokamak design." },
+      "task": { "text": "Raise the heating above 72 MW and read τ_E.", "check": { "event": "fusionlab:sim", "all": [{ "path": "controls.P_aux", "op": ">=", "value": 72 }] } } },
+
+    { "id": "2.5", "ch": 2, "title": "Density: the fuel",
+      "tab": "sandbox", "device": "iter", "reset": true, "set": { "n": 0.5 }, "lock": ["n"], "focus": ["knob-n", "readouts", "sb-gauges"],
+      "body": "[[Density|density]] is how much fuel is in the bottle. Fusion power grows as its square, because reactions need pairs. At half the usual density the plasma is hot but thin, and Q is about half what it could be.",
+      "task": { "text": "Add fuel until Q passes 9. Then keep going and watch what happens.", "check": { "event": "fusionlab:sim", "all": [{ "path": "result.Q", "op": ">=", "value": 9 }] } },
+      "deeper": "Past about 1.1 × 10²⁰ m⁻³ the same heating can no longer keep all that fuel hot and the burn goes out. A little further and the [[Greenwald|greenwald]] gauge turns red: a hard ceiling on density that you will meet in the next chapter." },
+
+    { "id": "2.6", "ch": 2, "title": "Plasma current",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["Ip"], "focus": ["knob-Ip", "readouts", "sb-gauges"],
+      "body": "The [[plasma current|ip]] does three jobs at once. It supplies the twist in the field. It is the strongest lever on confinement. And it sets how much density the plasma can hold. ITER runs at 15 MA.",
+      "predict": { "q": "You lower the current from 15 to 12 MA and touch nothing else. Which gauge goes red?", "options": ["Greenwald density", "Troyon β", "Kink"], "answer": 0,
+                   "reveal": "Greenwald. The density a plasma can hold scales with its current, n<sub>GW</sub> = I<sub>p</sub>/(πa²), so the same fuel is suddenly too much. The kink gauge <i>fell</i>: less current means a gentler twist (higher q95). Current buys confinement and density, and spends kink margin." },
+      "task": { "text": "Lower the current to 12 MA.", "check": { "event": "fusionlab:sim", "all": [{ "path": "controls.Ip", "op": "<=", "value": 12.1 }] } } },
+
+    { "id": "2.7", "ch": 2, "title": "Toroidal field",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["B"], "focus": ["knob-B", "readouts", "sb-gauges"],
+      "body": "The main [[field|bt]] from the big external magnets is what makes everything else safe. The edge [[safety factor|safety-factor]] q95 is proportional to B divided by I<sub>p</sub>: more field, more room for current. It is also the most expensive thing on the machine, which is why nobody has 'just add field' as an answer.",
+      "task": { "text": "Lower the field until the kink gauge turns red.", "check": { "event": "fusionlab:sim", "all": [{ "path": "result.limits.kink", "op": ">=", "value": 1 }] } } },
+
+    { "id": "2.8", "ch": 2, "title": "Two knobs nobody really has",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["H", "Zeff"], "focus": ["knob-H", "knob-Zeff", "readouts"],
+      "body": "[[H|h-factor]] says how much better or worse the plasma confines than the [[scaling law|scaling-law]] predicts. [[Z<sub>eff</sub>|zeff]] says how dirty it is. Both matter enormously and neither is a dial on a real machine. H is what experiments <i>measure</i>. It is also what this project's learned model tries to predict for MAST.",
+      "task": { "text": "Set H to 1.2 and watch Q.", "check": { "event": "fusionlab:sim", "all": [{ "path": "controls.H", "op": ">=", "value": 1.19 }] } },
+      "deeper": "A 20 % gain in confinement more than doubles Q in this model; raising Z<sub>eff</sub> from 1.7 to 2.5 puts the burn out. That sensitivity is why confinement and impurity control dominate tokamak research." },
+
+    { "id": "2.9", "ch": 2, "title": "The knob you choose once: size",
+      "tab": "sandbox", "device": "diiid", "reset": true, "lock": ["device"], "focus": ["device", "readouts"],
+      "body": "This is DIII-D, a machine about a quarter of ITER's size. Same physics, same formulas, and its confinement time is under 0.2 s. Heat takes longer to leak out of a bigger bottle, so the most reliable way to raise τ<sub>E</sub> is to build larger. That is the whole reason ITER is enormous.",
+      "task": { "text": "Switch the device to JET, then to ITER, and watch τ_E.", "check": { "event": "fusionlab:sim", "all": [{ "path": "controls.device", "op": "==", "value": "iter" }] } },
+      "deeper": "In this model τ<sub>E</sub> goes 0.18 s → 0.55 s → 3.8 s. The model has no beam-target fusion and assumes equal ion and electron temperatures, so it underpredicts JET's real D-T results by about ten times (docs/PHYSICS.md, Known gaps)." },
+
+    { "id": "3.1", "ch": 3, "title": "Three walls",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": [], "focus": ["sb-gauges"],
+      "body": "Why not turn everything up? Because a tokamak plasma is boxed in by three limits. Too dense ([[Greenwald|greenwald]]): the edge cools and radiates, the current channel shrinks. Too much pressure for the field ([[Troyon|troyon]]): the plasma pushes the field aside. Too much current for the field ([[kink]]): the column buckles. Cross any of them and the usual result is a [[disruption]]. On each gauge 1.0 is the limit; amber starts at 0.8." },
+
+    { "id": "3.2", "ch": 3, "title": "The operating map",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["n", "P_aux"], "focus": ["map", "knob-n", "knob-P_aux"],
+      "body": "The map shows Q for every combination of density and heating, with the other knobs held fixed. The dot is you. The dark region at the bottom and left is the unlit plasma from earlier. The bright island is the burn. Red shading is where the model flags a disruption, and the white line is where a limit reaches 1.0. Operating a tokamak is choosing a spot on a map like this, close enough to the edge to perform and far enough to survive.",
+      "task": { "text": "Move the dot into the red and back out.", "check": { "event": "fusionlab:sim", "all": [{ "path": "result.disruption", "op": "==", "value": true }] } } },
+
+    { "id": "3.3", "ch": 3, "title": "Your first operating point",
+      "tab": "sandbox", "device": "iter", "reset": true, "lock": ["Ip", "B", "n", "P_aux"], "focus": ["knob-Ip", "knob-B", "knob-n", "knob-P_aux", "readouts", "sb-gauges", "map"],
+      "body": "ITER's goal is Q = 10. With confinement and purity as given (H = 1, Z<sub>eff</sub> = 1.7), find an operating point that reaches it with every gauge below 1.0. It exists, and it is closer to a limit than you might like. That is not an accident of this model. It is how these machines are run.",
+      "deeper": "Stuck? In this model the window is narrow: density between about 1.04 and 1.19 × 10²⁰ m⁻³ with heating above about 59 MW, which puts the Greenwald gauge in amber.",
+      "task": { "text": "Reach Q ≥ 10 with all three gauges below 1.0.", "check": { "event": "fusionlab:sim", "all": [{ "path": "result.Q", "op": ">=", "value": 10 }, { "path": "result.limits.greenwald", "op": "<", "value": 1 }, { "path": "result.limits.troyon", "op": "<", "value": 1 }, { "path": "result.limits.kink", "op": "<", "value": 1 }] } } },
+
+    { "id": "4.1", "ch": 4, "title": "A different machine, and real data",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "view": "cutaway", "highlight": null, "focus": ["prov", "bar"],
+      "body": "Leave the model behind. From here on the machine is <b>MAST</b>, in Culham, UK: a seventh of ITER's radius, deuterium only, no fusion power. And the numbers are <b>measurements</b> from the open [[FAIR-MAST|fair-mast]] archive. Because real and modelled numbers now share a screen, every panel carries a [[tag|provenance]]: <span class=\"tag meas\">measured</span> <span class=\"tag model\">model</span> <span class=\"tag learn\">learned</span> <span class=\"tag comp\">computed</span>. Get in the habit of checking the tag before you believe a curve." },
+
+    { "id": "4.2", "ch": 4, "title": "Seeing inside without looking inside",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": false, "focus": ["xs", "bar"],
+      "body": "Nothing survives inside a plasma, so almost everything is inferred from outside. Around the vessel sit small pickup coils and loops, the [[magnetics]]. A code called [[EFIT|efit]] finds the plasma shape and current that would produce exactly those signals. The result is this slice through the ring: nested [[flux surfaces|flux-surface]] (blue), the [[boundary|lcfs]] and [[magnetic axis|magnetic-axis]] (orange), inside the real wall. Heat flows fast along a surface and slowly across it, so think of them as contours of temperature.",
+      "task": { "text": "Scrub through the shot and watch the shape evolve.", "check": { "event": "fusionlab:slice", "all": [{ "path": "t_s", "op": "<", "value": 0.15 }] } },
+      "deeper": "Where the orange boundary crosses itself is an [[X-point|x-point]]. Field lines just outside it are led down to the [[divertor]], which takes the exhaust heat away from the core." },
+
+    { "id": "4.3", "ch": 4, "title": "The same picture, learned",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": true, "focus": ["xs", "eq-overlay"],
+      "body": "The green dashed contours are not EFIT. A PhysicsNeMo network was trained to go straight from 93 magnetic signals to the flux map, a [[surrogate]] of the reconstruction that runs in a fraction of a millisecond. Open <i>How close is it?</i> for the error on this slice. Read the honesty line there too: this shot's session was in the training set, so the match here proves little. Chapter 7 shows a shot the network never saw." },
+
+    { "id": "4.4", "ch": 4, "title": "A laser thermometer",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": false, "mini": "thomson", "focus": ["thomson", "bar"],
+      "body": "[[Thomson scattering|thomson]] is how the temperature is actually measured. A laser fires across the plasma. Electrons scatter a little of its light, and because they are moving fast, the scattered light is smeared in colour: the hotter, the wider. Each dot is one point along the laser. You are looking at a temperature profile across the machine: over 1 keV, more than twelve million degrees, at the core, falling to almost nothing at the edge.",
+      "task": { "text": "Scrub to before 0.1 s and see how cold the early plasma is.", "check": { "event": "fusionlab:slice", "all": [{ "path": "t_s", "op": "<", "value": 0.1 }] } } },
+
+    { "id": "4.5", "ch": 4, "title": "The state of the shot, right now",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["params"],
+      "body": "Six numbers for the current instant. Time. [[Plasma current|ip]]. Line-averaged [[density]] from an [[interferometer]]. Core electron temperature from Thomson. [[Stored energy|stored-energy]] W. And H<sub>98</sub>, the measured [[confinement|h-factor]] relative to the standard H-mode law. You met all of these as knobs or readouts on ITER. Compare the scale: ITER's 15 MA and 300 MJ against MAST's 0.9 MA and 0.13 MJ." },
+
+    { "id": "4.6", "ch": 4, "title": "The water level",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["strip-w"],
+      "body": "The top strip is the bathtub's water level through the whole shot. <b>Blue</b> is the measured [[stored energy|stored-energy]]. The two warm curves are what the [[L-mode|iter89]] and [[H-mode|ipb98]] scaling laws predict when fed the power this plasma was really losing. The green dotted curve is the H-mode law times a learned correction. The vertical line is the time you are scrubbed to. This strip is the heart of the twin: the measurement, beside the models, on one time axis." },
+
+    { "id": "4.7", "ch": 4, "title": "What drives it",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["strip-p", "strip-ip"],
+      "body": "Below the energy are the two things the operators programmed. <b>Power</b>: [[ohmic heating|ohmic]] by the current itself, measured, and a [[neutral beam|nbi]] switching on at 0.12 s. The beam is drawn as a box because the open archive logs only its start, end and peak power. <b>Current</b>: ramped up over 0.2 s by the [[solenoid]], then held. Everything in the top strip is the plasma's response to these two." },
+
+    { "id": "4.8", "ch": 4, "title": "Distance to the three walls",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["gauge-greenwald", "gauge-troyon", "gauge-kink", "strip-lim"],
+      "body": "The same three limits as in the sandbox, now [[computed|provenance]] from measured quantities: density against the [[Greenwald|greenwald]] ceiling, EFIT's β<sub>N</sub> against the [[Troyon|troyon]] limit, and q95 against the [[kink]] limit. The bottom strip shows all three through time. On this shot the Troyon gauge climbs into amber and peaks at 0.92: MAST routinely ran close to the pressure limit, because high pressure for a given field is the point of a spherical tokamak." },
+
+    { "id": "5.1", "ch": 5, "title": "Ramp-up",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.06 }, "view": "cutaway", "highlight": null, "focus": ["xs", "strip-ip", "params", "bar"],
+      "body": "Now read a whole shot. At 0.06 s the plasma is young. The current is 0.37 MA and climbing, the plasma is small, and q95 is near 9: a gentle twist, far from the kink limit. Operators ramp the current gradually because pushing it up too fast drives instabilities of its own.",
+      "task": { "text": "Press ▶ PLAY and watch the current ramp.", "check": { "event": "fusionlab:slice", "all": [{ "path": "playing", "op": "==", "value": true }] } } },
+
+    { "id": "5.2", "ch": 5, "title": "Beams on",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.1 }, "focus": ["strip-p", "strip-w", "bar"],
+      "body": "So far the only heating is ohmic, under 1 MW, and the stored energy is about 10 kJ. Find the moment the [[neutral beam|nbi]] switches on.",
+      "task": { "text": "Scrub forward to the first slice with the beam on.", "check": { "event": "fusionlab:slice", "all": [{ "path": "nbi_on", "op": "==", "value": true }, { "path": "t_s", "op": "<=", "value": 0.135 }] } },
+      "deeper": "From 0.12 s about 2 MW of beam power arrives and the stored energy triples within 30 ms. Part of that early rise is the beam's own fast ions, which EFIT counts as stored energy." },
+
+    { "id": "5.3", "ch": 5, "title": "Leaving the L-mode law",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.15 }, "focus": ["strip-w", "logbook", "bar"],
+      "body": "Watch blue against the two warm curves. Early on the measurement tracks the L-mode law. Then it pulls away upwards, past the H-mode law. The plasma has gone into [[H-mode|h-mode]]: its edge has formed a barrier that holds heat in. The session leader saw it too. Read the logbook entry written minutes after the shot.",
+      "task": { "text": "Scrub to the time the logbook gives for H-mode (223 ms).", "check": { "event": "fusionlab:slice", "all": [{ "path": "t_s", "op": ">=", "value": 0.219 }, { "path": "t_s", "op": "<=", "value": 0.231 }] } } },
+
+    { "id": "5.4", "ch": 5, "title": "The peak",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["params", "gauge-troyon", "strip-w"],
+      "body": "At 0.27 s the stored energy peaks at 127 kJ and the Troyon gauge reaches 0.92. H<sub>98</sub> reads 1.3, which would be excellent confinement. Be careful. The measured energy includes fast beam ions that the scaling law knows nothing about, so H<sub>98</sub> reads high whenever beams are on. A number is only as good as your knowledge of what went into it, and the panel says so." },
+
+    { "id": "5.5", "ch": 5, "title": "What the comparison shows",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["insight", "logbook"],
+      "body": "Two readings of the same shot, side by side. On the left, what the twin works out from the data: confinement relative to each law, the closest approach to a limit and when, and how the learned correction did on this shot. On the right, what the physicist in the control room wrote. When they agree, you can trust both a little more. When they differ, you have found something worth a closer look." },
+
+    { "id": "6.1", "ch": 6, "title": "Same recipe, more power",
+      "tab": "replay", "shot": 30192, "slice": 0, "view": "cutaway", "highlight": null, "focus": ["bar", "strip-p", "strip-w", "strip-lim"],
+      "body": "Shot #30192, the next day. Same current, but two beams: 3.7 MW from 0.05 s, about 70 % more power. More tap, higher water level, and you know which wall that pushes on.",
+      "task": { "text": "Press ▶ PLAY and watch the limits strip.", "check": { "event": "fusionlab:slice", "all": [{ "path": "playing", "op": "==", "value": true }] } } },
+
+    { "id": "6.2", "ch": 6, "title": "Find the red",
+      "tab": "replay", "shot": 30192, "slice": { "t": 0.2 }, "focus": ["bar", "gauge-troyon", "strip-lim"],
+      "body": "The pressure climbs with the beam power. Find the first moment the plasma is over the [[Troyon limit|troyon]].",
+      "task": { "text": "Scrub to the first slice where the Troyon gauge is red.", "check": { "event": "fusionlab:slice", "all": [{ "path": "troyon", "op": ">=", "value": 1 }, { "path": "t_s", "op": "<=", "value": 0.241 }] } } },
+
+    { "id": "6.3", "ch": 6, "title": "What happened next",
+      "tab": "replay", "shot": 30192, "slice": { "t": 0.255 }, "focus": ["logbook", "insight", "gauge-troyon"],
+      "body": "The gauge first turns red at 0.24 s and peaks at 1.15. The logbook: <i>plasma locks… disrupts at 300 ms</i>. A [[locked mode|locked-mode]], then a [[disruption]], 60 ms after the limit was crossed. Be precise about what this shows. The session leader's note points at a 'kick', not at the pressure. Crossing a limit does not schedule a disruption. It removes the margin, so the next disturbance ends the shot instead of being shrugged off.",
+      "deeper": "The reconstruction ends at 0.28 s: EFIT has nothing to fit once the plasma is gone. The Troyon limit used here is β<sub>N</sub> = 3.5; MAST's real limit depended on the current profile and wall, which is one reason this twin says 'distance to a limit' and never 'will disrupt'." },
+
+    { "id": "7.1", "ch": 7, "title": "A law is a fit",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["strip-w"],
+      "body": "The warm curves come from [[scaling laws|scaling-law]]: power-law fits of confinement time across thousands of shots on many machines. They are how ITER was sized. But the machines in that database were conventional, doughnut-shaped tokamaks. MAST is a cored apple, and published studies found it scales differently, with a weaker dependence on current and a much stronger one on field. So on MAST the law is a reference line, not the truth.",
+      "deeper": "Valovič et al., <i>Nucl. Fusion</i> 49 (2009) 075016 fitted MAST H-modes as W ∝ I<sub>p</sub><sup>0.59</sup> B<sub>T</sub><sup>1.4</sup>, against [[IPB98(y,2)|ipb98]]'s I<sub>p</sub><sup>0.93</sup> B<sub>T</sub><sup>0.15</sup>. The same paper notes the magnitudes broadly agree." },
+
+    { "id": "7.2", "ch": 7, "title": "One shot among thousands",
+      "tab": "db", "focus": ["db-tau", "db-ops"],
+      "body": "Every dot is a real MAST shot at its moment of peak current. Left: measured confinement time against the law. On the dashed line they agree, and the cloud is the law's error. Right: where shots sat relative to the density and pressure limits, with the path of the shot you just replayed drawn across it. One shot is an anecdote. This is the population it came from." },
+
+    { "id": "7.3", "ch": 7, "title": "Learning the gap, and saying how well",
+      "tab": "db", "focus": ["holdout"],
+      "body": "A small PhysicsNeMo network learns the ratio between measurement and law from these shots. Whether it helps is decided on shots it never saw, a [[holdout test|holdout]]. Read the table's two columns. On unseen <i>sessions</i> the network beats a refitted power law. On an unseen <i>campaign</i>, a later year, it loses to it. Both results are reported. A random split would have mixed near-identical repeat shots into both sides and flattered the network. Showing where a model fails is part of the model." },
+
+    { "id": "7.4", "ch": 7, "title": "A shot the network never saw",
+      "tab": "replay", "shot": 27257, "slice": { "t": 0.25 }, "overlay": true, "focus": ["xs", "eq-overlay", "bar"],
+      "body": "Shot #27257 comes from a session held out of all training. The green dashed surfaces are the network's reconstruction from the magnetic signals alone; blue is EFIT. Open <i>How close is it?</i> for the error, and scrub through the shot to see where it is good and where it strains.",
+      "task": { "text": "Scrub through the shot with the overlay on.", "check": { "event": "fusionlab:slice", "all": [{ "path": "shot_id", "op": "==", "value": 27257 }, { "path": "t_s", "op": "<", "value": 0.15 }] } } },
+
+    { "id": "8.1", "ch": 8, "title": "Into the lab",
+      "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": true, "highlight": null, "view": "cutaway", "focus": [], "last": true,
+      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>What-if</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
+  ]
+}

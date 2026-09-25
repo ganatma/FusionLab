@@ -13,18 +13,19 @@
   // learned (PhysicsNeMo). That provenance tagging is the point of a twin, and it is the UI's organising idea.
   const TAG = { meas: '<span class="tag meas">measured</span>', model: '<span class="tag model">model</span>',
                 learn: '<span class="tag learn">learned</span>', comp: '<span class="tag comp">computed</span>' };
-  const strip = (id, label, unit) => `
-    <div class="strip"><span class="strip-label">${label}${unit ? ` <span class="dim">${unit}</span>` : ''}</span>
+  const strip = (id, label, unit, guide) => `
+    <div class="strip" data-guide="${guide}"><span class="strip-label">${label}${unit ? ` <span class="dim">${unit}</span>` : ''}</span>
       <span class="strip-val" id="${id}-val"></span><div id="${id}" class="fill"></div></div>`;
   root.innerHTML = `
     <div class="cr">
-      <div class="cr-bar">
-        <select id="rp-shot" aria-label="Shot"></select>
-        <button type="button" id="rp-play" class="tool" aria-label="Play the shot">▶ PLAY</button>
+      <div class="cr-bar" data-guide="bar">
+        <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
+        <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
         <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
           <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
-        <input type="range" id="rp-t" min="0" max="0" step="1" value="0" aria-label="Time slice">
+        <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
         <span class="mono" id="rp-tlabel">–</span>
+        <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
         <a id="rp-usd" class="tool" href="#" download title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</a>
       </div>
 
@@ -33,28 +34,40 @@
         A gauge turns red when a stability limit is crossed: try shot <b>#30192</b>.</span>
         <button type="button" id="rp-hint-x" class="tool" aria-label="Dismiss this hint">Got it</button></div>
 
-      <div class="cr-cell" id="cell-eq">
+      <div class="cr-cell" id="cell-eq" data-guide="eq">
         <h2>Equilibrium ${TAG.meas} <span class="dim">EFIT, real vessel</span></h2>
         <div class="keyline small"><span style="color:#3987e5">━ flux surfaces</span> <span style="color:#ff8a3d">━ last closed surface ✚ axis</span> <span style="color:#c3c2b7">━ wall</span> <span class="muted">▪ PF coils</span></div>
-        <div class="grow"><div id="rp-xs" class="fill"></div></div>
-        <div id="rp-eq" hidden>
+        <div class="grow" data-guide="xs"><div id="rp-xs" class="fill"></div></div>
+        <div id="rp-eq" data-guide="eq-overlay" hidden>
           <label class="small"><input type="checkbox" id="rp-eq-on" checked> ${TAG.learn} PhysicsNeMo reconstruction from the magnetic sensors (green, dashed)</label>
           <details class="small"><summary>How close is it?</summary><p id="rp-eq-note"></p></details>
         </div>
         <h2 style="margin-top:8px">Thomson T<sub>e</sub> ${TAG.meas} <span class="dim">keV vs R</span></h2>
-        <div style="position:relative;height:110px"><div id="rp-te" class="fill"></div></div>
+        <div style="position:relative;height:110px" data-guide="thomson"><div id="rp-te" class="fill"></div></div>
       </div>
 
-      <div class="cr-cell" id="cell-tr">
+      <div class="cr-cell" id="cell-tr" data-guide="traces">
         <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim">laws are fed the measured power</span></h2>
         <div class="strips">
-          ${strip('rp-w', 'W', 'kJ')}${strip('rp-p', 'P', 'MW')}${strip('rp-ip', 'I<sub>p</sub>', 'MA')}${strip('rp-lim', 'limits', '1.0 = limit')}
+          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
         </div>
       </div>
 
-      <div class="cr-cell scroll" id="cell-st">
+      <div class="cr-cell scroll" id="cell-st" data-guide="state">
+        <div id="rp-wi" hidden>
+          <h2>What-if on this shot ${TAG.model} ${TAG.learn} <span class="dim">the real programme, edited and re-flown · educational, not a prediction</span></h2>
+          <div class="wi-grid">
+            <div><div id="rp-wi-sliders"></div>
+              <p class="small muted" id="rp-wi-evidence"></p>
+              <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
+            <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
+                <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
+              <div class="wi-out small" id="rp-wi-out"></div>
+              <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+          </div>
+        </div>
         <h2>Shot state ${TAG.meas} <span id="rp-head" class="dim"></span></h2>
-        <div class="params">
+        <div class="params" data-guide="params">
           <div><span>t</span><b id="rp-r-t">–</b><i>s</i></div>
           <div><span>I<sub>p</sub></span><b id="rp-r-ip">–</b><i>MA</i></div>
           <div><span>n̄<sub>e</sub></span><b id="rp-r-n">–</b><i>10²⁰ m⁻³</i></div>
@@ -62,22 +75,22 @@
           <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
-        <h2 style="margin-top:8px">Distance to the operating limits ${TAG.comp} <span class="dim">limit formulas on the measured values · 1.0 = limit</span></h2>
-        <div class="gauge-row"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
-        <div class="gauge-row"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
-        <div class="gauge-row"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
+        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
+        <div class="gauge-row wi-keep" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
+        <div class="gauge-row wi-keep" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
+        <div class="gauge-row wi-keep" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
         <div class="cols">
-          <div><h2>What the comparison shows ${TAG.comp}</h2><div id="rp-insight" class="small"></div></div>
-          <div><h2>Session leader's logbook ${TAG.meas}</h2><div id="rp-log" class="small"></div></div>
+          <div data-guide="insight"><h2>What the comparison shows ${TAG.comp}</h2><div id="rp-insight" class="small"></div></div>
+          <div data-guide="logbook"><h2>Session leader's logbook ${TAG.meas}</h2><div id="rp-log" class="small"></div></div>
         </div>
         <p id="rp-attr" class="small muted"></p>
       </div>
 
-      <div class="cr-cell" id="rp-3d-panel">
+      <div class="cr-cell" id="rp-3d-panel" data-guide="machine">
         <h2 class="row"><span>The machine ${TAG.meas} ${TAG.comp} <span class="dim">real wall, coils, boundary · NVIDIA Warp field lines</span></span>
-          <span class="seg" id="rp-view" hidden><button type="button" data-v="cutaway" class="on">Cutaway</button><button type="button" data-v="port">Inside the vessel</button></span></h2>
+          <span class="seg" id="rp-view" data-guide="view" hidden><button type="button" data-v="cutaway" class="on">Cutaway</button><button type="button" data-v="port">Inside the vessel</button></span></h2>
         <div class="grow"><div id="rp-3d" class="fill"></div>
-          <div class="chips"><span>q<sub>95</sub> traced <b id="rp-q-tr">–</b></span><span>q<sub>95</sub> EFIT <b id="rp-q-ef">–</b></span></div></div>
+          <div class="chips" data-guide="q-chips"><span>q<sub>95</sub> traced <b id="rp-q-tr">–</b></span><span>q<sub>95</sub> EFIT <b id="rp-q-ef">–</b></span></div></div>
         <details class="small"><summary>What am I looking at?</summary>
           <p>The vessel and PF coils are the FAIR-MAST limiter contour and coil filaments revolved about the axis; the glowing shell is EFIT's last closed flux surface at this time slice, coloured by core T<sub>e</sub>. <span id="rp-3d-note"></span></p>
           <p class="muted">Each line is integrated through the EFIT flux map of this time slice (RK4 in toroidal angle, one GPU thread per line, every slice of the shot in one kernel launch). Counting toroidal turns per poloidal turn gives q without using EFIT's own q, so the agreement is a check of the whole chain: archive → units → interpolation → integrator. Axisymmetric reconstruction only: no islands, no 3D fields. Drag to rotate. The same lines are in the OpenUSD download.</p></details>
@@ -88,11 +101,11 @@
   if (dbRoot) dbRoot.innerHTML = `
     <div class="panel stack">
       <h2>The replayed shot among <span id="rp-db-n">…</span> real MAST shots (values at peak current)</h2>
-      <div id="rp-sur" class="small"></div>
+      <div id="rp-sur" class="small" data-guide="holdout"></div>
       <div class="grid">
-        <div><div id="rp-db-tau" class="plot" style="height:360px"></div>
+        <div data-guide="db-tau"><div id="rp-db-tau" class="plot" style="height:360px"></div>
           <div class="muted small">On the dashed line the IPB98(y,2) law matches the measurement. Energy includes beam fast ions.</div></div>
-        <div><div id="rp-db-ops" class="plot" style="height:360px"></div>
+        <div data-guide="db-ops"><div id="rp-db-ops" class="plot" style="height:360px"></div>
           <div class="muted small">Dashed lines: Greenwald fraction 1.0 and β<sub>N</sub> 3.5. Orange: the replayed shot's path in time.</div></div>
       </div>
     </div>`;
@@ -119,7 +132,9 @@
   const TIME_PLOTS = ['rp-w', 'rp-p', 'rp-ip', 'rp-lim'];
 
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
-  let shot = null, db = null, loaded = false, lines3dOk = true, use3 = false, playTimer = null, speed = 1;
+  let shot = null, db = null, lines3dOk = true, use3 = false, playTimer = null, speed = 1;
+  let initP = null, loadSeq = 0;
+  let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
   const lineCache = new Map();
   const psiCache = new Map();
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
@@ -137,9 +152,10 @@
     num.textContent = fmt(v);
   }
 
-  async function init() {
-    if (loaded) return;
-    loaded = true;
+  // One init, however many callers: the tab listener, the first paint and the guided study all await the same promise.
+  function init() { return initP || (initP = start()); }
+
+  async function start() {
     const list = await (await fetch('/shots')).json();
     $('rp-attr').textContent = list.attribution + '. Compared with the experiment, not validated against it.';
     $('rp-shot').innerHTML = list.shots.map(s =>
@@ -151,8 +167,10 @@
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
     seg('rp-speed', v => { speed = +v; if (playTimer) play(true); });
-    seg('rp-view', v => use3 && window.Vessel3D.setView(v));
+    seg('rp-view', v => { if (use3) window.Vessel3D.setView(v); document.dispatchEvent(new CustomEvent('fusionlab:view', { detail: { view: v } })); });
     $('rp-eq-on').addEventListener('change', () => drawPsi(+$('rp-t').value));
+    $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
+    $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => r.json()).then(j => { db = j; drawDb(); });
@@ -160,6 +178,13 @@
     const asked = +new URLSearchParams(location.search).get('shot');   // deep link: /?shot=30192
     const want = list.shots.find(s => s.shot_id === asked) || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
     if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
+    // deep link to a what-if: /?shot=30192&whatif=1&P_nbi=1.3&nbi_shift_s=-0.03 (edits the gate refuses are ignored)
+    const q = new URLSearchParams(location.search);
+    if (q.get('whatif')) {
+      await whatIf(true);
+      WI.forEach(([k]) => { const el = $('rp-wi-' + k); if (q.get(k) !== null && el && !el.disabled) el.value = q.get(k); });
+      askWhatIf();
+    }
   }
 
   // segmented control: one button on at a time
@@ -209,7 +234,10 @@
   }
 
   async function loadShot(id) {
-    shot = await (await fetch('/replay/' + id)).json();
+    const seq = ++loadSeq;
+    const next = await (await fetch('/replay/' + id)).json();
+    if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
+    shot = next;
     psiCache.clear(); lineCache.clear(); linesNow.clear();
     const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s;
     $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length} EFIT slices`;
@@ -238,6 +266,8 @@
     ], stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
               shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
 
+    wi.res = null;
+    if (wi.on) askWhatIf();
     drawSection();
     draw3d();
     if (db) drawDb();
@@ -245,6 +275,7 @@
     slider.max = t.length - 1;
     const peak = mo.worst_limit.reduce((best, v, i) => (v !== null && v > (mo.worst_limit[best] ?? -1)) ? i : best, 0);
     slider.value = peak;
+    document.dispatchEvent(new CustomEvent('fusionlab:shot', { detail: { shot_id: id, n: t.length, heating: m.heating || '' } }));
     scrub(peak);
     Promise.all([getPsi(id, peak), getLines(id, peak)]).then(() => prefetch(id, t.length));
   }
@@ -310,11 +341,12 @@
     $('rp-r-te').textContent = fmt(me.Te0_keV?.[i]);
     $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 1);
     $('rp-r-h').textContent = fmt(mo.H98[i]);
-    gauge('greenwald', mo.f_greenwald[i]); gauge('troyon', mo.troyon[i]); gauge('kink', mo.kink[i]);
+    const L = wi.on && wi.res && !wi.res.is_identity ? wi.res.limits : { greenwald: mo.f_greenwald, troyon: mo.troyon, kink: mo.kink };
+    gauge('greenwald', L.greenwald[i]); gauge('troyon', L.troyon[i]); gauge('kink', L.kink[i]);
 
     const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: t, x1: t, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
     TIME_PLOTS.forEach(id => {
-      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper');
+      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || s.name === 'ood');
       Plotly.relayout(id, { shapes: [...keep, cursor] });
     });
 
@@ -325,6 +357,91 @@
     if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
     clearTimeout(psiTimer);
     psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); }, 40);
+    document.dispatchEvent(new CustomEvent('fusionlab:slice', { detail: sliceState(i) }));
+  }
+
+  // What the guided study reads: the state of one time slice, plain numbers only.
+  function sliceState(i) {
+    const me = shot.measured, mo = shot.model;
+    return { shot_id: shot.meta.shot_id, i, n: me.t_s.length, t_s: me.t_s[i], playing: !!playTimer,
+             greenwald: mo.f_greenwald[i], troyon: mo.troyon[i], kink: mo.kink[i], worst: mo.worst_limit[i],
+             H98: mo.H98[i], W_kJ: me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, Ip_MA: me.Ip_MA[i],
+             nbi_on: (me.P_nbi_MW[i] || 0) > 0 };
+  }
+
+  // ---- what-if: the real programme, edited and re-flown (fusionlab/virtual.py). Every slider shows the evidence behind it;
+  // an edit the archive cannot test has no slider, and the server refuses it too.
+  const WI = [   // key, label, min, max, step, zero, format
+    ['P_nbi', 'Beam power', 0, 2, 0.05, 1, v => '× ' + fmt(v)], ['nbi_shift_s', 'Beam timing', -0.1, 0.1, 0.005, 0, v => (v > 0 ? '+' : '') + Math.round(v * 1e3) + ' ms'],
+    ['n', 'Density', 0.5, 1.5, 0.05, 1, v => '× ' + fmt(v)], ['Ip', 'Plasma current', 0.5, 1.5, 0.05, 1, v => '× ' + fmt(v)], ['B', 'Toroidal field', 0.5, 1.5, 0.05, 1, v => '× ' + fmt(v)]];
+  const WI_TRACES = ['What-if band (low)', 'What-if, anchored on the measurement', 'What-if, blind (no peeking at W)', 'Blind re-fly of the real programme'];
+
+  async function whatIf(on) {
+    wi.on = !!on && !!shot;
+    $('rp-whatif').classList.toggle('on', wi.on);
+    $('rp-wi').hidden = !wi.on;
+    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
+    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
+    if (!wi.gate) {
+      wi.gate = await fetch('/virtual/gate').then(r => r.json());
+      // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
+      const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
+      $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
+          <input type="range" id="rp-wi-${k}" data-zero="${zero}" min="${min}" max="${max}" step="${step}" value="${zero}"${G[k].enabled ? '' : ' disabled'}>
+          <output id="rp-wi-${k}-out"></output></label>`).join('');
+      $('rp-wi-evidence').innerHTML = (wi.gate.validated ? 'Evidence, from matched pairs of real shots (same session, one input changed by > 20%, the rest within 5%): ' +
+          open.filter(([k]) => k !== 'nbi_shift_s').map(([k, label]) => `${label.toLowerCase()} ${G[k].n_pairs.toLocaleString()} pairs (${esc(G[k].admissible.join(', '))})`).join('; ') + '. '
+        : 'Not validated on this machine yet: run scripts/validate_virtual.py. ') +
+        (shut.length ? `<b>No slider</b> for ${shut.map(([k, label]) => `${label.toLowerCase()} (${G[k].n_pairs} pairs)`).join(' or ')}: too few pairs in 6,353 shots to test any law.` : '');
+      $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
+      $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
+    }
+    askWhatIf();
+  }
+  function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
+
+  async function askWhatIf() {
+    if (!wi.on || !shot) return;
+    labelsWhatIf();
+    const id = shot.meta.shot_id, my = ++wi.seq, edit = Object.fromEntries(WI.map(([k]) => [k, +$('rp-wi-' + k).value]));
+    const r = await fetch('/virtual/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edit }) });
+    if (my !== wi.seq || !wi.on || !shot || shot.meta.shot_id !== id) return;
+    if (!r.ok) { $('rp-wi-out').innerHTML = `<p class="muted">${esc((await r.json()).detail || r.status)}</p>`; return; }
+    wi.res = await r.json();
+    drawWhatIf(); scrub(+$('rp-t').value);
+  }
+
+  function drawWhatIf() {
+    const W = $('rp-w'), lim = $('rp-lim'), P = $('rp-p'), r = wi.res;
+    const drop = (el, names) => { const k = el.data.map((t, i) => names.includes(t.name) ? i : -1).filter(i => i >= 0); if (k.length) Plotly.deleteTraces(el, k); };
+    if (!W.data) return;
+    drop(W, WI_TRACES); drop(lim, ['What-if Greenwald', 'What-if Troyon', 'What-if kink']); drop(P, ['Beams, edited']);
+    Plotly.relayout(W, { shapes: (W.layout.shapes || []).filter(s => s.name !== 'ood') });
+    $('rp-lim-src').textContent = wi.on && r && !r.is_identity ? 'scaled from the measured values by the what-if · 1.0 = limit' : 'limit formulas on the measured values · 1.0 = limit';
+    if (!wi.on || !r) { $('rp-wi-out').innerHTML = ''; return; }
+    const t = r.t_s, k = a => scale(a, 1e3), dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
+    const band = r.timing_edit ? 0.10 : 0.28;   // a timing edit keeps the real shot's events at their old times: the anchored band is shown faint
+    Plotly.addTraces(W, [
+      line(t, k(r.anchored.lo), WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
+      line(t, k(r.anchored.hi), WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
+      Object.assign(dash(t, k(r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2)), WI_TRACES[2], C.magenta), { showlegend: false }),
+      Object.assign(dash(t, k(r.W_refly_MJ), WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
+    // shade the stretches where the learned correction is outside the range it was trained on (ramps, big edits)
+    const ood = []; let a = null;
+    r.in_distribution.forEach((ok, i) => { if (!ok && a === null) a = i; if ((ok || i === t.length - 1) && a !== null) { ood.push([t[a], t[ok ? i - 1 : i]]); a = null; } });
+    Plotly.relayout(W, { shapes: [...(W.layout.shapes || []), ...ood.map(([x0, x1]) => ({ type: 'rect', name: 'ood', xref: 'x', yref: 'paper', x0, x1, y0: 0, y1: 1, fillcolor: 'rgba(137,135,129,0.10)', line: { width: 0 }, layer: 'below' }))] });
+    if (!r.is_identity) {
+      Plotly.addTraces(lim, [dash(t, r.limits.greenwald, 'What-if Greenwald', C.blue), dash(t, r.limits.troyon, 'What-if Troyon', C.orange), dash(t, r.limits.kink, 'What-if kink', C.aqua)].map(x => Object.assign(x, { showlegend: false })));
+      Plotly.addTraces(P, [Object.assign(dash(t, r.P_nbi_MW, 'Beams, edited', C.magenta), { line: { color: C.magenta, width: 2, dash: 'dash', shape: 'hv' }, showlegend: false })]);
+    }
+    const e = r.refly_error, pc = v => (v === null || v === undefined) ? '–' : Math.round(100 * (Math.exp(v) - 1)) + '%', rng = a => a[0] === a[1] ? `${a[0] > 0 ? '+' : ''}${a[0]}%` : `${a[0] > 0 ? '+' : ''}${a[0]} to ${a[1] > 0 ? '+' : ''}${a[1]}%`;
+    const cross = Object.entries(r.would_cross_at_s).filter(([, v]) => v !== null).map(([name, v]) => `<b>${LIMIT_LABEL[name]}</b> at t = ${fmt(v, 3)} s`);
+    $('rp-wi-out').innerHTML = (r.is_identity
+      ? `<p>No edits yet. The dotted grey line is the <b>blind re-fly</b>: the real programme run through ${esc(r.closure_name)} with no knowledge of the measured energy. On this shot it is off by <b>${pc(e.flat_top_median_abs_ln)}</b> on the flat top${e.beam_rise_median_abs_ln === null ? '' : ` and <b>${pc(e.beam_rise_median_abs_ln)}</b> in the 50 ms after beam-on`}. That error is the honest size of what follows.</p>`
+      : `<p>Flat-top stored energy: <b>${rng(r.dW_flat_pct.anchored)}</b> anchored on the measurement, <b>${rng(r.dW_flat_pct.blind)}</b> blind. The spread is the disagreement between ${r.laws.length} response laws.</p>
+         <p>${cross.length ? 'With this programme the plasma would cross ' + cross.join(', ') + '. That is a distance to a limit, not a forecast of a disruption.' : 'No operating limit would be crossed.'}</p>`) +
+      (r.timing_edit ? '<p class="muted">Timing edit: the anchored band keeps the real shot\'s events (its L–H transition) at their original times, so it is drawn faint. Read the blind line.</p>' : '') +
+      `<p class="muted">${r.in_distribution.filter(x => !x).length} of ${t.length} slices are outside the range the learned correction was trained on (ramps, large edits).${r.validated ? '' : ' The response laws have not been validated on this machine yet (scripts/validate_virtual.py).'}</p>`;
   }
 
   // ---- 3D: vessel and plasma boundary revolved 270° (cutaway towards the camera), Warp field lines inside
@@ -469,5 +586,26 @@
       if (use3) window.Vessel3D.resize();
     });
   });
+  // Handle for the guided study (guide.js). Each call goes through the same paths as the toolbar controls.
+  window.FusionLab = Object.assign(window.FusionLab || {}, { replay: {
+    async select(id) {   // resolves once the shot is drawn; a no-op when it is already up
+      await init();
+      if (shot && shot.meta.shot_id === id) return sliceState(+$('rp-t').value);
+      play(false); $('rp-shot').value = id; await loadShot(id);
+      return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+    },
+    scrubTo(where) {     // a slice index, or { t: seconds } for the nearest slice
+      if (!shot) return;
+      const t = shot.measured.t_s;
+      let i = typeof where === 'number' ? where : t.reduce((best, v, k) => Math.abs(v - where.t) < Math.abs(t[best] - where.t) ? k : best, 0);
+      i = Math.min(Math.max(Math.round(i), 0), t.length - 1);
+      play(false); $('rp-t').value = i; scrub(i);
+    },
+    play: on => play(on),
+    view(v) { const b = $('rp-view').querySelector(`button[data-v="${v}"]`); if (b && !$('rp-view').hidden) b.click(); },
+    state: () => (shot ? sliceState(+$('rp-t').value) : null),
+    whatIf: on => whatIf(on),
+  } });
+
   if (!root.hidden) init();
 })();

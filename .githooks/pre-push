@@ -1,0 +1,4 @@
+#!/bin/sh
+# Never push a broken build.
+echo "pre-push: running tests…"
+uv run pytest -q || { echo "✘ tests failing, push blocked (use --no-verify only in an emergency)"; exit 1; }

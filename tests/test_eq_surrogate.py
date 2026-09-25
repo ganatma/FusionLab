@@ -45,3 +45,26 @@ def test_axis_finder_on_a_known_peak():
     assert abs(float(r) - 0.91) < 1e-3 and abs(float(z) - 0.07) < 1e-3
     r, z = eqs.magnetic_axis(-psi, -torch.ones(1), R, Z)                               # reversed current: a minimum
     assert abs(float(r) - 0.91) < 1e-3 and abs(float(z) - 0.07) < 1e-3
+
+
+def test_forward_spike_metrics_record_the_gate_decision_the_readme_reports():
+    """The coils-only spike (scripts/train_eq_surrogate.py --inputs coils, scripts/eq_forward_jacobian.py) ships nothing;
+    its numbers and its go / no-go are on disk, and the README says what the file says."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    f = root / "models" / "eq_forward_spike_metrics.json"
+    if not f.exists():
+        pytest.skip("forward spike not run in this checkout")
+    m = json.loads(f.read_text())
+    assert m["test_metrics"]["physicsnemo"]["rel_l2"]["median"] > m["test_metrics"]["pca_truncation_floor_k64"]["rel_l2"]["median"]
+    j = m["jacobian_check"]
+    assert set(j["main_circuits"]) <= set(j["circuits"]) and isinstance(j["verdict"]["go"], bool)
+    for name in j["main_circuits"]:
+        c = j["circuits"][name]
+        assert -1 <= c["r_all"]["median"] <= 1 and c["n"] > 20 and c["sign"] in ("same", "opposite")
+    assert j["verdict"]["go"] == (j["verdict"]["consistent_sign_on_main_circuits"] and all(j["circuits"][n]["passes"] for n in j["main_circuits"]))
+    assert j["verdict"]["main_circuits_passing"] == [n for n in j["main_circuits"] if j["circuits"][n]["passes"]]
+    docs = "".join(p.read_text() for p in (root / "README.md", root / "docs" / "RESULTS.md") if p.exists())
+    assert ("a spike that did not ship" in docs) == (not j["verdict"]["go"])

@@ -94,6 +94,55 @@ NVIDIA Warp field-line tracing (`make fieldlines`, numbers in `models/fieldlines
 Also measured: the whole 15,969-shot table downloads in one request in ~7 s; `/replay/{id}` answers in ~40 ms;
 the OpenUSD export of a 71-slice shot with field lines takes ~0.4 s (6.6 MB `.usdc`).
 
+## Virtual shot: how far to trust it
+
+`fusionlab/virtual.py` re-flies a real shot's programme through `dW/dt = P_heat − (W/K)^(1/(1−α))` (backward Euler at
+1 ms, vectorized over scenarios; the derivation is in `docs/PHYSICS.md`). Two gates decide what the UI may offer
+(`make validate-virtual` → `models/virtual_metrics.json`); the numbers below are that script's output.
+
+Blind re-fly of 117 shots from sessions the τ_E correction never saw, median |ln(W_refly / W_measured)| (0.10 ≈ 10%), shots in brackets:
+
+| Closure | Flat top, all | beam-heated | ohmic | 50 ms after beam-on |
+|---|---|---|---|---|
+| IPB98(y,2) × PhysicsNeMo correction **(default)** | 0.175 (114) | 0.138 (80) | 0.237 (34) | 0.332 (80) |
+| IPB98(y,2) | 0.270 (114) | 0.229 (80) | 0.713 (34) | 0.697 (80) |
+| ITER89-P | 0.351 (114) | 0.349 (80) | 0.366 (34) | 0.623 (80) |
+
+The learned correction cuts the flat-top error by a third against IPB98 alone. The rise after beam-on is about twice as
+wrong as the flat top for every closure: the beam is a logged box and fast ions are not modelled.
+
+Matched pairs (two shots of the same 100-shot block, one input changed by > 20%, the other six within 5%), RMSE of the
+change in ln τ_E between the two shots (each law's exponent in brackets):
+
+| Edited input | Pairs | Measured exponent | No change | IPB98(y,2) | Valovič 2009 | Refit power law | Slider |
+|---|---|---|---|---|---|---|---|
+| Plasma current | 14 | 1.66 | 0.598 | 0.426 (0.93) | 0.488 (0.59) | 0.398 (1.16) | no: too few pairs |
+| Toroidal field | 3 | 0.12 | 0.029 | 0.032 (0.15) | 0.262 (1.4) | 0.207 (−0.86) | no: too few pairs |
+| Density | 958 | 0.05 | 0.419 | 0.596 (0.41) | 0.429 (0.0) | 0.444 (0.19) | yes: Valovič |
+| Loss power | 2454 | −0.39 | 0.463 | 0.440 (−0.69) | 0.461 (−0.73) | 0.398 (−0.38) | yes: all three |
+
+Two findings. **On MAST, confinement time does not depend on density** (exponent 0.05 over 958 pairs): IPB98's n^0.41
+does worse than assuming nothing changes, as Valovič found with a dedicated scan, so the what-if never uses it. And
+**routine operation cannot test a current or field edit** (14 and 3 pairs in 6,353 shots), so those sliders do not exist
+and the server refuses those edits. Caveat on the power exponent: stored energy includes beam fast ions, which flattens
+the measured degradation.
+
+### Forward equilibrium, a spike that did not ship
+
+The equilibrium surrogate goes magnetics → ψ, so knobs cannot drive it. Restricted to what an operator sets (21 PF
+circuit currents + Rogowski Ip → ψ, `scripts/train_eq_surrogate.py --inputs coils --tag forward`, same block split) it
+reaches 3.49% median relative L2 on unseen sessions (p95 11.9%), axis within 2.3 cm, against 1.65% and 1.2 cm for the
+shipped model and 8.3% for ridge on the same inputs (`models/eq_forward_spike_metrics.json`). Promising, but held-out
+error does not certify an *edit*: coils are under feedback, so part of the coil–shape correlation runs from plasma to
+coil. The check that can (`scripts/eq_forward_jacobian.py`): perturb one circuit's EFIT columns, take the model's ∂ψ/∂I on
+192 held-out slices, and compare it with that circuit's vacuum field outside the plasma. Rule, fixed before the run:
+shape r ≥ 0.8 and magnitude within 0.5–2× on every main circuit. Result: sign right everywhere; **P4 and P5 pass**
+(r 0.87 / 0.95, 0.87× / 0.65× vacuum), the two coils that set the vertical field and elongation; P2 inner and outer are
+0.63× / 0.81× vacuum but their shape agrees only near the coils (r 0.83 / 0.80 there, 0.67 / 0.64 over the whole vessel);
+the solenoid is 0.46× vacuum, which EFIT's own flux maps say is the vessel's induced currents screening it (they follow
+the solenoid at 0.37× vacuum), not the model. Two of five main circuits pass, so no "reshape the plasma" control ships.
+A limited P4/P5-only control is the next thing to test.
+
 ## Known limitations & next steps
 
 **Limitations**
@@ -117,4 +166,7 @@ the OpenUSD export of a 71-slice shot with field lines takes ~0.4 s (6.6 MB `.us
    Warp next: connection length and strike-point maps on the divertor from millions of scrape-off-layer lines.
 3. TORAX as the 1D model in the "model" slot, driven by the same shot bundles.
 4. Time-resolved training data (every steady slice, thermal energy only) to fix the transfer problem in limitation 5.
-5. Missions written on real shots ("why did 30420 miss its density target?").
+5. More guided chapters written on real shots ("why did 30420 miss its density target?"), on top of the guided study.
+6. A P4/P5-only "vertical field / elongation" control from the forward-equilibrium spike, with the internal-state proxies
+   in the training files (l_i, Shafranov shift, q95) as labelled knobs, and ψ_axis, ψ_bnd, q95 as extra targets so the Warp
+   tracer needs no X-point finder.

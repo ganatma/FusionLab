@@ -22,8 +22,10 @@ week of plumbing; a student gets a real discharge to scrub through and watch hit
 | | |
 |---|---|
 | **Replay a real shot** | One screen: EFIT flux surfaces inside the real vessel, Thomson T_e profile, stored energy against the IPB98(y,2) and ITER89-P scaling laws fed the *measured* power, live Greenwald / Troyon / kink gauges, the session leader's logbook note, and a three.js vessel view with Warp-traced field lines. |
+| **Guided study** | For people new to fusion: a 15-minute lesson rail beside the live app. It lights one panel at a time, drives the app (picks the shot, scrubs, flips the 3D view, unlocks one slider) and sets tasks that tick themselves. **Lab** mode is the full app, with glossary tooltips and a **?** on every panel that opens its lesson. |
 | **Shot database** | 6,353 real shots against IPB98(y,2), with the learned correction's holdout table beside it. |
 | **What-if sandbox** | 0D power balance on ITER, a SPARC-class design, JET, DIII-D and MAST: move a slider, watch Q, the limits and the operating map. |
+| **Virtual shot** | Edit a real shot's programme (beam power and timing, density) and re-fly it through a time-dependent 0D energy balance anchored on the measurement. A slider exists only where matched pairs of real shots can test the edit; the result is worded as a distance to a limit, never a forecast. |
 | **Equilibrium surrogate** | A PhysicsNeMo network reconstructs the flux map ψ(R,Z) from 93 magnetic signals; shown dashed over EFIT's surfaces with the per-slice error. |
 | **OpenUSD export** | Each shot as a time-sampled stage: real vessel, PF coils, plasma boundary, field lines. OpenUSD export (Omniverse-compatible); opens in usdview, USD Composer or Blender. |
 | **Python loader** | `mast.load_shot()` and a cleaned shot table, in consistent units on one time base. |
@@ -42,7 +44,7 @@ make dev          # http://localhost:8000
 
 Other commands: `make test` · `make train` (retrain the correction, rewrites its metrics) · `make bench` ·
 `make usd` (OpenUSD export to `out/`) · `make fieldlines` (Warp q check + benchmark) ·
-`make data` (re-download the FAIR-MAST cache).
+`make validate-virtual` (the virtual shot's gates: fetches ~120 held-out shots) · `make data` (re-download the FAIR-MAST cache).
 
 ```python
 from fusionlab import mast
@@ -57,6 +59,8 @@ db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
 
 ## A five-minute demo
 
+0. **First visit:** the app asks. **New to fusion** starts the guided study (about 15 minutes; `/?lesson=1.5` jumps
+   into a chapter); **I know tokamaks** opens the lab. The header's **Guided | Lab** switch changes it any time.
 1. **Replay tab.** Shot **#30166** loads. Read the logbook note ("H-mode from 223 ms"), press **▶ Play**, and watch the
    flux surfaces, Thomson profile, gauges and 3D vessel move together. The measured stored energy leaves the L-mode law
    and joins the H-mode law.
@@ -64,9 +68,35 @@ db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
 3. **Vessel view:** field lines traced by Warp inside the real vessel, traced q95 next to EFIT's. Drag to rotate;
    **Inside the vessel** puts the camera in the tank.
 4. Pick **#30192**: the Troyon gauge turns red before the shot ends, and the logbook says why.
+   **What-if** in the toolbar: give its beams 30 % more power and read the band on the energy strip and the limit
+   crossing (`/?shot=30192&whatif=1&P_nbi=1.3`). Current and field have no slider, and the panel says why.
 5. **Shot database tab:** this shot among 6,353, the holdout table, and the exponent caveat.
 6. **OpenUSD stage** in the toolbar downloads the shot; open it in usdview, Omniverse USD Composer or Blender.
 7. **Sandbox tab:** push ITER's density past the Greenwald limit and watch the operating map.
+
+## Guided and Lab modes
+
+![Guided study, chapter 1: the lesson rail on the left, the PF coils lit in the real vessel, every other panel dimmed](docs/img/guided.png)
+
+The guided study runs on the real screen, so finishing it leaves you in the UI you now know how to read: nine chapters
+from why fusion, through the knobs and the three limits on ITER's sandbox, to reading shot 30166 instrument by instrument
+and watching 30192 go wrong. Tasks check themselves from the app's own events (*predict what happens to τ_E when you raise
+the heating, then do it*; *scrub to the first slice over the Troyon limit*). The lessons are data (`web/lessons.json`,
+`web/glossary.json`); `tests/test_guide.py` proves every task can be done on the cached shots and is not already done when
+its step opens. Objectives and sources per chapter: [`docs/CURRICULUM.md`](docs/CURRICULUM.md).
+
+## Virtual shot
+
+![What-if on shot 30192 with 30% more beam power: the what-if band on the energy strip, the edited beam box, sliders with the matched-pair evidence, and the result worded as a distance to a limit](docs/img/whatif.png)
+
+The level of confinement comes from the shot (a *blind* run with the learned correction and no knowledge of the measured
+energy, and an *anchored* run that reproduces it); the response to an edit comes from published scaling-law exponents,
+never from the network's own derivatives. Blind re-fly of 117 held-out shots puts the flat-top error at 0.175 (median
+|ln W_refly/W_measured|) with the correction against 0.270 for IPB98 alone. Matched pairs of real shots showed that on
+MAST the confinement time does not depend on density (958 pairs), so IPB98's n^0.41 is never used, and that routine
+operation cannot test a current or field edit (14 and 3 pairs), so those sliders do not exist. Tables and the
+forward-equilibrium spike that did not ship: [`docs/RESULTS.md`](docs/RESULTS.md#virtual-shot-how-far-to-trust-it);
+equations: [`docs/PHYSICS.md`](docs/PHYSICS.md).
 
 ## What it found on real data
 
@@ -152,6 +182,8 @@ Code: MIT.
 - The equilibrium surrogate learns EFIT's answer; it does not check it. Field lines are those of EFIT's axisymmetric
   reconstruction: no islands, no 3D fields.
 - Omniverse: we ship an OpenUSD export (Omniverse-compatible). We have not opened it in an Omniverse Kit app yet.
+- The virtual shot models no L–H transition, no fast-ion slowing down and nothing within ~30 ms of a beam edge (the
+  beam is a logged box); slices outside the correction's training range are shaded, not hidden.
 
 The full list and next steps are in [`docs/RESULTS.md`](docs/RESULTS.md#known-limitations--next-steps).
 

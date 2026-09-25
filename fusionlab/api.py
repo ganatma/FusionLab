@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
@@ -9,12 +10,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from fusionlab.api_replay import router as replay_router
-from fusionlab.physics import DEVICES, Controls, simulate
+from fusionlab.api_replay import router as replay_router, start_warm_up
+from fusionlab.api_virtual import router as virtual_router
+from fusionlab.physics import DEVICES, Controls, sigmav_dt, simulate
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 MAP_MAX = 100  # cap on grid points per axis for /map
-app = FastAPI(title="FusionLab", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_warm_up()   # a real server start only; TestClient(app) without a context never enters the lifespan
+    yield
+
+
+app = FastAPI(title="FusionLab", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -81,7 +91,14 @@ def operating_map(device: str = "iter", Ip: float | None = None, B: float | None
     return out
 
 
-# TODO(P1+): /map from the surrogate, /missions, /missions/{id}/check, /coach
+@app.get("/reactivity")
+def reactivity(n: int = 80):
+    """D-T reactivity <sigma v>(T) from the engine's Bosch-Hale fit, for the guided study's first figure."""
+    T_keV = np.geomspace(1.0, 100.0, int(np.clip(n, 8, 400)))
+    return {"T_keV": T_keV.tolist(), "sigmav_m3_s": sigmav_dt(T_keV).tolist(), "source": "Bosch & Hale, Nucl. Fusion 32 (1992) 611"}
+
+
+# TODO(P1+): /map from the surrogate, /coach
 
 
 @app.get("/")
@@ -90,4 +107,5 @@ def index():
 
 
 app.include_router(replay_router)
+app.include_router(virtual_router)
 app.mount("/static", StaticFiles(directory=WEB), name="static")

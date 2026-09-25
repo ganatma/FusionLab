@@ -86,6 +86,8 @@
       $('r-tau').textContent = fmt(r.tau_E_s, 3);
       ['greenwald', 'troyon', 'kink'].forEach((k) => gauge(k, r.limits[k]));
       status(r);
+      const controls = Object.fromEntries([['device', $('device').value], ...SLIDERS.map((k) => [k, val(k)])]);
+      document.dispatchEvent(new CustomEvent('fusionlab:sim', { detail: { controls, result: r } }));
     } catch (e) {
       $('status').textContent = 'API error: ' + e.message; $('status').className = 'status bad';
     }
@@ -140,12 +142,28 @@
   }));
   $('device').addEventListener('change', loadDevice);
 
-  fetch('/devices').then((r) => r.json()).then((d) => {
+  const ready = fetch('/devices').then((r) => r.json()).then((d) => {
     devices = d;
     $('device').innerHTML = Object.entries(d).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
     $('device').value = 'iter' in d ? 'iter' : Object.keys(d)[0];
     loadDevice();
   }).catch((e) => { $('status').textContent = 'API error: ' + e; $('status').className = 'status bad'; });
+
+  // ---------------------------------------------------------------- hooks for the guided study (guide.js)
+  // Setting a control goes through the same 'input' / 'change' listeners as a hand on the slider.
+  const LOCKABLE = ['device', ...SLIDERS];
+  window.FusionLab = Object.assign(window.FusionLab || {}, {
+    showTab,
+    sandbox: {
+      // device(k) switches machine; device(k, true) also puts every control back to that machine's defaults
+      device(k, reset) { if (!(k in devices) || ($('device').value === k && !reset)) return; $('device').value = k; loadDevice(); },
+      set(k, v) { if (!SLIDERS.includes(k)) return; $(k).value = v; $(k).dispatchEvent(new Event('input')); },
+      get: (k) => (k === 'device' ? $('device').value : val(k)),
+      // lock(['Ip']) leaves one knob live; lock(null) frees them all
+      lock(keys) { LOCKABLE.forEach((k) => { $(k).disabled = !!keys && !keys.includes(k); }); },
+      ready: () => ready,   // resolves once /devices has filled the controls
+    },
+  });
 
   // Replay (real shots) is the landing tab; /#sandbox opens the what-if sliders directly.
   if (location.hash !== '#sandbox') showTab('replay');

@@ -10,18 +10,22 @@
   <script type="module" src="/static/vessel3d.js"></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/replay.js" defer></script>
+  <script src="/static/figures.js" defer></script>
+  <script src="/static/guide.js" defer></script>
 </head>
 <body>
   <header>
     <div class="title">
       <h1>FUSIONLAB<span class="dim"> · open-data tokamak twin</span></h1>
     </div>
-    <div class="prov" title="Every panel in the replay says where its content comes from">
+    <div class="prov" data-guide="prov" title="Every panel in the replay says where its content comes from">
       <span class="tag meas">measured</span> FAIR-MAST data
       <span class="tag model">model</span> published laws
       <span class="tag learn">learned</span> PhysicsNeMo
       <span class="tag comp">computed</span> from the data
     </div>
+    <span class="seg" id="mode" role="group" aria-label="Mode" title="Guided: a 15-minute study that teaches you to read this screen. Lab: the full app.">
+      <button type="button" data-v="guided">Guided</button><button type="button" data-v="lab" class="on">Lab</button></span>
     <nav class="tabs">
       <button type="button" data-tab="replay">Replay a real shot</button>
       <button type="button" data-tab="db">Shot database</button>
@@ -36,25 +40,25 @@
     <div class="grid">
       <div class="panel">
         <h2>Device</h2>
-        <select id="device" aria-label="Device"></select>
+        <select id="device" data-guide="device" aria-label="Device"></select>
         <p id="device-blurb" class="muted small"></p>
         <h2>Controls</h2>
-        <div class="control"><label for="Ip"><span>Plasma current I<sub>p</sub></span> <output id="Ip-out"></output></label>
+        <div class="control" data-guide="knob-Ip"><label for="Ip"><span>Plasma current I<sub>p</sub></span> <output id="Ip-out"></output></label>
           <input type="range" id="Ip" step="0.01"></div>
-        <div class="control"><label for="B"><span>Toroidal field B</span> <output id="B-out"></output></label>
+        <div class="control" data-guide="knob-B"><label for="B"><span>Toroidal field B</span> <output id="B-out"></output></label>
           <input type="range" id="B" step="0.01"></div>
-        <div class="control"><label for="n"><span>Density n</span> <output id="n-out"></output></label>
+        <div class="control" data-guide="knob-n"><label for="n"><span>Density n</span> <output id="n-out"></output></label>
           <input type="range" id="n" step="0.001"></div>
-        <div class="control"><label for="P_aux"><span>Heating P<sub>aux</sub></span> <output id="P_aux-out"></output></label>
+        <div class="control" data-guide="knob-P_aux"><label for="P_aux"><span>Heating P<sub>aux</sub></span> <output id="P_aux-out"></output></label>
           <input type="range" id="P_aux" step="0.1"></div>
-        <div class="control"><label for="H"><span>Confinement multiplier H</span> <output id="H-out"></output></label>
+        <div class="control" data-guide="knob-H"><label for="H"><span>Confinement multiplier H</span> <output id="H-out"></output></label>
           <input type="range" id="H" min="0.5" max="2" step="0.01" value="1"></div>
-        <div class="control"><label for="Zeff"><span>Impurity content Z<sub>eff</sub></span> <output id="Zeff-out"></output></label>
+        <div class="control" data-guide="knob-Zeff"><label for="Zeff"><span>Impurity content Z<sub>eff</sub></span> <output id="Zeff-out"></output></label>
           <input type="range" id="Zeff" min="1" max="4" step="0.05" value="1.7"></div>
       </div>
 
       <div class="panel wide stack">
-        <div>
+        <div data-guide="readouts">
           <h2>Steady state (reduced 0D model) <span id="status" class="status">…</span></h2>
           <div class="grid tight">
             <div class="readout"><span class="label">Temperature T</span><span class="value" id="r-T">–</span><span class="unit">keV</span></div>
@@ -64,13 +68,13 @@
             <div class="readout"><span class="label">Confinement time τ<sub>E</sub></span><span class="value" id="r-tau">–</span><span class="unit">s</span></div>
           </div>
         </div>
-        <div>
+        <div data-guide="sb-gauges">
           <h2>Operating limits (1.0 = disruption)</h2>
           <div class="gauge-row"><span>Greenwald density</span><div class="gauge"><div class="bar" id="g-greenwald"></div></div><span class="num" id="g-greenwald-num">–</span></div>
           <div class="gauge-row"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="g-troyon"></div></div><span class="num" id="g-troyon-num">–</span></div>
           <div class="gauge-row"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="g-kink"></div></div><span class="num" id="g-kink-num">–</span></div>
         </div>
-        <div>
+        <div data-guide="map">
           <h2>Operating map: Q over density × heating</h2>
           <div id="map" class="plot"></div>
           <div class="muted small">Red shading: the reduced model flags a disruption or radiative collapse. White line: a stability limit reaches 1.0. Dot: current operating point.</div>
@@ -78,6 +82,21 @@
       </div>
     </div>
   </section>
+
+  <!-- guided study (guide.js): lesson rail, stage for the concept figures, first-visit choice -->
+  <aside id="guide-rail" class="rail" aria-label="Guided study" hidden></aside>
+  <div id="guide-stage" class="stage" hidden></div>
+  <div id="guide-welcome" class="welcome" hidden>
+    <div class="welcome-card">
+      <h1>FUSIONLAB<span class="dim"> · open-data tokamak twin</span></h1>
+      <p class="muted">Real shots of the MAST tokamak, beside the physics models, with learned corrections and their errors stated. Where would you like to start?</p>
+      <div class="welcome-pick">
+        <button type="button" data-mode="guided"><b>New to fusion</b><span>A guided study, about 15 minutes. What a tokamak is trying to do, what each knob means, and how to read a real shot. It runs on this very screen, so you finish knowing the app.</span><i>Start the guided study →</i></button>
+        <button type="button" data-mode="lab"><b>I know tokamaks</b><span>Straight to the lab: replay real shots, the 6,353-shot database, the what-if sandbox. Every panel has a <b>?</b> that opens its lesson if you want one.</span><i>Open the lab →</i></button>
+      </div>
+      <p class="small dim">You can switch at any time with Guided | Lab in the header.</p>
+    </div>
+  </div>
 
   <footer>Educational reduced model (0D power balance with published scaling laws, see docs/PHYSICS.md). It shows trends and does not forecast real machine performance.</footer>
 </body>

@@ -173,6 +173,9 @@ def main():
     ap.add_argument("--only", default="", help="comma-separated candidate names (default: all)")
     ap.add_argument("--ip-source", default="ip_measured", choices=("ip_measured", "ip"),
                     help="'ip' feeds EFIT's own fitted current: a leak, for the ablation only")
+    ap.add_argument("--inputs", default="all", choices=("all", "coils"),
+                    help="'coils' keeps only the PF/passive circuit currents and the Rogowski Ip: the FORWARD problem "
+                         "(what the operator sets -> psi), for the what-if spike. Use with --tag; never the shipped model")
     ap.add_argument("--tag", default="", help="ablation run: write to data/eq/runs/<tag>.* instead of models/")
     a = ap.parse_args()
     if a.tag:
@@ -200,6 +203,9 @@ def main():
     w_mean = np.nan_to_num(d["w"][masks["train"]]).mean(0)
     used = (w_mean >= a.min_efit_weight) | ~zero_missing                         # the weight rule applies to probes and loops only
     keep = np.flatnonzero((live >= LIVE_MIN) & (x_std > 0) & used)
+    if a.inputs == "coils":
+        assert a.tag, "--inputs coils is an experiment: give it a --tag so it cannot overwrite the shipped model"
+        keep = keep[keep >= eqs.N_PROBE + eqs.N_LOOP]                           # no magnetic measurements at all
     grp = lambda lo, hi: int(((keep >= lo) & (keep < hi)).sum())
     sensors = {
         "rule": f"input = sensor finite and (for probes/flux loops) non-zero in >= {LIVE_MIN:.0%} of training slices, with non-zero spread; "

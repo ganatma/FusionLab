@@ -34,7 +34,9 @@ No external services (no Postgres/Redis/etc.). The only setup prerequisite is `u
 ## Environment
 
 - `.env` (copied from `.env.example`): `FUSIONLAB_PORT=8000`, `FUSIONLAB_DEVICE=` (force `mps|cuda|cpu`; default auto).
-- No API keys exist or are needed. The demo runs fully offline after `make setup`.
+- Optional agent keys (`FUSIONLAB_AGENT_ENABLED`, `FUSIONLAB_AGENT_MODEL`, `ANTHROPIC_API_KEY`): all three are
+  unnecessary for the offline demo; the in-app agent stays off unless the flag and a key are both set.
+- No API keys are needed. The demo runs fully offline after `make setup`.
 
 ## Codebase map
 

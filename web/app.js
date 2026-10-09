@@ -90,6 +90,7 @@
       const controls = Object.fromEntries([['device', $('device').value], ...SLIDERS.map((k) => [k, val(k)])]);
       document.dispatchEvent(new CustomEvent('fusionlab:sim', { detail: { controls, result: r } }));
     } catch (e) {
+      if (seq !== simSeq) return;  // a newer request is in flight: its answer owns the status bar, not this stale failure
       $('status').textContent = 'API error: ' + e.message; $('status').className = 'status bad';
     }
   }
@@ -106,7 +107,7 @@
       const res = await fetch('/map?' + query(MAP_KEYS) + '&nx=30&ny=30');
       if (!res.ok) throw new Error(res.status);
       m = await res.json();
-    } catch (e) { $('map').textContent = 'API error: ' + e.message; return; }
+    } catch (e) { if (seq !== mapSeq) return; $('map').textContent = 'API error: ' + e.message; return; }  // a stale failure may not blank a fresh heatmap
     if (seq !== mapSeq) return;
     const css = getComputedStyle(document.documentElement);
     const fg = css.getPropertyValue('--fg').trim(), muted = css.getPropertyValue('--muted').trim();

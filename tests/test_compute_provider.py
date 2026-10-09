@@ -1,8 +1,10 @@
 """ComputeProvider seam: selection defaults to LocalProvider, config overrides parse, and LocalProvider's
 tasks return exactly what the wrapped functions return (offline, CPU)."""
 
+import ast
 import asyncio
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -156,3 +158,36 @@ def test_trace_fieldlines_passthrough_matches_direct_calls():
     assert task_summary == direct_summary
     assert out["device"] == str(tr.get("device", fieldlines.default_device()))
     assert out["psi_n_start"] == list(fieldlines.USD_PSI_N)
+
+
+# ---------------------------------------------------------------- the seam's core constraint, pinned statically
+_GPU_MODULES = {"torch", "warp", "fieldlines", "surrogate", "eq_surrogate"}
+
+
+def _enclosing_function(parents: dict, node) -> str | None:
+    while node is not None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+        node = parents.get(node)
+    return None
+
+
+def test_routers_reach_gpu_compute_only_through_the_provider():
+    """PR 1's core constraint, pinned statically so it cannot regress silently: every function in the two
+    router files reaches torch, Warp, or the modules that wrap them only through fusionlab.compute. The one
+    exemption is replay_usd, whose Warp-traced export writes a file this process serves back (a remote
+    provider would need artifact sync — design §9) and which already falls back to a plain stage."""
+    for name in ("api_replay", "api_virtual"):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "fusionlab" / f"{name}.py").read_text())
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            names = [a.name for a in node.names]
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names.append(node.module)
+            offenders += [n for n in names if n.split(".")[-1] in _GPU_MODULES
+                          and _enclosing_function(parents, node) != "replay_usd"]
+        assert offenders == [], f"{name} imports GPU modules outside the provider seam: {offenders}"

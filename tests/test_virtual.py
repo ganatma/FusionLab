@@ -4,7 +4,18 @@ import numpy as np
 import pytest
 
 from fusionlab import mast
-from fusionlab.virtual import CLOSURES, RESPONSE, Edit, baseline, gate, gated_laws, in_distribution, integrate, response_laws, run
+from fusionlab.virtual import (
+    CLOSURES,
+    RESPONSE,
+    Edit,
+    baseline,
+    gate,
+    gated_laws,
+    in_distribution,
+    integrate,
+    response_laws,
+    run,
+)
 
 
 def test_integrator_matches_the_analytic_rise_and_converges_first_order():
@@ -109,7 +120,7 @@ def test_virtual_endpoint_shapes_wording_and_gate():
     j = r.json()
     n = len(j["t_s"])
     assert len(j["anchored"]["lo"]) == len(j["blind"]["hi"]) == len(j["in_distribution"]) == len(j["limits"]["troyon"]) == n
-    assert all(lo <= hi for lo, hi in zip(j["anchored"]["lo"], j["anchored"]["hi"]))
+    assert all(lo <= hi for lo, hi in zip(j["anchored"]["lo"], j["anchored"]["hi"], strict=True))
     assert j["dW_flat_pct"]["anchored"][0] > 0 and j["would_cross_at_s"]["troyon"] is not None   # more power on a shot already over the limit
     text = (r.text + client.get("/virtual/gate").text).lower()
     assert "would cross" in text and "will disrupt" not in text and "predicts a disruption" not in text

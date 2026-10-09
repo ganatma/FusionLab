@@ -50,7 +50,7 @@ def load_dataset(ip_source: str = "ip_measured") -> dict:
             g = (z["major_radius"], z["z"])
             if grid is None:
                 grid = g
-            if z["psi"].shape[1:] != (eqs.NZ, eqs.NR) or not all(np.allclose(a, b) for a, b in zip(g, grid)):
+            if z["psi"].shape[1:] != (eqs.NZ, eqs.NR) or not all(np.allclose(a, b) for a, b in zip(g, grid, strict=True)):
                 print(f"  skip {p.name}: different grid")
                 continue
             n = z["ip"].size
@@ -110,7 +110,7 @@ def score(psi_hat: torch.Tensor, t: dict, orient: float) -> dict:
     pn, pn_hat = (psi - t["psi_axis"][:, None]) / den, (psi_hat - t["psi_axis"][:, None]) / den
     R, Z = t["R_m"].repeat(eqs.NZ), t["Z_m"].repeat_interleave(eqs.NR)           # flattened (Z, R) grid
     b = t["box"]
-    inside = (pn <= 1) & (R >= b[:, 0:1]) & (R <= b[:, 1:2]) & (Z >= b[:, 2:3]) & (Z <= b[:, 3:4])
+    inside = (pn <= 1) & (b[:, 0:1] <= R) & (b[:, 1:2] >= R) & (b[:, 2:3] <= Z) & (b[:, 3:4] >= Z)
     se, cnt = ((pn_hat - pn) ** 2 * inside).sum(1), inside.sum(1)
     ok = (cnt > 0) & torch.isfinite(se)
     out["psi_n_rmse_in_plasma"] = {"pooled": float((se[ok].sum() / cnt[ok].sum()).sqrt()), "per_slice": pct((se[ok] / cnt[ok]).sqrt()),
@@ -182,7 +182,8 @@ def main():
         (ROOT / "data" / "eq" / "runs").mkdir(parents=True, exist_ok=True)
         eqs.MODEL_FILE, eqs.METRICS_FILE = (ROOT / "data" / "eq" / "runs" / f"{a.tag}{ext}" for ext in (".pt", ".json"))
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    T = lambda v: torch.as_tensor(v, dtype=torch.float32, device=dev)
+    def T(v):
+        return torch.as_tensor(v, dtype=torch.float32, device=dev)
 
     d = load_dataset(a.ip_source)
     masks = split_by_block(d["shot"])
@@ -206,7 +207,8 @@ def main():
     if a.inputs == "coils":
         assert a.tag, "--inputs coils is an experiment: give it a --tag so it cannot overwrite the shipped model"
         keep = keep[keep >= eqs.N_PROBE + eqs.N_LOOP]                           # no magnetic measurements at all
-    grp = lambda lo, hi: int(((keep >= lo) & (keep < hi)).sum())
+    def grp(lo, hi):
+        return int(((keep >= lo) & (keep < hi)).sum())
     sensors = {
         "rule": f"input = sensor finite and (for probes/flux loops) non-zero in >= {LIVE_MIN:.0%} of training slices, with non-zero spread; "
                 "remaining dropouts (NaN, or exactly 0 on a probe/loop) are imputed with the training mean; EFIT weights are never network inputs"
@@ -248,14 +250,15 @@ def main():
     basis = evecs[:, -K_PCA:].flip(1).T.float().contiguous()                     # (k, 4225), orthonormal rows
     explained = float(evals[-K_PCA:].sum() / evals.sum())
     coef = {k: v @ basis.T for k, v in Y.items()}
-    decode = lambda c: psi_mean + psi_scale * (c @ basis)
+    def decode(c):
+        return psi_mean + psi_scale * (c @ basis)
     print(f"PCA k={K_PCA}: explained variance {explained:.6f}")
 
     # ---- baselines
     results = {"mean": score(psi_mean.expand_as(psi["test"]), tt["test"], orient)}
     results["efit_psi_axis_finder_floor_cm"] = pct(100 * torch.hypot(*[p - q for p, q in zip(
         eqs.magnetic_axis(psi["test"].reshape(-1, eqs.NZ, eqs.NR), orient * torch.sign(tt["test"]["ip"]), R_m, Z_m),
-        (tt["test"]["axis_r"], tt["test"]["axis_z"]))]))
+        (tt["test"]["axis_r"], tt["test"]["axis_z"]), strict=True)]))
     results[f"pca_truncation_floor_k{K_PCA}"] = score(decode(coef["test"]), tt["test"], orient)
 
     X1 = {k: torch.cat([v, torch.ones_like(v[:, :1])], 1) for k, v in xs.items()}
@@ -268,10 +271,12 @@ def main():
         ridge_val[lam] = float(((X1["val"].float() @ W.float() - Y["val"]) ** 2).mean())
     lam = min(ridge_val, key=ridge_val.get)
     W_ridge = torch.linalg.solve(XtX + lam * n_tr * eye, XtY).float()            # (d+1, 4225)
-    ridge_psi = lambda k: psi_mean + psi_scale * (X1[k].float() @ W_ridge)
+    def ridge_psi(k):
+        return psi_mean + psi_scale * (X1[k].float() @ W_ridge)
     results["ridge"] = score(ridge_psi("test"), tt["test"], orient)
     results["ridge"]["lambda"] = lam
-    val_rel = lambda p: float(((p - psi["val"]).norm(dim=1) / psi["val"].norm(dim=1)).median())
+    def val_rel(p):
+        return float(((p - psi["val"]).norm(dim=1) / psi["val"].norm(dim=1)).median())
     print("ridge lambda", lam, "test", results["ridge"]["rel_l2"], "val median rel L2", val_rel(ridge_psi("val")))
     lin_W = (W_ridge @ basis.T).contiguous()                                     # the same ridge fit in PCA space
 
@@ -334,7 +339,7 @@ def main():
     db = mast.load_db()                                                          # campaign of every shot actually used
     shots_used = np.unique(d["shot"])
     camp, n_camp = np.unique(db["campaign"][np.isin(db["shot_id"], shots_used)], return_counts=True)
-    campaigns = {f"M{c}": int(n) for c, n in zip(camp, n_camp)}
+    campaigns = {f"M{c}": int(n) for c, n in zip(camp, n_camp, strict=True)}
     beats = results["physicsnemo"]["rel_l2"]["median"] < results["ridge"]["rel_l2"]["median"]
     metrics = {
         "what": "Surrogate of EFIT's equilibrium reconstruction on MAST: magnetic measurements -> psi(R,Z) on EFIT's 65x65 grid. "

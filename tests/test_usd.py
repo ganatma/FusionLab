@@ -52,7 +52,7 @@ def test_plasma_is_time_sampled_with_constant_topology(stage, shot):
     for f in frames:
         assert np.isfinite(f).all()
         R = np.hypot(f[:, 0], f[:, 1])
-        assert 0.15 < R.min() and R.max() < 1.6 and np.abs(f[:, 2]).max() < 1.5    # inside the MAST vessel
+        assert R.min() > 0.15 and R.max() < 1.6 and np.abs(f[:, 2]).max() < 1.5    # inside the MAST vessel
 
 
 def test_vertices_do_not_swim(shot):

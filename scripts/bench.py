@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 import sys
 import time
 from pathlib import Path
@@ -14,7 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fusionlab import mast, surrogate  # noqa: E402
-from fusionlab.physics import Controls, DEVICES, replay, simulate  # noqa: E402
+from fusionlab.physics import DEVICES, Controls, replay, simulate  # noqa: E402
 
 
 def best(fn, repeat=5):
@@ -34,7 +35,8 @@ def main():
     nt = shot["t_s"].size
 
     # 1. replay: every time slice in one numpy call vs one call per slice
-    one = lambda i: {k: (v[i:i + 1] if isinstance(v, np.ndarray) and v.shape[:1] == (nt,) else v) for k, v in shot.items()}
+    def one(i):
+        return {k: (v[i:i + 1] if isinstance(v, np.ndarray) and v.shape[:1] == (nt,) else v) for k, v in shot.items()}
     slices = [one(i) for i in range(nt)]
     t_vec, t_loop = best(lambda: replay(shot)), best(lambda: [replay(s) for s in slices])
     rows.append((f"Replay of a real shot ({nt} EFIT slices), vectorized", f"{t_vec * 1e3:.2f} ms", f"{nt / t_vec:,.0f} slices/s"))
@@ -74,7 +76,7 @@ def main():
     d = DEVICES["iter"]
     for nx in (30, 100):
         n_ax, P_ax = np.meshgrid(np.linspace(0.05, 1.5, nx), np.linspace(0, d.P_aux_max, nx))
-        t_map = best(lambda: simulate(Controls(device="iter"), n=n_ax, P_aux=P_ax), repeat=3)
+        t_map = best(functools.partial(simulate, Controls(device="iter"), n=n_ax, P_aux=P_ax), repeat=3)
         rows.append((f"Sandbox operating map {nx}x{nx} (0D power-balance solve per point)", f"{t_map * 1e3:.0f} ms",
                      f"{nx * nx / t_map:,.0f} points/s"))
 

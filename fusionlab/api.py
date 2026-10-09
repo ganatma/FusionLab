@@ -11,7 +11,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from fusionlab.api_replay import router as replay_router, start_warm_up
+from fusionlab.api_replay import router as replay_router
+from fusionlab.api_replay import start_warm_up
 from fusionlab.api_virtual import router as virtual_router
 from fusionlab.physics import DEVICES, Controls, sigmav_dt, simulate
 

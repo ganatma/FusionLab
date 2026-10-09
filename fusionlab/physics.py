@@ -12,7 +12,7 @@ Units: lengths m, field T, current MA, density 1e20 m^-3, temperature keV, power
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
@@ -179,7 +179,8 @@ def _solve_T(d: Device, Ip, B, n, P_aux, H, Zeff, mode: str):
     Ip, B, n, P_aux, H, Zeff = np.broadcast_arrays(*map(np.asarray, (Ip, B, n, P_aux, H, Zeff)))
     V = volume(d.R, d.a, d.kappa)
     T = _T_GRID.reshape((1,) * Ip.ndim + (-1,))
-    ex = lambda x: np.asarray(x, dtype=float)[..., None]
+    def ex(x):
+        return np.asarray(x, dtype=float)[..., None]
     fn = tau_coeff_H if mode == "H" else tau_coeff_L
     C, alpha = fn(d, ex(Ip), ex(B), ex(n), ex(H))
     heat = ex(P_aux) + ALPHA_FRACTION * fusion_power(ex(n), T, V, ex(Zeff)) \

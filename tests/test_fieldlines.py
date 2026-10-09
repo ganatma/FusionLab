@@ -8,7 +8,8 @@ import pytest
 
 wp = pytest.importorskip("warp")
 
-from fusionlab import fieldlines as fl, mast  # noqa: E402
+from fusionlab import fieldlines as fl  # noqa: E402
+from fusionlab import mast  # noqa: E402
 
 SHOT = 30420  # ohmic, 700 kA
 wp.init()
@@ -91,7 +92,7 @@ def test_usd_stage_has_time_sampled_field_lines(shot, tmp_path):
         p = np.array(curves.GetPointsAttr().Get(k))
         assert p.shape == (counts.sum(), 3) and np.isfinite(p).all()
         R = np.hypot(p[:, 0], p[:, 1])
-        assert 0.15 < R.min() and R.max() < 2.0 and np.abs(p[:, 2]).max() < 2.1
+        assert R.min() > 0.15 and R.max() < 2.0 and np.abs(p[:, 2]).max() < 2.1
     cd = curves.GetPrim().GetCustomData()
     assert cd["provenance"] == fl.PROVENANCE and "NVIDIA Warp" in cd["provenance"] and "CC BY-SA 4.0" in cd["provenance"]
     assert UsdGeom.Mesh(stage.GetPrimAtPath("/MAST/Plasma")).GetPointsAttr().GetNumTimeSamples() == nt   # untouched

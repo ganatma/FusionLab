@@ -59,7 +59,8 @@ def fetch_db() -> dict:
     """Download the whole shot table (~64 MB, one request) and keep the numeric columns."""
     raw = urllib.request.urlopen(f"{REST}/ndjson/shots", timeout=180).read()
     rows = [json.loads(line) for line in raw.split(b"\n") if line.strip()]
-    num = lambda v: float(v) if isinstance(v, (int, float)) else np.nan
+    def num(v):
+        return float(v) if isinstance(v, (int, float)) else np.nan
     db = {name: np.array([num(r.get(key)) for r in rows]) * k for name, (key, k) in _DB_COLS.items()}
     db["B_T"] = np.abs(db["B_T"])
     db["P_nbi_MW"] = np.nan_to_num(db["P_nbi_MW"])    # null means no beams
@@ -110,7 +111,8 @@ def _pf_coils(g) -> dict:
     """PF coil cross-sections (one rectangle per winding-pack element) from the pf_active geometry arrays."""
     names = {k for k, _ in g.arrays()}
     stems = sorted(k[:-2] for k in names if k.endswith("_r") and {k[:-2] + s for s in ("_z", "_width", "_height")} <= names)
-    cat = lambda s: np.concatenate([np.atleast_1d(g[st + s][:]).astype(float) for st in stems]) if stems else np.zeros(0)
+    def cat(s):
+        return np.concatenate([np.atleast_1d(g[st + s][:]).astype(float) for st in stems]) if stems else np.zeros(0)
     return {"coil_R": cat("_r"), "coil_Z": cat("_z"), "coil_W": cat("_width"), "coil_H": cat("_height")}
 
 
@@ -133,15 +135,17 @@ def fetch_shot(shot_id: int) -> dict:
         jobs += [("wall", k) for k in ("limiter_r", "limiter_z")]
     src = {"eq": eq, "summary": summ, **{n: g[n] for n in ("thomson_scattering", "wall") if n in groups}}
     with ThreadPoolExecutor(16) as pool:  # S3 latency dominates; one request per array
-        raw = dict(zip(jobs, pool.map(lambda j: np.asarray(src[j[0]][j[1]][:], dtype=float), jobs)))
-    e = lambda k: raw[("eq", k)]
+        raw = dict(zip(jobs, pool.map(lambda j: np.asarray(src[j[0]][j[1]][:], dtype=float), jobs), strict=True))
+    def e(k):
+        return raw[("eq", k)]
 
     # EFIT arrays are (..., time). Keep slices with a plasma and a closed boundary.
     t_all, ip = e("time"), np.abs(e("ip")) * 1e-6
     keep = np.isfinite(ip) & (ip > IP_MIN_MA) & np.isfinite(e("q95")) & (np.isfinite(e("lcfs_r")).mean(0) > 0.5)
     keep &= e("plasma_energy") > 0   # EFIT returns negative energy on a few start-up slices
     t = t_all[keep]
-    sl = lambda k: e(k)[..., keep]
+    def sl(k):
+        return e(k)[..., keep]
 
     # Stored energy is EFM_PLASMA_ENERGY (3/2 ∫p dV), which matches the logged cpf_wmhd. The level-2 array
     # named "wmhd" is EFM_WPLASMD, the diamagnetic energy, ~3.5x larger on shot 30420. Do not use it.
@@ -168,12 +172,14 @@ def fetch_shot(shot_id: int) -> dict:
 
     # Raw magnetics EFIT was given, in archive units and in the order fusionlab.eq_surrogate.INPUT_NAMES expects:
     # 78 poloidal field probes [T], 46 flux loops [Wb], 101 PF/passive currents [A], Rogowski Ip [A]. (time, 226)
-    by_time = lambda k: (e(k) if e(k).shape[0] == t_all.size else e(k).T)[keep]
+    def by_time(k):
+        return (e(k) if e(k).shape[0] == t_all.size else e(k).T)[keep]
     out["eq_inputs"] = np.concatenate([by_time("b_field_pol_probe_measured"), by_time("flux_loop_measured"),
                                        by_time("pf_current"), e("ip_measured")[keep, None]], axis=1).astype(np.float32)
 
     ts = raw[("summary", "time")]
-    summary = lambda k, scale: _on(t, ts, raw[("summary", k)]) * scale if ("summary", k) in raw else np.full(t.shape, np.nan)
+    def summary(k, scale):
+        return _on(t, ts, raw[("summary", k)]) * scale if ("summary", k) in raw else np.full(t.shape, np.nan)
     out["n_e20"] = summary("line_average_n_e", 1e-20)
     out["P_ohm_MW"] = summary("power_ohm", 1e-6)
     out["P_rad_MW"] = summary("power_radiated", 1e-6)
@@ -215,7 +221,8 @@ _META_KEYS = {"campaign": "campaign", "heating": "heating", "timestamp": "timest
 def fetch_meta(shot_id: int) -> dict:
     """Logbook text and beam timing for one shot from the REST API."""
     d = json.load(urllib.request.urlopen(f"{REST}/json/shots/{shot_id}", timeout=60))
-    clean = lambda v: v.strip().strip("'").strip() if isinstance(v, str) else v
+    def clean(v):
+        return v.strip().strip("'").strip() if isinstance(v, str) else v
     return {"shot_id": int(shot_id), **{k: clean(d.get(src)) for k, src in _META_KEYS.items()}}
 
 

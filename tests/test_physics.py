@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from fusionlab.physics import DEVICES, Controls, simulate, sigmav_dt
+from fusionlab.physics import DEVICES, Controls, sigmav_dt, simulate
 
 
 def test_iter_baseline_is_calibrated():

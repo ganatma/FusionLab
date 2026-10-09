@@ -155,7 +155,7 @@
   const TIME_PLOTS = ['rp-w', 'rp-p', 'rp-ip', 'rp-lim'];
 
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
-  let shot = null, db = null, lines3dOk = true, use3 = false, playTimer = null, speed = 1;
+  let shot = null, db = null, lines3dOk = true, linesFail503 = 0, use3 = false, playTimer = null, speed = 1;
   let initP = null, loadSeq = 0;
   let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
   const lineCache = new Map();
@@ -176,7 +176,16 @@
   }
 
   // One init, however many callers: the tab listener, the first paint and the guided study all await the same promise.
-  function init() { return initP || (initP = start()); }
+  // A failed start() is NOT memoized: initP resets so the next tab entry retries, and the failure lands as a
+  // one-line error in the replay cell instead of silently blank panels.
+  function init() {
+    if (!initP) initP = start().catch(e => {
+      initP = null;
+      $('rp-attr').innerHTML = `<span>The replay panel needs the FusionLab server: ${esc(String(e && e.message || e))}. Switching tabs retries.</span>`;
+      throw e;   // callers decide: the listeners swallow it, select() turns it into a null state
+    });
+    return initP;
+  }
 
   async function start() {
     const list = await (await fetch('/shots')).json();
@@ -215,9 +224,11 @@
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te'].forEach(id => fit.observe($(id)));
-    fetch('/db').then(r => r.json()).then(j => { db = j; drawDb(); });
+    fetch('/db').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => { db = j; drawDb(); })
+      .catch(() => { $('tab-db').innerHTML = '<p class="muted">The shot database needs the FusionLab server (/db). Reload to retry.</p>'; });
     initDbSearch();
-    fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate);
+    fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate)
+      .catch(() => { const el = $('rp-sur'); if (el) el.innerHTML = '<p class="muted">The learned-correction table needs the FusionLab server (/surrogate). Reload to retry.</p>'; });
     const asked = +new URLSearchParams(location.search).get('shot');   // deep link: /?shot=30192
     const want = list.shots.find(s => s.shot_id === asked) || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
     if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
@@ -263,8 +274,19 @@
   };
   const getLines = (id, i) => {
     const key = id + ':' + i;
-    if (!lineCache.has(key)) lineCache.set(key, fetch(`/replay/${id}/fieldlines/${i}`).then(r => r.ok ? r.json() : null).catch(() => null)
-      .then(f => { if (f) linesNow.set(key, f.lines); return f; }));
+    if (!lineCache.has(key)) {
+      const p = fetch(`/replay/${id}/fieldlines/${i}`)
+        .then(r => { if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; } return r.json(); })
+        .then(f => { linesFail503 = 0; linesNow.set(key, f.lines); return f; })
+        .catch(e => {
+          if (lineCache.get(key) === p) lineCache.delete(key);   // a failed promise must not be cached: the next scrub or prefetch retries
+          // The server's 503 means "tracing unavailable" but also covers a transient GPU OOM, so the counter
+          // only lets a 503 that persists across attempts disable the 3D lines; everything else retries freely.
+          linesFail503 = e && e.status === 503 ? linesFail503 + 1 : 0;
+          return null;
+        });
+      lineCache.set(key, p);
+    }
     return lineCache.get(key);
   };
   // Warm the caches in the background, after the first slice is on screen, so playback does not wait on the network.
@@ -278,9 +300,21 @@
 
   async function loadShot(id) {
     const seq = ++loadSeq;
-    const next = await (await fetch('/replay/' + id)).json();
-    if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
-    shot = next;
+    try {
+      const r = await fetch('/replay/' + id);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const next = await r.json();
+      if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
+      shot = next;
+    } catch (e) {
+      // A failed switch must not desync the dropdown from the panels: put the select back on the loaded shot
+      // and surface the failure. The rejection is handled here (rendered), so callers see a settled state.
+      if (seq === loadSeq) {
+        $('rp-shot').value = shot ? shot.meta.shot_id : '';
+        $('rp-attr').innerHTML = `<span>Shot #${id} could not be loaded — the FusionLab server did not answer. Pick it again to retry.</span>`;
+      }
+      return;
+    }
     psiCache.clear(); lineCache.clear(); linesNow.clear();
     const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s;
     $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length} EFIT slices`;
@@ -419,13 +453,24 @@
   const WI_TRACES = ['What-if band (low)', 'What-if, anchored on the measurement', 'What-if, blind (no peeking at W)', 'Blind re-fly of the real programme'];
 
   async function whatIf(on) {
-    wi.on = !!on && !!shot;
-    $('rp-whatif').classList.toggle('on', wi.on);
-    $('rp-wi').hidden = !wi.on;
-    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
-    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
-    if (!wi.gate) {
-      wi.gate = await fetch('/virtual/gate').then(r => r.json());
+    const want = !!on && !!shot;
+    if (want && !wi.gate) {
+      // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
+      // leave the panel half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
+      // refetch on every later click and keep what-if broken until reload.
+      let gate = null;
+      try {
+        const r = await fetch('/virtual/gate');
+        const j = await r.json();
+        if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
+      } catch (e) { /* network failure: the error render just below carries it */ }
+      if (!gate) {
+        $('rp-wi').hidden = false;   // open the panel just enough to carry the one-line error
+        $('rp-whatif').classList.remove('on');
+        $('rp-wi-out').innerHTML = '<p class="muted">What-if needs the FusionLab server (/virtual/gate). Click What-if again to retry.</p>';
+        return;
+      }
+      wi.gate = gate;
       // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
       const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
       $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
@@ -438,6 +483,11 @@
       $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
       $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
+    wi.on = want;
+    $('rp-whatif').classList.toggle('on', wi.on);
+    $('rp-wi').hidden = !wi.on;
+    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
+    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
     askWhatIf();
   }
   function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
@@ -446,10 +496,21 @@
     if (!wi.on || !shot) return;
     labelsWhatIf();
     const id = shot.meta.shot_id, my = ++wi.seq, edit = Object.fromEntries(WI.map(([k]) => [k, +$('rp-wi-' + k).value]));
-    const r = await fetch('/virtual/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edit }) });
-    if (my !== wi.seq || !wi.on || !shot || shot.meta.shot_id !== id) return;
-    if (!r.ok) { $('rp-wi-out').innerHTML = `<p class="muted">${esc((await r.json()).detail || r.status)}</p>`; return; }
-    wi.res = await r.json();
+    const current = () => my === wi.seq && wi.on && !!shot && shot.meta.shot_id === id;
+    let r;
+    try {
+      r = await fetch('/virtual/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ edit }) });
+      if (!r.ok) {   // error bodies are not always JSON (a proxy's 502 page, a plain-text 500)
+        const d = await r.json().catch(() => null);
+        if (current()) $('rp-wi-out').innerHTML = `<p class="muted">${esc(d?.detail || r.status)}</p>`;
+        return;
+      }
+      wi.res = await r.json();
+    } catch (e) {
+      if (current()) $('rp-wi-out').innerHTML = '<p class="muted">What-if needs the FusionLab server: the re-fly request failed. Nudge a slider to retry.</p>';
+      return;
+    }
+    if (!current()) return;
     drawWhatIf(); scrub(+$('rp-t').value);
   }
 
@@ -526,7 +587,12 @@
   async function drawLines(i) {
     if (!lines3dOk) return;
     const id = shot.meta.shot_id, f = await getLines(id, i);
-    if (!f) { lines3dOk = false; $('rp-3d-panel').hidden = !use3; return; }   // no Warp on this machine: vessel and boundary only
+    if (!f) {
+      // Transient failures (a network blip, one 503) leave lines3dOk true and retry on the next scrub; only a
+      // 503 that persists across attempts means the server cannot trace at all (no Warp): vessel and boundary only.
+      if (linesFail503 < 3) return;
+      lines3dOk = false; $('rp-3d-panel').hidden = !use3; return;
+    }
     if (+$('rp-t').value !== i || shot.meta.shot_id !== id) return;
     if (use3) window.Vessel3D.setSlice(i, f.lines);
     else {
@@ -772,15 +838,19 @@
     init().then(() => {
       [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-3d', 'rp-db-tau', 'rp-db-ops'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
       if (use3) window.Vessel3D.resize();
-    });
+    }).catch(() => { /* the failure is already rendered in the replay cell; the next tab entry retries */ });
   });
   // Handle for the guided study (guide.js). Each call goes through the same paths as the toolbar controls.
   window.FusionLab = Object.assign(window.FusionLab || {}, { replay: {
     async select(id) {   // resolves once the shot is drawn; a no-op when it is already up
-      await init();
-      if (shot && shot.meta.shot_id === id) return sliceState(+$('rp-t').value);
-      play(false); $('rp-shot').value = id; await loadShot(id);
-      return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+      try {
+        await init();
+        if (shot && shot.meta.shot_id === id) return sliceState(+$('rp-t').value);
+        play(false); $('rp-shot').value = id; await loadShot(id);
+        return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+      } catch (e) {
+        return null;   // a failed init/load renders its own error in the replay cell; the guide gets null, not a rejection
+      }
     },
     scrubTo(where) {     // a slice index, or { t: seconds } for the nearest slice
       if (!shot) return;
@@ -795,5 +865,5 @@
     whatIf: on => whatIf(on),
   } });
 
-  if (!root.hidden) init();
+  if (!root.hidden) init().catch(() => { /* rendered in the replay cell; retried on the next tab entry */ });
 })();

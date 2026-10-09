@@ -16,6 +16,13 @@ Security shape of the confirm endpoint: the client names an action, it never sup
 The endpoint takes no body — the stored args were computed server-side through the route's own
 gates (the /virtual/{id} matched-pairs gate, the cache boundary), so a tampered client can only
 confirm or not; it cannot steer the edit.
+
+Protocol ingestion (blueprint "Protocol ingestion") shares the disabled gate and the event-free
+response shape: POST /agent/protocol/ingest reads a PDF (magic-byte check, size cap) or pasted
+text, makes the one schema-constrained extraction call (fusionlab/protocol.py), and answers with
+the draft protocol for review; POST /agent/protocols/{id}/accept promotes the reviewed draft to
+data/protocols/{id}.json and consumes it — accept makes no model call, so it works whenever a
+draft exists.
 """
 
 from __future__ import annotations
@@ -29,11 +36,11 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from fusionlab import agent
+from fusionlab import agent, protocol
 from fusionlab.agent_config import agent_settings
 
 router = APIRouter()
@@ -41,6 +48,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 ACTION_TTL_S = 600.0  # 10 minutes: a proposal dies at the next message or the TTL, whichever comes first
+
+DISABLED_DETAIL = ("the agent is disabled: set FUSIONLAB_AGENT_ENABLED=1 and ANTHROPIC_API_KEY "
+                   "in .env (the offline demo never needs them)")
 
 
 # ---------------------------------------------------------------- the pending-action store
@@ -161,8 +171,7 @@ def agent_chat(body: ChatIn) -> StreamingResponse:
     lives in the browser, and this new message expires any pending action before the turn runs."""
     settings = agent_settings()
     if not settings.enabled:
-        raise HTTPException(409, "the agent is disabled: set FUSIONLAB_AGENT_ENABLED=1 and ANTHROPIC_API_KEY "
-                                 "in .env (the offline demo never needs them)")
+        raise HTTPException(409, DISABLED_DETAIL)
     try:
         history = _validated_history(body.history)
     except ValueError as e:
@@ -191,3 +200,46 @@ def agent_confirm(action_id: str) -> dict[str, Any]:
         raise HTTPException(410, str(e)) from e
     return {"type": "action_applied", "action_id": action.action_id, "tool": action.tool,
             "args": action.args, "apply": action.apply}
+
+
+@router.post("/agent/protocol/ingest", status_code=201)
+def agent_protocol_ingest(file: UploadFile | None = None, text: str | None = Form(default=None)) -> dict[str, Any]:
+    """PDF-or-paste -> the one extraction call -> a draft protocol for review (blueprint "Protocol
+    ingestion"). Disabled mode answers before anything is read, because extraction is a model call.
+    The size cap is a request limit checked here; everything downstream (magic bytes, text layer,
+    schema, zero steps) is a clean refusal — nothing is written and nothing is obeyed."""
+    settings = agent_settings()
+    if not settings.enabled:
+        raise HTTPException(409, DISABLED_DETAIL)
+    if (file is None) == (text is None):
+        raise HTTPException(422, "provide exactly one of: a PDF file ('file') or pasted 'text'")
+    try:
+        if file is not None:
+            data = file.file.read(settings.max_upload_bytes + 1)
+            if len(data) > settings.max_upload_bytes:
+                raise HTTPException(413, f"the PDF exceeds the {settings.max_upload_bytes // (1024 * 1024)} MiB upload cap")
+            draft = protocol.ingest_pdf(data, filename=file.filename, settings=settings)
+        else:
+            payload = text or ""
+            if len(payload.encode("utf-8")) > settings.max_upload_bytes:
+                raise HTTPException(413, f"the pasted text exceeds the {settings.max_upload_bytes // (1024 * 1024)} MiB cap")
+            draft = protocol.ingest_text(payload, settings=settings)
+    except protocol.ExtractionRefused as e:
+        raise HTTPException(422, str(e)) from e
+    return {"protocol_id": draft.protocol_id, "status": "draft",
+            "protocol": draft.protocol.model_dump(mode="json")}
+
+
+@router.post("/agent/protocols/{protocol_id}/accept")
+def agent_protocol_accept(protocol_id: str) -> dict[str, Any]:
+    """Second phase of protocol review: promote the reviewed draft to data/protocols/{id}.json and
+    consume the draft (protocol.accept_draft is the only writer there). Unknown and malformed ids
+    answer 404 — the id is validated before it can name a path, so a tampered client cannot reach
+    the filesystem, only promote a draft that exists."""
+    try:
+        accepted = protocol.accept_draft(protocol_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return {"protocol_id": protocol_id, "status": "accepted", "protocol": accepted.model_dump(mode="json")}

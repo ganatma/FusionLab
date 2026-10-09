@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -15,6 +14,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from fusionlab import mast
+from fusionlab.compute import get_provider
+from fusionlab.compute import warm_up as compute_warm_up
 from fusionlab.physics import (
     BETA_N_LIMIT,
     LIMIT_NAMES,
@@ -126,13 +127,13 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
 @lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _lines(shot_id: int):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""
-    from fusionlab import fieldlines
     s = _shot(shot_id)
-    pts, tr = fieldlines.usd_lines(s)                       # (time, line, point, xyz)
-    qc = fieldlines.q_check(s)
+    provider = get_provider()
+    out = provider.result(provider.submit("trace_fieldlines", {"shot": s}))
+    pts, qc = out["pts"], out["q_check"]                    # (time, line, point, xyz)
     q = np.full(s["t_s"].size, np.nan)
     q[np.asarray(qc["slice"], dtype=int)] = qc["q_traced"]
-    return pts, q, qc["summary"], str(tr.get("device", fieldlines.default_device()))
+    return pts, q, qc["summary"], out["device"], out["psi_n_start"]
 
 
 @router.get("/replay/{shot_id}/fieldlines/{i}")
@@ -142,11 +143,10 @@ def replay_fieldlines(shot_id: int, i: int):
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
     try:
-        from fusionlab.fieldlines import USD_PSI_N
-        pts, q, summary, device = _lines(shot_id)
+        pts, q, summary, device, psi_n_start = _lines(shot_id)
     except Exception as e:   # no Warp / no usable device: the rest of the replay still works
         raise HTTPException(503, f"field-line tracing unavailable: {type(e).__name__}") from e
-    return {"i": i, "t_s": float(s["t_s"][i]), "psi_n_start": list(USD_PSI_N), "device": device,
+    return {"i": i, "t_s": float(s["t_s"][i]), "psi_n_start": list(psi_n_start), "device": device,
             "lines": [{"x": _j(line[:, 0], 3), "y": _j(line[:, 1], 3), "z": _j(line[:, 2], 3)} for line in pts[i]],
             "q95_traced": _j(q[i], 3), "q95_efit": _j(s["q95"][i], 3),
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
@@ -154,12 +154,12 @@ def replay_fieldlines(shot_id: int, i: int):
 
 @lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_model():
-    """Equilibrium surrogate + the shots it never saw. None when no trained model is on disk."""
-    from fusionlab import eq_surrogate
-    if not eq_surrogate.MODEL_FILE.exists():
+    """The equilibrium surrogate's holdout shots. None when no trained model is on disk."""
+    provider = get_provider()
+    if not provider.capabilities().get("eq_surrogate_available"):
         return None
-    held_out = set(json.loads(eq_surrogate.METRICS_FILE.read_text())["test_shot_ids"])
-    return eq_surrogate.load(), held_out
+    metrics = provider.result(provider.submit("model_metrics", {"model": "eq_surrogate"}))
+    return set(metrics["test_shot_ids"])
 
 
 @lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
@@ -168,14 +168,11 @@ def _eq_psi(shot_id: int):
     Normalised with EFIT's axis and boundary flux so the two maps share contour levels; error is on psi itself."""
     s = _shot(shot_id)
     try:
-        loaded = _eq_model()
-        if loaded is None or "eq_inputs" not in s:
+        held_out = _eq_model()
+        if held_out is None or "eq_inputs" not in s:
             return None
-        import torch
-        model, held_out = loaded
-        with torch.no_grad():
-            x = torch.as_tensor(s["eq_inputs"], dtype=torch.float32, device=model.x_mean.device)
-            psi = model(x).cpu().numpy()
+        provider = get_provider()
+        psi = provider.result(provider.submit("run_eq_surrogate", {"eq_inputs": s["eq_inputs"]}))   # one batch
     except Exception:   # the replay works without the surrogate
         logger.warning("equilibrium surrogate overlay failed; serving the replay without it", exc_info=True)
         return None
@@ -203,14 +200,12 @@ def _summary(s: dict, r: dict) -> dict:
 def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
     """IPB98 x learned correction on this shot, with its error beside plain IPB98 so it is never trusted blindly.
     Skipped when no trained model is on disk: the replay works without it."""
-    from fusionlab import (
-        surrogate,  # imports torch; keep it off the import path of the rest of the API
-    )
-    if not surrogate.available():
+    provider = get_provider()
+    if not provider.capabilities().get("surrogate_available"):
         return
-    Hc = surrogate.correction(surrogate.shot_features(s, r["P_loss_MW"]))
+    Hc = provider.result(provider.submit("run_surrogate_shot", {"shot": s, "P_loss_MW": r["P_loss_MW"]}))
     r["H_learned"], r["W_hybrid_MJ"] = Hc, r["W_H_MJ"] * Hc
-    m = json.loads(surrogate.METRICS_FILE.read_text())
+    m = provider.result(provider.submit("model_metrics", {"model": "surrogate"}))
     summary["tau_correction_held_out"] = s["meta"]["shot_id"] // m.get("block_size", 100) in m.get("held_out_blocks", [])
     ok = r["steady"] & np.isfinite(r["H98"]) & (r["H98"] > 0)
     if ok.any():
@@ -220,9 +215,7 @@ def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
 
 
 def _warm_up():
-    from fusionlab import surrogate
-    if surrogate.available():
-        surrogate.load()
+    compute_warm_up()   # the correction model (and torch) load here rather than on the first replay request
     try:   # builds/loads the Warp kernels and traces the landing shot
         _lines(30166)
     except Exception:
@@ -242,19 +235,19 @@ def start_warm_up():
 @router.get("/eq_surrogate")
 def eq_surrogate_metrics():
     """Holdout metrics of the equilibrium surrogate, as written by scripts/train_eq_surrogate.py."""
-    from fusionlab.eq_surrogate import METRICS_FILE
-    if not METRICS_FILE.exists():
-        raise HTTPException(404, "no metrics: run scripts/train_eq_surrogate.py")
-    return json.loads(METRICS_FILE.read_text())
+    try:
+        return get_provider().result(get_provider().submit("model_metrics", {"model": "eq_surrogate"}))
+    except FileNotFoundError:
+        raise HTTPException(404, "no metrics: run scripts/train_eq_surrogate.py") from None
 
 
 @router.get("/surrogate")
 def surrogate_metrics():
     """Holdout errors of the learned correction, as written by `python -m fusionlab.surrogate`."""
-    from fusionlab.surrogate import METRICS_FILE
-    if not METRICS_FILE.exists():
-        raise HTTPException(404, "no trained model: run `make train`")
-    return json.loads(METRICS_FILE.read_text())
+    try:
+        return get_provider().result(get_provider().submit("model_metrics", {"model": "surrogate"}))
+    except FileNotFoundError:
+        raise HTTPException(404, "no trained model: run `make train`") from None
 
 
 @lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart

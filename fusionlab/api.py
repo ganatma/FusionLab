@@ -43,8 +43,15 @@ def simulate_point(device: str = "iter", Ip: float | None = None, B: float | Non
     if device not in DEVICES:
         raise HTTPException(404, f"unknown device '{device}'")
     d = DEVICES[device]
-    c = Controls(device=device, Ip=Ip if Ip is not None else d.Ip_max, B=B if B is not None else d.B_max,
-                 n=n, P_aux=P_aux, H=H, Zeff=Zeff)
+    Ip, B = Ip if Ip is not None else d.Ip_max, B if B is not None else d.B_max
+    # Generous device-relative floors and caps: exclude overflow-scale inputs, never the UI's
+    # operating range (sliders span 0.1-1x Ip_max, 0.2-1x B_max, 0-1x P_aux_max, H 0.5-2, Zeff 1-4).
+    # Caps alone miss degenerate small inputs (n = 1e-300), floors alone miss 1e308-scale overflows.
+    if not (1e-3 * d.Ip_max <= Ip <= 10 * d.Ip_max and 1e-3 * d.B_max <= B <= 10 * d.B_max
+            and 1e-6 <= n <= 1e6 and 0 <= P_aux <= 10 * d.P_aux_max
+            and 1e-3 <= H <= 100 and 1 <= Zeff <= 1000):
+        raise HTTPException(422, "controls out of physical range")
+    c = Controls(device=device, Ip=Ip, B=B, n=n, P_aux=P_aux, H=H, Zeff=Zeff)
     return {"controls": c.__dict__, "result": simulate(c)}
 
 

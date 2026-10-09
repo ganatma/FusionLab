@@ -38,6 +38,7 @@
     .agent-rail { left: auto; right: 0; width: var(--agent-w); border-right: 0; border-left: 1px solid var(--line); z-index: 30; }
     .agent-rail .rail-head .tool { padding: 3px 8px; }
     .agent-rail .rail-head .tool.on { border-color: var(--accent); color: var(--accent); }
+    .agent-rail .rail-scroll { display: block; }   /* the guide rail's flex card layout shrink-wraps chat messages */
     .agent-msg { margin: 0 0 12px; }
     .agent-msg .who { font: 600 10.5px/1.6 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
     .agent-msg.user .who { color: var(--accent); }
@@ -57,6 +58,7 @@
     .agent-card .actions { display: flex; gap: 8px; margin-top: 8px; }
     .agent-card .note { margin-top: 8px; font-size: 12.5px; }
     .agent-card.applied { border-left-color: var(--ok); } .agent-card.applied .head { color: var(--ok); }
+    .agent-card button:disabled { opacity: .45; cursor: default; }   /* a settled card must look settled */
     .agent-card.gone { opacity: .55; border-left-color: var(--line); }
     .agent-card.failed { border-left-color: var(--bad); } .agent-card.failed .head { color: var(--bad); }
     .agent-composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
@@ -283,6 +285,13 @@
   }
 
   // ------------------------------------------------------------------ one turn over the SSE stream
+  // The model writes markdown (**bold**, headings); the panel renders plain text plus **bold** —
+  // the copy is data, so the text is escaped before any of it can become markup.
+  function renderMd(el, text) {
+    const esc = text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    el.innerHTML = esc.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  }
+
   async function sendTurn(message) {
     const text = String(message || '').trim();
     if (streaming || !text) return;
@@ -368,7 +377,7 @@
       errMsg = 'the chat request failed: ' + (e && e.message || e);
       note(errMsg, false);
     } finally {
-      if (acc) body.textContent = acc;
+      if (acc) renderMd(body, acc);
       finalize();
     }
   }

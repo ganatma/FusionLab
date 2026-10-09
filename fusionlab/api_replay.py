@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -101,11 +102,17 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
     if f".{fmt}" not in FORMATS:
         raise HTTPException(422, f"fmt must be one of {sorted(x.lstrip('.') for x in FORMATS)}")
     out = Path(__file__).resolve().parent.parent / "out" / f"mast_{shot_id}.{fmt}"
-    try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
-        from fusionlab.fieldlines import export_shot_with_field_lines
-        export_shot_with_field_lines(_shot(shot_id), out)
+    tmp = out.with_name(f".{out.stem}.tmp{os.getpid()}{out.suffix}")   # dotfile, pid-unique, extension kept (export_shot validates the suffix)
+    try:
+        try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
+            from fusionlab.fieldlines import export_shot_with_field_lines
+            export_shot_with_field_lines(_shot(shot_id), tmp)
+        except Exception:
+            export_shot(_shot(shot_id), tmp)
+        os.replace(tmp, out)   # atomic same-directory publish: readers only ever see a complete stage
     except Exception:
-        export_shot(_shot(shot_id), out)
+        tmp.unlink(missing_ok=True)
+        raise
     return FileResponse(out, filename=out.name, media_type="application/octet-stream")
 
 

@@ -2,8 +2,10 @@ import json
 import math
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from fusionlab import api_replay
 from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
@@ -179,6 +181,50 @@ def test_usd_download_is_a_usd_file():
     r = client.get("/replay/30420/usd")
     assert r.status_code == 200 and r.content[:8] == b"PXR-USDC" and len(r.content) > 100_000
     assert client.get("/replay/30420/usd", params={"fmt": "exe"}).status_code == 422
+
+
+def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
+    """Overlapping downloads used to share one in-place output path and readers mid-write got truncated
+    stages: both export phases must land on a same-directory temp, published with one os.replace."""
+    out = Path(api_replay.__file__).resolve().parent.parent / "out" / "mast_30420.usda"
+    out.parent.mkdir(exist_ok=True)
+    out.unlink(missing_ok=True)   # the assertion is that the endpoint creates the served path
+    seen = {}
+
+    def fake_with_lines(shot, path):
+        seen["tmp"] = Path(path)
+        seen["final_exists_mid_export"] = out.exists()
+        Path(path).write_bytes(b"stage-bytes")
+
+    def plain_must_not_run(shot, path):
+        raise AssertionError("plain export ran although the field-line export succeeded")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", fake_with_lines)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", plain_must_not_run)
+    r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+    assert r.status_code == 200 and r.content == b"stage-bytes"
+    assert seen["tmp"] != out and seen["tmp"].parent == out.parent   # temp, same dir -> atomic replace
+    assert seen["final_exists_mid_export"] is False                  # the served path exists only after publish
+    assert out.exists() and not seen["tmp"].exists()
+    assert not list(out.parent.glob(f".{out.stem}.tmp*"))            # no temp litter on the success path
+
+
+def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch):
+    """A download that fails mid-write must not damage the previous stage nor leave a temp behind."""
+    out = Path(api_replay.__file__).resolve().parent.parent / "out" / "mast_30420.usda"
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(b"previous-good-stage")
+
+    def dies_mid_write(shot, path):
+        Path(path).write_bytes(b"half-written")
+        raise RuntimeError("export exploded mid-write")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", dies_mid_write)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", dies_mid_write)
+    with pytest.raises(RuntimeError, match="export exploded"):
+        client.get("/replay/30420/usd", params={"fmt": "usda"})   # a total failure still surfaces as a 500
+    assert out.read_bytes() == b"previous-good-stage"             # the old artifact is untouched
+    assert not list(out.parent.glob(f".{out.stem}.tmp*"))         # temp unlinked on failure
 
 
 def test_fieldlines_slice_has_traced_q_next_to_efit():

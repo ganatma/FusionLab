@@ -1,6 +1,9 @@
 """GET /compute and the fallback runner (PR 3): the local shape, a mocked-SSH handshake, an unreachable
 worker as a status — never a 5xx — and provenance. No SSH; HTTP stays on httpx.MockTransport fakes."""
 
+import asyncio
+import sys
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -129,6 +132,16 @@ def test_unreachable_worker_is_a_status_not_an_error(clean, monkeypatch):
     body = r.json()
     assert body["reachable"] is False and body["fallback"] is True and body["worker"] is None
     assert "no route" in body["reason"]
+
+
+def test_missing_remote_extra_raises_the_install_hint(monkeypatch):
+    """Without the optional extra, configuring provider="ssh" is a status that names the fix —
+    not a bare ModuleNotFoundError and not a 5xx."""
+    monkeypatch.setitem(sys.modules, "asyncssh", None)   # forces `import asyncssh` to ImportError
+    session = object.__new__(ssh_mod._SshSession)        # no loop thread needed for this path
+    session.host = "gpu-lab"
+    with pytest.raises(ssh_mod.RemoteComputeError, match=r"uv sync --extra remote"):
+        asyncio.run(session._ensure_async())
 
 
 def test_dead_worker_between_handshakes_is_unreachable(clean, monkeypatch):

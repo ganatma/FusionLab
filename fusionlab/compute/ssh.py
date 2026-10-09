@@ -150,7 +150,13 @@ class _SshSession:
 
     # -- the asyncssh parts (the only coroutines in this module that touch SSH)
     async def _ensure_async(self) -> None:
-        import asyncssh  # optional extra: `uv sync --extra remote`
+        try:
+            import asyncssh  # optional extra: `uv sync --extra remote`
+        except ImportError:
+            raise RemoteComputeError(
+                "install",
+                "this machine has the SSH provider configured but not the 'remote' extra — run: uv sync --extra remote",
+            ) from None
 
         try:
             self._conn = await asyncssh.connect(self.host)   # honors ~/.ssh/config, agent, keys

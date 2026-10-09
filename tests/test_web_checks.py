@@ -78,3 +78,25 @@ def test_fire_and_forget_panels_render_their_errors():
     replay = _served("replay.js")
     assert ".catch(() => { $('tab-db').innerHTML" in replay
     assert ".catch(() => { const el = $('rp-sur'); if (el) el.innerHTML" in replay
+
+
+def test_compute_chip_polls_status_and_escapes_remote_strings():
+    """JS-08 (PR 3): the compute chip polls /compute with a timeout and renders remote-host names
+    through esc() — the handshake text comes from another machine, so treat it like shot data."""
+    replay = _served("replay.js")
+    assert "fetch('/compute'" in replay and "setInterval(pollCompute" in replay
+    for name in ("f.computed_on", "q.computed_on", "q.learned_computed_on"):
+        assert f"esc({name})" in replay
+
+
+def test_fallback_banner_is_dismissible_and_self_rearming():
+    """JS-09 (PR 3): the banner renders from the same /compute poll as the chip — dismissal is
+    per-visit, recovery re-arms it, and the server-provided reason is escaped."""
+    replay = _served("replay.js")
+    banner = replay.split("function renderFallback")[1].split("async function pollCompute")[0]
+    assert "fallbackSeen = false" in banner
+    assert "esc(s.reason || '')" in banner
+    assert "'rp-fallback-x'" in replay
+    # one notice per grid row: while the banner is up it takes the row from the onboarding hint
+    assert "$('rp-hint').hidden = show ? true : hintSeen()" in banner
+

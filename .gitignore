@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+fusionlab.toml
 data/*
 !data/README.md
 !data/shots/

@@ -14,8 +14,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from fusionlab import mast
-from fusionlab.compute import get_provider
 from fusionlab.compute import warm_up as compute_warm_up
+from fusionlab.compute.status import capabilities as compute_capabilities
+from fusionlab.compute.status import provenance, run_task
 from fusionlab.physics import (
     BETA_N_LIMIT,
     LIMIT_NAMES,
@@ -72,7 +73,8 @@ def replay_shot(shot_id: int, H: float = 1.0):
     eq = _eq_psi(shot_id)
     if eq is not None:
         summary["eq_surrogate"] = {"held_out": eq["held_out"], "median_rel_l2": round(float(np.median(eq["rel_l2"])), 4),
-                                   "p95_rel_l2": round(float(np.percentile(eq["rel_l2"], 95)), 4)}
+                                   "p95_rel_l2": round(float(np.percentile(eq["rel_l2"], 95)), 4),
+                                   "computed_on": eq.get("computed_on")}
     return {
         "meta": s["meta"], "attribution": ATTRIBUTION, "limit_names": LIMIT_NAMES, "summary": summary,
         "measured": {k: _j(s[k]) for k in _TRACES if k in s},
@@ -93,7 +95,8 @@ def replay_psi(shot_id: int, i: int):
     out = {"i": i, "t_s": float(s["t_s"][i]), "psi_n": _j(s["psi_n"][i], 3)}
     eq = _eq_psi(shot_id)
     if eq is not None:
-        out["surrogate"] = {"psi_n": _j(eq["psi_n"][i], 3), "rel_l2": _j(eq["rel_l2"][i], 4)}
+        out["surrogate"] = {"psi_n": _j(eq["psi_n"][i], 3), "rel_l2": _j(eq["rel_l2"][i], 4),
+                            "computed_on": eq.get("computed_on")}
     if "ts_R" in s:
         out["thomson"] = {"R": _j(s["ts_R"], 3), "Te_keV": _j(s["ts_Te_keV"][i], 3), "ne_e20": _j(s["ts_ne_e20"][i], 3)}
     return out
@@ -128,12 +131,12 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
 def _lines(shot_id: int):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""
     s = _shot(shot_id)
-    provider = get_provider()
-    out = provider.result(provider.submit("trace_fieldlines", {"shot": s}))
+    out = run_task("trace_fieldlines", {"shot": s})
+    where = provenance("trace_fieldlines").get("host")   # captured now: the cache keeps it honest
     pts, qc = out["pts"], out["q_check"]                    # (time, line, point, xyz)
     q = np.full(s["t_s"].size, np.nan)
     q[np.asarray(qc["slice"], dtype=int)] = qc["q_traced"]
-    return pts, q, qc["summary"], out["device"], out["psi_n_start"]
+    return pts, q, qc["summary"], out["device"], out["psi_n_start"], where
 
 
 @router.get("/replay/{shot_id}/fieldlines/{i}")
@@ -143,10 +146,11 @@ def replay_fieldlines(shot_id: int, i: int):
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
     try:
-        pts, q, summary, device, psi_n_start = _lines(shot_id)
+        pts, q, summary, device, psi_n_start, computed_on = _lines(shot_id)
     except Exception as e:   # no Warp / no usable device: the rest of the replay still works
         raise HTTPException(503, f"field-line tracing unavailable: {type(e).__name__}") from e
     return {"i": i, "t_s": float(s["t_s"][i]), "psi_n_start": list(psi_n_start), "device": device,
+            "computed_on": computed_on,
             "lines": [{"x": _j(line[:, 0], 3), "y": _j(line[:, 1], 3), "z": _j(line[:, 2], 3)} for line in pts[i]],
             "q95_traced": _j(q[i], 3), "q95_efit": _j(s["q95"][i], 3),
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
@@ -155,10 +159,9 @@ def replay_fieldlines(shot_id: int, i: int):
 @lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_model():
     """The equilibrium surrogate's holdout shots. None when no trained model is on disk."""
-    provider = get_provider()
-    if not provider.capabilities().get("eq_surrogate_available"):
+    if not compute_capabilities().get("eq_surrogate_available"):
         return None
-    metrics = provider.result(provider.submit("model_metrics", {"model": "eq_surrogate"}))
+    metrics = run_task("model_metrics", {"model": "eq_surrogate"})
     return set(metrics["test_shot_ids"])
 
 
@@ -171,8 +174,7 @@ def _eq_psi(shot_id: int):
         held_out = _eq_model()
         if held_out is None or "eq_inputs" not in s:
             return None
-        provider = get_provider()
-        psi = provider.result(provider.submit("run_eq_surrogate", {"eq_inputs": s["eq_inputs"]}))   # one batch
+        psi = run_task("run_eq_surrogate", {"eq_inputs": s["eq_inputs"]})   # one batch, where it ran last
     except Exception:   # the replay works without the surrogate
         logger.warning("equilibrium surrogate overlay failed; serving the replay without it", exc_info=True)
         return None
@@ -181,7 +183,8 @@ def _eq_psi(shot_id: int):
     def flat(a):
         return a.reshape(len(a), -1)
     rel = np.linalg.norm(flat(psi - psi_efit), axis=1) / np.linalg.norm(flat(psi_efit), axis=1)
-    return {"psi_n": (psi - ax) / (bd - ax), "rel_l2": rel, "held_out": shot_id in held_out}
+    return {"psi_n": (psi - ax) / (bd - ax), "rel_l2": rel, "held_out": shot_id in held_out,
+            "computed_on": provenance("run_eq_surrogate").get("host")}
 
 
 def _summary(s: dict, r: dict) -> dict:
@@ -200,12 +203,12 @@ def _summary(s: dict, r: dict) -> dict:
 def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
     """IPB98 x learned correction on this shot, with its error beside plain IPB98 so it is never trusted blindly.
     Skipped when no trained model is on disk: the replay works without it."""
-    provider = get_provider()
-    if not provider.capabilities().get("surrogate_available"):
+    if not compute_capabilities().get("surrogate_available"):
         return
-    Hc = provider.result(provider.submit("run_surrogate_shot", {"shot": s, "P_loss_MW": r["P_loss_MW"]}))
+    Hc = run_task("run_surrogate_shot", {"shot": s, "P_loss_MW": r["P_loss_MW"]})
+    summary["learned_computed_on"] = provenance("run_surrogate_shot").get("host")
     r["H_learned"], r["W_hybrid_MJ"] = Hc, r["W_H_MJ"] * Hc
-    m = provider.result(provider.submit("model_metrics", {"model": "surrogate"}))
+    m = run_task("model_metrics", {"model": "surrogate"})
     summary["tau_correction_held_out"] = s["meta"]["shot_id"] // m.get("block_size", 100) in m.get("held_out_blocks", [])
     ok = r["steady"] & np.isfinite(r["H98"]) & (r["H98"] > 0)
     if ok.any():
@@ -236,7 +239,7 @@ def start_warm_up():
 def eq_surrogate_metrics():
     """Holdout metrics of the equilibrium surrogate, as written by scripts/train_eq_surrogate.py."""
     try:
-        return get_provider().result(get_provider().submit("model_metrics", {"model": "eq_surrogate"}))
+        return run_task("model_metrics", {"model": "eq_surrogate"})
     except FileNotFoundError:
         raise HTTPException(404, "no metrics: run scripts/train_eq_surrogate.py") from None
 
@@ -245,7 +248,7 @@ def eq_surrogate_metrics():
 def surrogate_metrics():
     """Holdout errors of the learned correction, as written by `python -m fusionlab.surrogate`."""
     try:
-        return get_provider().result(get_provider().submit("model_metrics", {"model": "surrogate"}))
+        return run_task("model_metrics", {"model": "surrogate"})
     except FileNotFoundError:
         raise HTTPException(404, "no trained model: run `make train`") from None
 

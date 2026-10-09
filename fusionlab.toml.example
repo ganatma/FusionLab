@@ -1,0 +1,26 @@
+# FusionLab compute configuration (optional). Copy to fusionlab.toml at the repo root, beside .env.
+# Every value can also be set with a FUSIONLAB_* environment variable (see .env.example); the env
+# var wins over this file. Neither place ever holds a key, password, or token — the connection uses
+# the user's own SSH config, agent, and keys (design §8).
+
+[compute]
+# "local" (default): compute runs in this process — zero config, works offline.
+# "ssh": GPU-bound tasks run on your own host over SSH — see the README section
+# "User-provided compute (SSH)" and docs/COMPUTE.md.
+# provider = "local"
+
+[compute.ssh]
+# The host to run compute on. Any alias your ~/.ssh/config already resolves works as-is.
+# host = "ousaisrvr"
+
+# Where the FusionLab clone lives on that host; the worker autostarts from here.
+# remote_dir = "~/FusionLab"
+
+# Run `uv run fusionlab-worker` over SSH when no worker answers (default true).
+# autostart = true
+
+# Local end of the tunnel on this machine (default 8420).
+# port = 8420
+
+# Port the worker binds on the remote host, loopback-only (default 8420).
+# remote_port = 8420

@@ -47,3 +47,8 @@ class ComputeProvider(Protocol):
     def result(self, job: JobHandle) -> Any:
         """The job's payload, consumed once."""
         ...
+
+    def health(self) -> None:
+        """Raise if this backend cannot take work right now — the liveness probe GET /compute renders as
+        status. Local always answers; a remote provider probes its worker (design §7)."""
+        ...

@@ -1,8 +1,9 @@
 """Compute selection: the API imports this package and never torch or Warp.
 
 get_provider() returns the backend named by FUSIONLAB_COMPUTE_PROVIDER or by the optional fusionlab.toml
-([compute] provider = "local"), and defaults to LocalProvider — today's in-process behavior, so a bare
-checkout with no config runs exactly as before. SshProvider (PR 2) is registered behind a lazy import:
+at the repo root, beside .env ([compute] provider = "local"), and defaults to LocalProvider — today's
+in-process behavior, so a bare checkout with no config runs exactly as before. SshProvider (PR 2) is
+registered behind a lazy import:
 the default install never pulls asyncssh; selecting ssh requires `uv sync --extra remote` and a
 [compute.ssh] host (or FUSIONLAB_SSH_HOST) — keys and passwords never appear in config, by design.
 """
@@ -22,7 +23,7 @@ __all__ = ["ComputeProvider", "JobHandle", "LocalProvider", "get_provider", "pro
            "ssh_options", "warm_up"]
 
 DEFAULT_PROVIDER = "local"
-_TOML_PATH = Path(__file__).resolve().parent.parent / "fusionlab.toml"   # optional; the env var wins
+_TOML_PATH = Path(__file__).resolve().parent.parent.parent / "fusionlab.toml"   # repo root, beside .env; the env var wins
 
 _SSH_ENV_VARS: dict[str, str] = {   # FUSIONLAB_SSH_* overrides; keys map to SshProvider/_SshSession kwargs
     "host": "FUSIONLAB_SSH_HOST",

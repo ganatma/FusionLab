@@ -43,15 +43,52 @@ def _j(a, nd=4):
 
 
 @lru_cache(maxsize=16)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
-def _shot(shot_id: int) -> dict:
-    if shot_id not in mast.cached_shots():
-        raise HTTPException(404, f"shot {shot_id} is not in the local cache (scripts/fetch_mast.py {shot_id})")
+def _shot_cached(shot_id: int) -> dict:
     return mast.load_shot(shot_id)
+
+
+# One archive fetch per shot id, however many requests want it: compare fans out over ids in parallel.
+_inflight: dict[int, dict] = {}
+_inflight_lock = threading.Lock()
+_FETCH_WAIT_S = 600   # a fetch takes seconds to minutes; a waiter gives up and asks the client to retry
+
+
+def _shot(shot_id: int) -> dict:
+    """A cached shot from the process cache; an uncached catalog shot through load_shot()'s fetch-and-cache path."""
+    if shot_id in mast.cached_shots():
+        return _shot_cached(shot_id)
+    if not bool(np.any(_catalog()["shot_id"] == shot_id)):
+        raise HTTPException(404, f"shot {shot_id} is not in the MAST catalog (data/mast_db.npz)")
+    with _inflight_lock:
+        job = _inflight.get(shot_id)
+        if job is None:
+            job = _inflight[shot_id] = {"done": threading.Event(), "err": None}
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        if not job["done"].wait(_FETCH_WAIT_S):
+            raise HTTPException(503, f"shot {shot_id} is still being fetched from FAIR-MAST — retry shortly")
+        if job["err"]:
+            raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST: {job['err']}")
+    else:
+        try:
+            mast.load_shot(shot_id)   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
+        except Exception as e:
+            job["err"] = type(e).__name__
+            logger.warning("fetch of shot %s from FAIR-MAST failed", shot_id, exc_info=True)
+        finally:
+            with _inflight_lock:
+                _inflight.pop(shot_id, None)
+            job["done"].set()
+    if shot_id in mast.cached_shots():
+        return _shot_cached(shot_id)
+    raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST")
 
 
 @router.get("/shots")
 def shots():
-    """Cached shots with their logbook text. The app never fetches from the network."""
+    """Cached shots with their logbook text. Uncached catalog shots are fetched on demand by /replay/{id}."""
     out = []
     for sid in mast.cached_shots():
         s = _shot(sid)

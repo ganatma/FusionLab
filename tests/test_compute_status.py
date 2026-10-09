@@ -89,7 +89,9 @@ class StubRemote:
 
 @pytest.fixture()
 def clean(monkeypatch):
-    """No selected provider, no status state leaking between tests (and out of them)."""
+    """No selected provider, no status state leaking between tests (and out of them). The env pin
+    keeps the suite hermetic: a user's repo-root fusionlab.toml must not flip these tests to ssh."""
+    monkeypatch.setenv("FUSIONLAB_COMPUTE_PROVIDER", "local")
     monkeypatch.setattr(compute, "_provider", None)
     status._reset_for_tests()
     yield

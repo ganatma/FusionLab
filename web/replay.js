@@ -236,10 +236,13 @@
     [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => { db = j; drawDb(); })
       .catch(() => { $('tab-db').innerHTML = '<p class="muted">The shot database needs the FusionLab server (/db). Reload to retry.</p>'; });
+    // Snapshot the shared link BEFORE initDbSearch(): its searchDb() rewrite canonicalizes ?compare= into
+    // numeric order while no live compare exists yet, which silently re-points the reference — the first id
+    // of a shared link is the reference and must survive the boot.
+    const q = new URLSearchParams(location.search);
     initDbSearch();
     fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate)
       .catch(() => { const el = $('rp-sur'); if (el) el.innerHTML = '<p class="muted">The learned-correction table needs the FusionLab server (/surrogate). Reload to retry.</p>'; });
-    const q = new URLSearchParams(location.search);
     const asked = +q.get('shot');   // deep link: /?shot=30192
     const cmpIds = (q.get('compare') || '').split(',').map(Number).filter(Boolean);   // deep link: /?compare=30166,30420
     // An uncached ?shot= id is replayable too — the dropdown list only knows the shipped cache.
@@ -751,7 +754,7 @@
     if (srchSel.size) {
       const sel = [...srchSel];
       const ref = cmp.on && srchSel.has(cmp.ref) ? cmp.ref : null;   // a live compare keeps its reference first in the URL
-      shared.set('compare', (ref != null ? [ref, ...sel.filter(x => x !== ref).sort((a, b) => a - b)] : sel.sort((a, b) => a - b)).join(','));
+      shared.set('compare', (ref != null ? [ref, ...sel.filter(x => x !== ref)] : sel).join(','));   // selection order: tick order, or the shared link's reference-first order
     }
     const qs = shared.toString();
     history.replaceState(null, '', qs ? '?' + qs : location.pathname);
@@ -887,7 +890,7 @@
 
   const cmpReadyIds = () => cmp.ids.filter(id => cmp.st.get(id) === 'ready' && cmpData(id));
 
-  const cmpUrlParam = () => [cmp.ref, ...cmp.ids.filter(id => id !== cmp.ref).sort((a, b) => a - b)].join(',');
+  const cmpUrlParam = () => [cmp.ref, ...cmp.ids.filter(id => id !== cmp.ref)].join(',');
 
   function cmpUrl() {   // the selection lives in the URL, reference first: the shared link reproduces the comparison
     const shared = new URLSearchParams(location.search);

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from fusionlab.api import app
+from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
 WEB = Path(__file__).resolve().parents[1] / "web"
@@ -78,6 +78,24 @@ def test_map_caps_grid_and_rejects_bad_input():
     assert m["nx"] == 100 and len(m["Q"]) == 3 and len(m["Q"][0]) == 100
     assert client.get("/map", params={"device": "nope"}).status_code == 404
     assert client.get("/map", params={"device": "iter", "Ip": 0}).status_code == 422
+
+
+def test_nodotfiles_lookup_path():
+    """Unit: a dotted component anywhere in the path reports Starlette's "not found" shape;
+    a normal asset still resolves."""
+    static = NoDotfiles(directory=WEB)
+    for dotted in (".env", "../.env", "vendor/.hidden/x"):
+        assert static.lookup_path(dotted) == ("", None), dotted
+    resolved, stat = static.lookup_path("app.js")
+    assert Path(resolved).name == "app.js" and stat is not None
+
+
+def test_static_dotfile_paths_404_not_403():
+    """A dotfile — plain, or reached via an encoded traversal — 404s (the house rule forbids
+    403 existence oracles), while normal assets keep serving."""
+    for path in ("/static/.env", "/static/%2e%2e/.env"):
+        assert client.get(path).status_code == 404, path
+    assert client.get("/static/app.js").status_code == 200
 
 
 def test_map_matches_simulate_at_a_grid_point():

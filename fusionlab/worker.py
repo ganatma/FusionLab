@@ -80,10 +80,10 @@ class RunSurrogateInputs(BaseModel):
 
 
 class RunSurrogateShotInputs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     shot: dict[str, Any]
-    P_loss_MW: float
+    P_loss_MW: float | np.ndarray   # the replayed loss trace is per-slice (physics.replay)
 
 
 class RunEqSurrogateInputs(BaseModel):
@@ -409,6 +409,14 @@ async def job_events(job_id: str) -> StreamingResponse:
             await asyncio.sleep(0.1)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/v1/jobs/{job_id}")
+async def job_status(job_id: str) -> dict:
+    """Job state without the payload — SshProvider.result() polls this while the job runs."""
+    job = _JOBS.get(job_id)
+    return {"job_id": job_id, "task": job.task, "state": job.state,
+            "error": job.error, "error_type": job.error_type}
 
 
 @app.get("/v1/jobs/{job_id}/result")

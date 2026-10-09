@@ -145,7 +145,7 @@ flowchart LR
   F --> U
   F --> A
   M --> U[usd_export.py<br/>time-sampled OpenUSD stage]
-  R --> A[FastAPI<br/>/shots /replay /db /surrogate /simulate /map]
+  R --> A[FastAPI<br/>/shots /replay /db /db/search /surrogate /simulate /map]
   S --> A
   U --> A
   E[physics.simulate<br/>0D power balance<br/>ITER · SPARC · JET · DIII-D · MAST] --> A

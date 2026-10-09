@@ -57,7 +57,8 @@ _DB_COLS = {
 
 def fetch_db() -> dict:
     """Download the whole shot table (~64 MB, one request) and keep the numeric columns."""
-    raw = urllib.request.urlopen(f"{REST}/ndjson/shots", timeout=180).read()
+    # B310: scheme and host are the module's fixed https REST constant, not user input
+    raw = urllib.request.urlopen(f"{REST}/ndjson/shots", timeout=180).read()   # nosec B310
     rows = [json.loads(line) for line in raw.split(b"\n") if line.strip()]
     def num(v):
         return float(v) if isinstance(v, (int, float)) else np.nan
@@ -220,7 +221,8 @@ _META_KEYS = {"campaign": "campaign", "heating": "heating", "timestamp": "timest
 
 def fetch_meta(shot_id: int) -> dict:
     """Logbook text and beam timing for one shot from the REST API."""
-    d = json.load(urllib.request.urlopen(f"{REST}/json/shots/{shot_id}", timeout=60))
+    # B310: fixed https REST constant; shot_id is an int
+    d = json.load(urllib.request.urlopen(f"{REST}/json/shots/{shot_id}", timeout=60))   # nosec B310
     def clean(v):
         return v.strip().strip("'").strip() if isinstance(v, str) else v
     return {"shot_id": int(shot_id), **{k: clean(d.get(src)) for k, src in _META_KEYS.items()}}

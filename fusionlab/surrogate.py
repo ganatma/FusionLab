@@ -195,8 +195,10 @@ def train(showcase=(27257, 29823, 30166, 30192, 30420)) -> dict:
         for name, i in (("session_block", info_A), ("temporal_M9", info_B))}
 
     MODELS.mkdir(exist_ok=True)
-    torch.save({"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": bundle["mu"], "sd": bundle["sd"],
-                "n_in": len(VARS) + 1}, MODEL_FILE)
+    # mu/sd are saved as tensors so the checkpoint contains only the torch.load weights_only-safe subset
+    # (no pickled numpy): the loader can then refuse arbitrary object types (bandit B614).
+    torch.save({"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": torch.as_tensor(bundle["mu"]),
+                "sd": torch.as_tensor(bundle["sd"]), "n_in": len(VARS) + 1}, MODEL_FILE)
     METRICS_FILE.write_text(json.dumps(metrics, indent=1))
     return metrics
 
@@ -213,10 +215,10 @@ def load():
     """Trained network + input normalisation, read once."""
     global _loaded
     if _loaded is None:
-        ck = torch.load(MODEL_FILE, map_location="cpu", weights_only=False)
+        ck = torch.load(MODEL_FILE, map_location="cpu", weights_only=True)   # checkpoint is tensor-only (B614)
         net = _net(ck["n_in"])
         net.load_state_dict(ck["state"])
-        _loaded = (net.eval(), ck["mu"], ck["sd"])
+        _loaded = (net.eval(), ck["mu"].numpy(), ck["sd"].numpy())
     return _loaded
 
 

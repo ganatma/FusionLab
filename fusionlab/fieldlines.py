@@ -372,7 +372,8 @@ def first_launch_s(device: str, cold: bool) -> float:
     cold=True points Warp at an empty throw-away kernel cache, so the kernel is compiled from source;
     cold=False uses the normal cache (what a user sees on every run after the first). The difference is the compile.
     """
-    import subprocess
+    # B404: benchmark helper runs this repo's own interpreter on a module-built snippet
+    import subprocess  # nosec B404
     import tempfile
 
     code = ("import time\nfrom fusionlab import mast, fieldlines as fl\ns = mast.load_shot(mast.cached_shots()[0])\n"
@@ -382,7 +383,8 @@ def first_launch_s(device: str, cold: bool) -> float:
         # cold = no Warp kernel cache AND no NVIDIA driver JIT cache (which otherwise hides ~2 s of the CUDA build)
         env = {**os.environ, "WARP_CACHE_PATH": tmp, "CUDA_CACHE_DISABLE": "1"} if cold else dict(os.environ)
         for _ in range(1 if cold else 2):          # cached: the first run primes the cache, the second is the number
-            res = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, check=True)
+            # B603: fixed argv (sys.executable + module-built code), no shell, no untrusted input
+            res = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, check=True)  # nosec B603
     return float(res.stdout.strip().splitlines()[-1])
 
 

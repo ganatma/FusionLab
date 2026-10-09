@@ -70,7 +70,7 @@ shots (`make data`, `fetch_mast.py`) or retraining (`make train`) to pick up the
 
 ## Contents
 
-[Quick start](#quick-start) · [Why](#why) · [What's in it](#whats-in-it) · [A five-minute demo](#a-five-minute-demo) · [Guided and Lab modes](#guided-and-lab-modes) · [Virtual shot](#virtual-shot) · [What it found on real data](#what-it-found-on-real-data) · [Architecture](#architecture) · [Performance](#performance) · [Data & licence](#data--licence) · [Limitations](#limitations) · [Security posture](#security-posture) · [Credit](#credit)
+[Quick start](#quick-start) · [Why](#why) · [What's in it](#whats-in-it) · [A five-minute demo](#a-five-minute-demo) · [Guided and Lab modes](#guided-and-lab-modes) · [Virtual shot](#virtual-shot) · [What it found on real data](#what-it-found-on-real-data) · [Architecture](#architecture) · [Performance](#performance) · [Data & licence](#data--licence) · [Limitations](#limitations) · [Security posture](#security-posture) · [Optional AI agent](#optional-ai-agent) · [Credit](#credit)
 
 ## Why
 
@@ -230,6 +230,19 @@ FusionLab is a single-user tool with **no authentication**, by design: everythin
 (CC BY-SA 4.0), and it needs no API keys ([.env.example](.env.example)). `make dev` starts uvicorn with no `--host`
 flag, so the server binds to `127.0.0.1` and is reachable only from your own machine. If you deliberately expose the
 app on a network, add an authentication gate of your own first — none exists in this repository.
+
+## Optional AI agent
+
+There is also a chat panel — off unless you turn it on. Enabled (`FUSIONLAB_AGENT_ENABLED=1` and an
+`ANTHROPIC_API_KEY` in `.env`), it answers from the same data the app serves: search the 15,969-shot catalog in
+plain language (*beam-heated shots above 4 MA in campaign M8* — value sorting the UI has no way to do), ask why
+a what-if slider is admissible or refused, or upload a paper and get a step-by-step protocol draft to review and
+accept into `data/protocols/`. It proposes, you confirm: every state-changing action arrives as a card that shows
+its arithmetic (*3.0 MW = 0.60 × the shot's maximum beam power*) and nothing applies until you accept it, with the
+matched-pairs evidence gate enforced server-side exactly as in the virtual-shot UI. Without those two settings the
+panel is never rendered, `/static/agent.js` answers 404, and no key is needed — the offline demo is unchanged.
+Agent answers come from the app's own tools, *compared with* MAST data, never validated against it and never
+predictive; limit crossings are distances, not forecasts.
 
 ## Credit
 

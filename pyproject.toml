@@ -10,7 +10,7 @@ dependencies = [
   "torch>=2.3",
   "nvidia-physicsnemo>=1.0",
   "usd-core>=26.8",
-  "zarr>=3.0",
+  "zarr>=3.1.6",
   "s3fs>=2026.9.0",
 ]
 

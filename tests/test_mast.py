@@ -60,6 +60,26 @@ def test_savez_writes_the_exact_temp_path(tmp_path):
         assert z["a"].tolist() == [0, 1, 2]
 
 
+def test_load_shot_fetches_uncached_catalog_shot_and_caches_it(monkeypatch, tmp_path):
+    """A2 criterion 4: load_shot() is the app's only fetch path — cache-then-archive, mocked offline here."""
+    uncached = next(i for i in sorted(int(x) for x in mast.load_db()["shot_id"]) if i > 30000 and i not in mast.cached_shots())
+    real = mast.load_shot(30420)
+    calls = []
+
+    def fake_fetch(shot_id):
+        calls.append(int(shot_id))
+        return {**real, "meta": {**real["meta"], "shot_id": int(shot_id)}}
+
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", fake_fetch)
+    s = mast.load_shot(uncached)
+    assert calls == [uncached]
+    assert s["meta"]["shot_id"] == uncached
+    assert np.array_equal(s["Ip_MA"], real["Ip_MA"])          # fetched shots carry identical provenance and units
+    assert uncached in mast.cached_shots() and (tmp_path / f"{uncached}.npz").exists()
+    assert mast.load_shot(uncached)["meta"]["shot_id"] == uncached and calls == [uncached]   # second call: pure cache hit
+
+
 def test_shot_table_cleaning():
     db = mast.load_db()
     c = mast.clean_db(db)

@@ -13,7 +13,7 @@ time-sampled OpenUSD stages. FastAPI backend serves a static, no-build web UI.
 | API | FastAPI + Uvicorn (`fusionlab.api:app`), port **8000** |
 | Frontend | Static `web/` (HTML/JS, Plotly + three.js vendored, no build step, offline) |
 | ML / GPU | torch, nvidia-physicsnemo, warp-lang — GPU **optional**; runs CPU-only with a benign Warp CUDA warning |
-| Data | UKAEA FAIR-MAST cache ships in-repo (`data/shots/*.npz`, `data/mast_db.npz`) — no network, no DB, no secrets |
+| Data | UKAEA FAIR-MAST cache ships in-repo (`data/shots/*.npz`, `data/mast_db.npz`) — no network, no DB, no secrets; compare fetches uncached catalog shots on demand via `/replay/{id}` (cache-then-S3) |
 
 ## Commands (all verified 2026-10-09)
 

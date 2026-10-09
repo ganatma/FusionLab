@@ -187,6 +187,13 @@ Code: MIT.
 
 The full list and next steps are in [`docs/RESULTS.md`](docs/RESULTS.md#known-limitations--next-steps).
 
+## Security posture
+
+FusionLab is a single-user tool with **no authentication**, by design: everything it serves is open FAIR-MAST data
+(CC BY-SA 4.0), and it needs no API keys ([.env.example](.env.example)). `make dev` starts uvicorn with no `--host`
+flag, so the server binds to `127.0.0.1` and is reachable only from your own machine. If you deliberately expose the
+app on a network, add an authentication gate of your own first — none exists in this repository.
+
 ## Credit
 
 [fusionsimulator.io](https://fusionsimulator.io) (Daniel Burgess, Columbia Fusion Research Center) was our reference

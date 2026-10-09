@@ -21,6 +21,38 @@ def test_simulate_defaults_and_unknown_device():
     assert client.get("/simulate", params={"device": "nope"}).status_code == 404
 
 
+def test_simulate_rejects_overflow_scale_inputs():
+    """Extreme finite floats once overflowed the engine into inf and rendered as an unhandled 500."""
+    for params in ({"device": "iter", "Ip": 1e308, "H": 1e308},   # overflow-scale: the reproduced 500
+                   {"device": "iter", "n": 1e-300}):              # degenerate: positivity alone would miss it
+        assert client.get("/simulate", params=params).status_code == 422
+
+
+def test_simulate_every_device_default_is_strictly_finite_json():
+    for device in client.get("/devices").json():
+        resp = client.get("/simulate", params={"device": device})
+        assert resp.status_code == 200, device
+        json.loads(resp.text, parse_constant=_reject_constant)  # NaN / Infinity would raise here
+
+
+def test_simulate_keeps_the_ui_operating_range():
+    """Slider corners from web/app.js (0.1-1x Ip_max, 0.2-1x B_max, 0-1x P_aux_max, 0.05-1.3x n_GW,
+    H 0.5-2, Zeff 1-4) must still be accepted: the bounds exclude overflow-scale inputs, never
+    real operating points."""
+    for name, d in client.get("/devices").json().items():
+        n_gw = 0.1 * d["Ip_max"] / (math.pi * d["a"] ** 2)  # n slider's low end sits at the Ip floor
+        params = {"Ip": 0.1 * d["Ip_max"], "B": 0.2 * d["B_max"], "n": 0.05 * n_gw,
+                  "P_aux": 0, "H": 0.5, "Zeff": 1.0}
+        resp = client.get("/simulate", params=params)
+        assert resp.status_code == 200, (name, params)
+
+
+def test_simulate_non_finite_result_is_422_not_500(monkeypatch):
+    """Second layer: a non-finite result must surface as 422, never as the JSON encoder's 500."""
+    monkeypatch.setattr("fusionlab.api.simulate", lambda c: {"Q": float("inf"), "hmode": True})
+    assert client.get("/simulate", params={"device": "iter"}).status_code == 422
+
+
 def test_index_served():
     assert "FusionLab" in client.get("/").text
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -43,9 +44,16 @@ def simulate_point(device: str = "iter", Ip: float | None = None, B: float | Non
     if device not in DEVICES:
         raise HTTPException(404, f"unknown device '{device}'")
     d = DEVICES[device]
-    c = Controls(device=device, Ip=Ip if Ip is not None else d.Ip_max, B=B if B is not None else d.B_max,
-                 n=n, P_aux=P_aux, H=H, Zeff=Zeff)
-    return {"controls": c.__dict__, "result": simulate(c)}
+    Ip, B = Ip if Ip is not None else d.Ip_max, B if B is not None else d.B_max
+    # Generous device-relative floors and caps: exclude overflow-scale inputs, never the UI's
+    # operating range (sliders span 0.1-1x Ip_max, 0.2-1x B_max, 0-1x P_aux_max, H 0.5-2, Zeff 1-4).
+    # Caps alone miss degenerate small inputs (n = 1e-300), floors alone miss 1e308-scale overflows.
+    if not (1e-3 * d.Ip_max <= Ip <= 10 * d.Ip_max and 1e-3 * d.B_max <= B <= 10 * d.B_max
+            and 1e-6 <= n <= 1e6 and 0 <= P_aux <= 10 * d.P_aux_max
+            and 1e-3 <= H <= 100 and 1 <= Zeff <= 1000):
+        raise HTTPException(422, "controls out of physical range")
+    c = Controls(device=device, Ip=Ip, B=B, n=n, P_aux=P_aux, H=H, Zeff=Zeff)
+    return {"controls": c.__dict__, "result": _strict_json(simulate(c))}
 
 
 def _grid_json(x, shape):
@@ -56,6 +64,18 @@ def _grid_json(x, shape):
     out = x.astype(object)
     out[~np.isfinite(x)] = None
     return out.tolist()
+
+
+def _strict_json(x):
+    """Scalar counterpart of _grid_json: a non-finite number must reach the client as a 422,
+    never as Starlette's allow_nan=False encoder raising at render time (an unhandled 500)."""
+    if isinstance(x, dict):
+        return {k: _strict_json(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_strict_json(v) for v in x]
+    if isinstance(x, float) and not math.isfinite(x):
+        raise HTTPException(422, "result contains a non-finite value")
+    return x
 
 
 MAP_KEYS = ("Q", "T_keV", "P_fus_MW", "tau_E_s", "f_greenwald", "beta_N", "q95", "worst_limit",

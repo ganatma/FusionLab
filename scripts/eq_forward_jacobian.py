@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fusionlab import eq_surrogate as eqs  # noqa: E402
 from fusionlab import mast  # noqa: E402
+from fusionlab.atomicio import atomic_write  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 FORWARD = ROOT / "data" / "eq" / "runs" / "forward.pt"
@@ -143,6 +144,18 @@ def verify_map(shot_id: int = 30166) -> dict:
     return out
 
 
+def load_spike_metrics(path: Path) -> dict:
+    """Existing OUT contents to merge into; a truncated file (an earlier interrupted write) counts as absent.
+
+    The tolerant read self-heals a checkout an interrupted run already damaged; the atomic write below
+    prevents recurrence.
+    """
+    try:
+        return json.loads(path.read_text()) if path.exists() else {}
+    except json.JSONDecodeError:
+        return {}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--verify-map", action="store_true")
@@ -216,9 +229,9 @@ def main() -> None:
                                 "(EFIT's own psi outside the plasma follows the solenoid at 0.37x its vacuum field)",
               "main_circuits": list(MAIN), "dI_A": D_I, "circuits": table, "verdict": verdict,
               "layout_self_check_axis_err_m_median": round(float(np.median(axis_err)), 4)}
-    m = json.loads(OUT.read_text()) if OUT.exists() else {}
+    m = load_spike_metrics(OUT)
     m["jacobian_check"] = result
-    OUT.write_text(json.dumps(m, indent=1) + "\n")
+    atomic_write(OUT, lambda tmp: tmp.write_text(json.dumps(m, indent=1) + "\n"))
 
     print(f"\n{'circuit':10s} {'turns':>5s} {'n':>3s} {'r all':>7s} {'r near':>7s} {'slope':>7s} {'rms ratio':>9s}  sign      pass  map")
     for name, s in table.items():

@@ -1,10 +1,14 @@
 """Helper-level tests for fusionlab.atomicio — written once for the whole atomic-write class."""
 
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
 from fusionlab.atomicio import atomic_write
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_writes_and_publishes_the_artifact(tmp_path):
@@ -45,3 +49,15 @@ def test_temp_file_is_invisible_to_suffix_globs(tmp_path):
     assert seen["glob"] == []                                   # a *.npz glob mid-write never sees the temp file
     assert seen["tmp_name"].startswith(".") and not seen["tmp_name"].endswith(".npz")
     assert f.read_text() == "x"
+
+
+def test_jacobian_merge_tolerates_truncated_json(tmp_path):
+    """JOBS-02 self-heal: JSON truncated by a pre-fix interrupted write is treated as absent, not fatal."""
+    sys.path.insert(0, str(ROOT / "scripts"))   # the scripts' own import pattern (pythonpath only covers fusionlab)
+    from eq_forward_jacobian import load_spike_metrics
+
+    f = tmp_path / "eq_forward_spike_metrics.json"
+    f.write_text('{"jacobian_check": {"go": tru')
+    assert load_spike_metrics(f) == {}
+    f.write_text('{"older": 1}')
+    assert load_spike_metrics(f) == {"older": 1}

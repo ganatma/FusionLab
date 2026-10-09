@@ -1,0 +1,6 @@
+# FusionLab repo policy (auto-detected from GitHub settings, 2026-10-09)
+branches:
+  default: main
+merge:
+  # GitHub allows merge commit, squash and rebase; merge commit is the repo default button.
+  method: merge

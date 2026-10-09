@@ -6,7 +6,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
   "numpy>=1.26",
   "fastapi>=0.142.2",
-  "uvicorn[standard]>=0.29",
+  "uvicorn[standard]>=0.54.0",
   "torch>=2.3",
   "nvidia-physicsnemo>=1.0",
   "usd-core>=26.8",

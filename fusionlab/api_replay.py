@@ -41,7 +41,7 @@ def _j(a, nd=4):
     return np.where(np.isfinite(a), a, None).tolist()
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=16)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _shot(shot_id: int) -> dict:
     if shot_id not in mast.cached_shots():
         raise HTTPException(404, f"shot {shot_id} is not in the local cache (scripts/fetch_mast.py {shot_id})")
@@ -119,7 +119,7 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
     return FileResponse(out, filename=out.name, media_type="application/octet-stream")
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _lines(shot_id: int):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""
     from fusionlab import fieldlines
@@ -148,7 +148,7 @@ def replay_fieldlines(shot_id: int, i: int):
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_model():
     """Equilibrium surrogate + the shots it never saw. None when no trained model is on disk."""
     from fusionlab import eq_surrogate
@@ -158,7 +158,7 @@ def _eq_model():
     return eq_surrogate.load(), held_out
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_psi(shot_id: int):
     """PhysicsNeMo reconstruction of psi from the magnetic sensors, every slice of the shot in one batch.
     Normalised with EFIT's axis and boundary flux so the two maps share contour levels; error is on psi itself."""
@@ -253,7 +253,7 @@ def surrogate_metrics():
     return json.loads(METRICS_FILE.read_text())
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _db_view() -> dict:
     """The usable shot table in operating-space coordinates, with IPB98(y,2) evaluated on every row at once."""
     c = mast.clean_db(mast.load_db())

@@ -57,6 +57,13 @@ class FakeClient:
         deltas, blocks = self.script.pop(0)
         return FakeStream(deltas, blocks)
 
+    def create(self, **kwargs: Any) -> FakeMessage:
+        """The non-streaming call the protocol extractor uses (forced tool_choice cannot stream);
+        the scripted deltas are meaningless here, only the blocks are returned."""
+        self.calls.append(copy.deepcopy(kwargs))
+        _, blocks = self.script.pop(0)
+        return FakeMessage(blocks)
+
 
 class ExplodingClient:
     """A client whose every call fails — the loop must answer with an error event, not a raise."""

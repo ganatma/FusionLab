@@ -2,7 +2,8 @@
 art_LbvYoBDn, "Protocol ingestion").
 
 The flow has exactly one model call. `extract_protocol` sends the document text — delimited as
-<document> data, never a bare instruction — with one forced `protocol` tool whose input_schema IS
+<document> data, never a bare instruction — with the `protocol` tool as the only tool offered,
+whose input_schema IS
 the pydantic schema (`ProtocolStep.model_json_schema()`), then validates the tool call's input
 through the same pydantic models the review UI reads. Everything that is not a protocol — an
 unreadable PDF, a schema-violating or missing tool call, zero steps — is a clean rejection
@@ -110,8 +111,6 @@ PROTOCOL_TOOL = {
         "required": ["title", "steps"],
     },
 }
-TOOL_CHOICE = {"type": "tool", "name": "protocol"}  # forced: the call's input is the whole answer
-
 EXTRACTION_SYSTEM_PROMPT = """\
 You are FusionLab's protocol extractor. The user's message is one document (a paper, a report, or
 pasted notes) that may describe a tokamak experiment protocol. Your entire job is one call to the
@@ -140,16 +139,18 @@ def frame_document(document_text: str) -> str:
 
 
 def extract_protocol(document_text: str, settings: AgentSettings, source: ProtocolSource) -> Protocol:
-    """The one schema-constrained extraction call: forced `protocol` tool, pydantic-validated input,
-    server-built provenance (the model never fills its own `source`)."""
+    """The one schema-constrained extraction call: `protocol` is the only tool offered, the call's
+    input is pydantic-validated, and provenance is server-built (the model never fills its own
+    `source`)."""
     client = agent._client(settings.api_key)
     try:
-        with client.messages.stream(model=settings.model, max_tokens=MAX_EXTRACTION_TOKENS,
-                                    system=EXTRACTION_SYSTEM_PROMPT, tools=[PROTOCOL_TOOL],
-                                    tool_choice=TOOL_CHOICE,
-                                    messages=[{"role": "user",
-                                               "content": frame_document(document_text)}]) as stream:
-            final = stream.get_final_message()
+        # The extraction model rejects forced tool_choice (type "tool"/"any"), so `protocol` is
+        # merely the only tool offered; a plain-text answer is refused and schema validation
+        # remains the enforcement (the schema is the check, not the force).
+        final = client.messages.create(model=settings.model, max_tokens=MAX_EXTRACTION_TOKENS,
+                                       system=EXTRACTION_SYSTEM_PROMPT, tools=[PROTOCOL_TOOL],
+                                       messages=[{"role": "user",
+                                                  "content": frame_document(document_text)}])
     except Exception as e:
         logger.exception("protocol extraction model call failed (model %s)", settings.model)
         raise ExtractionRefused("the extraction model call failed — nothing was extracted; "

@@ -3,7 +3,7 @@ and prompt-injection text are clean rejections (never behavior); accept promotes
 consumes it — drafts under data/protocols/draft-*.json, never served as accepted.
 
 The model seam is scripted with the shared FakeClient, exactly like test_api_agent.py: the one
-extraction call is inspected for its forced tool choice, its pydantic-derived input schema, and the
+extraction call is inspected for its single offered tool, its pydantic-derived input schema, and the
 <document> framing that marks the document's text as data, never instructions. Storage is
 redirected to a tmp directory, so the repo's data/ is never touched.
 """
@@ -117,10 +117,12 @@ def test_a_fixture_pdf_becomes_a_schema_valid_draft_with_provenance(monkeypatch)
     assert src["pages"] == 1 and src["extracted_by"] == "test-model"
     assert src["extracted_at"]  # provenance includes when
 
-    # exactly one model call: forced tool choice, the pydantic schema itself, framed document
+    # exactly one model call: no forced tool choice (the model rejects it), the pydantic schema
+    # itself, framed document
     assert len(fake.calls) == 1
     call = fake.calls[0]
-    assert call["tool_choice"] == protocol.TOOL_CHOICE
+    assert "tool_choice" not in call
+    assert [t["name"] for t in call["tools"]] == ["protocol"]
     assert call["tools"][0]["input_schema"]["properties"]["steps"]["items"] == protocol.ProtocolStep.model_json_schema()
     assert call["messages"][0]["content"].startswith("<document>")
 

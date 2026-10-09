@@ -191,10 +191,12 @@ class _SshSession:
         ~/.local/bin is prepended because a non-interactive SSH session often lacks it and uv
         installs there. The repo clone + `uv sync` are the documented prerequisites (design §1).
         """
-        assert self._conn is not None
+        conn = self._conn
+        if conn is None:   # unreachable: only _wait_worker (after _ensure_async) calls this
+            raise RemoteComputeError("connect", "autostart attempted before the SSH connection was up")
         cmd = (f'export PATH="$HOME/.local/bin:$PATH"; cd {self.remote_dir} && '
                f"nohup uv run fusionlab-worker --port {self.remote_port} >> .fusionlab-worker.log 2>&1 &")
-        result = await self._conn.run(cmd)
+        result = await conn.run(cmd)
         if result.exit_status != 0:
             detail = (result.stderr.strip() or result.stdout.strip())[:300]
             raise RemoteComputeError("connect", f"autostart failed on {self.host}: {detail}")
@@ -292,9 +294,14 @@ class SshProvider:
         return JobHandle(job_id=job_id, task=task, provider=self.name)
 
     async def stream(self, job: JobHandle) -> AsyncIterator[dict]:
-        """Relay the worker's SSE events for one job onto the caller's loop (PR 3's progress chip)."""
+        """Relay the worker's SSE events for one job onto the caller's loop (PR 3's progress chip).
+
+        Connect and write stay bounded; reads are unlimited because a long silent task (a full Warp
+        trace emits no progress) is legitimate, not a stall.
+        """
+        sse_timeouts = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
         try:
-            async with httpx.AsyncClient(base_url=self._session.base_url, timeout=None) as client, \
+            async with httpx.AsyncClient(base_url=self._session.base_url, timeout=sse_timeouts) as client, \
                     client.stream("GET", f"/v1/jobs/{job.job_id}/events") as resp:
                 if resp.status_code == 404:
                     raise RemoteComputeError("job", f"unknown job {job.job_id} (worker restarted?)")

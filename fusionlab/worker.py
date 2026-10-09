@@ -138,7 +138,8 @@ def _local_task(name: str) -> Callable[[BaseModel, Callable[[dict], None]], Any]
 def _run_benchmark(inputs: BaseModel, progress: Callable[[dict], None]) -> dict:
     from fusionlab import bench  # lazy: pulls torch via surrogate
 
-    assert isinstance(inputs, BenchmarkInputs)
+    if not isinstance(inputs, BenchmarkInputs):   # registry dispatch guarantees this; keep it honest
+        raise TypeError(f"benchmark inputs must be BenchmarkInputs, got {type(inputs).__name__}")
     return bench.timings(profile=inputs.profile, progress=progress)
 
 

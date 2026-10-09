@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -128,4 +128,16 @@ def index():
 
 app.include_router(replay_router)
 app.include_router(virtual_router)
-app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+
+class NoDotfiles(StaticFiles):
+    """Serve no dotfiles: any dotted path component reports "not found" (404, never 403),
+    so a dotfile that ever lands under web/ is inert rather than served."""
+
+    def lookup_path(self, path: str):
+        if any(part.startswith(".") for part in PurePosixPath(path).parts):
+            return "", None  # same shape as Starlette's own not-found
+        return super().lookup_path(path)
+
+
+app.mount("/static", NoDotfiles(directory=WEB), name="static")

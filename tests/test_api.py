@@ -491,3 +491,46 @@ def test_db_search_unfiltered_is_fast():
     j = client.get("/db/search").json()
     assert time.perf_counter() - t0 < 0.5
     assert j["total"] == 15_969 and len(j["rows"]) == 200
+
+
+def _no_nan_floats(node) -> bool:
+    """Strict JSON everywhere: no NaN/inf survived to the encoder (mirrors the _j null convention)."""
+    if isinstance(node, float):
+        return math.isfinite(node)
+    if isinstance(node, dict):
+        return all(_no_nan_floats(v) for v in node.values())
+    if isinstance(node, list):
+        return all(_no_nan_floats(v) for v in node)
+    return True
+
+
+def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypatch):
+    """A shot without line-average density (some M9 catalog rows) replays an all-NaN model. The summary
+    must answer null medians — the strict-JSON encoder turns a single NaN into a 500 (observed on 28788)."""
+    real = api_replay.replay
+    import numpy as _np
+
+    def nan_model(shot, H=1.0):
+        r = real(shot, H=H)
+        return {k: _np.full_like(v, _np.nan) if isinstance(v, _np.ndarray) and v.dtype.kind == "f" else v
+                for k, v in r.items()}
+
+    monkeypatch.setattr(api_replay, "replay", nan_model)
+    r = client.get("/replay/30420")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["summary"]["P_LH_median_MW"] is None
+    assert j["summary"]["H98_median"] is None and j["summary"]["H89_median"] is None
+    assert _no_nan_floats(j)
+
+
+def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch):
+    """Some catalog rows have no level-2 Zarr in FAIR-MAST (observed: 30004). The fetch path answers a
+    404 that names the gap — not a 502 that blames the archive, and never a half-written cache."""
+    from zarr.errors import GroupNotFoundError
+    uncached = next(int(i) for i in mast.load_db()["shot_id"] if int(i) not in mast.cached_shots())
+    monkeypatch.setattr(mast, "load_shot", lambda sid: (_ for _ in ()).throw(GroupNotFoundError(sid)))
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 404
+    assert "not published" in r.json()["detail"]
+    assert uncached not in mast.cached_shots()

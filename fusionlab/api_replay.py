@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from zarr.errors import GroupNotFoundError
 
 from fusionlab import mast
 from fusionlab.physics import (
@@ -69,11 +70,16 @@ def _shot(shot_id: int) -> dict:
     if not owner:
         if not job["done"].wait(_FETCH_WAIT_S):
             raise HTTPException(503, f"shot {shot_id} is still being fetched from FAIR-MAST — retry shortly")
+        if job["err"] == "unpublished":
+            raise HTTPException(404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST")
         if job["err"]:
             raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST: {job['err']}")
     else:
         try:
             mast.load_shot(shot_id)   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
+        except GroupNotFoundError:
+            job["err"] = "unpublished"   # waiters answer with the same 404, not a 502
+            raise HTTPException(404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST")
         except Exception as e:
             job["err"] = type(e).__name__
             logger.warning("fetch of shot %s from FAIR-MAST failed", shot_id, exc_info=True)
@@ -222,16 +228,22 @@ def _eq_psi(shot_id: int):
 
 
 def _summary(s: dict, r: dict) -> dict:
-    """Numbers for the insight panel, taken over near-steady slices only."""
+    """Numbers for the insight panel, taken over near-steady slices only. Medians are null when the model
+    has nothing to say (a shot without line-average density has an all-NaN model) — never NaN: the JSON
+    encoder rejects it and the panel shows an honest gap."""
     ok = r["steady"] & np.isfinite(r["H98"]) & np.isfinite(r["H89"])
     worst = np.nan_to_num(r["worst_limit"], nan=0.0)
     k = int(worst.argmax())
     def med(a):
-        return round(float(np.median(a[ok])), 2) if ok.any() else None
+        if not ok.any():
+            return None
+        m = float(np.median(a[ok]))
+        return round(m, 2) if np.isfinite(m) else None
+    p_lh = float(np.nanmedian(r["P_LH_MW"])) if np.isfinite(r["P_LH_MW"]).any() else None
     return {"n_steady": int(ok.sum()), "H98_median": med(r["H98"]), "H89_median": med(r["H89"]),
             "peak_limit": LIMIT_NAMES[int(r["binding"][k])], "peak_limit_fraction": round(float(worst[k]), 2),
             "peak_limit_t_s": round(float(s["t_s"][k]), 3),
-            "P_LH_median_MW": round(float(np.nanmedian(r["P_LH_MW"])), 2), "P_loss_median_MW": med(r["P_loss_MW"])}
+            "P_LH_median_MW": round(p_lh, 2) if p_lh is not None else None, "P_loss_median_MW": med(r["P_loss_MW"])}
 
 
 def _add_hybrid(s: dict, r: dict, summary: dict) -> None:

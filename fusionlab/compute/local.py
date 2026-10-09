@@ -112,6 +112,9 @@ class LocalProvider:
         except KeyError:
             raise KeyError(f"job {job.job_id} has no result: unknown id, or already consumed") from None
 
+    def health(self) -> None:
+        """Always healthy: this provider is the current process."""
+
     def warm_up(self) -> None:
         """Load the trained correction model (and torch) at server start — the ~5 s import the first replay
         request otherwise pays. Reached through fusionlab.compute.warm_up(), never at import time."""

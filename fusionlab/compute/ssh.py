@@ -352,6 +352,26 @@ class SshProvider:
         except frames.FrameError as e:
             raise RemoteComputeError("collect", f"corrupt result envelope: {e}") from None
 
+    @property
+    def host(self) -> str | None:
+        """The configured SSH host (a ~/.ssh/config alias is passed through as written) — the
+        provenance label and the /compute chip read this, not the tunnel URL."""
+        return getattr(self._session, "host", None)
+
+    def health(self) -> None:
+        """Probe the worker through the tunnel, right now. A failure tears the session down so the next
+        use reconnects (and autostarts) from scratch instead of trusting a stale handshake — and raises
+        RemoteComputeError, the one typed signal GET /compute renders as "unreachable"."""
+        try:
+            r = self._http.get("/health", timeout=2.0)
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            try:
+                self._session.close()
+            finally:
+                self._remote = None
+            raise RemoteComputeError("connect", f"worker did not answer /health: {type(e).__name__}: {e}") from None
+
     # -- internals
     def _handshake(self) -> dict:
         if self._remote is None:

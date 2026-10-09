@@ -258,9 +258,9 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
             "time_note": f"time code = EFIT slice index ({nt} slices, t = {t[0]:.4f}-{t[-1]:.4f} s); "
                          "real time in seconds is /MAST/Plasma.fusionlab:t_s",
             "scope_note": "Educational twin. Plasma surface is the axisymmetric EFIT boundary revolved about Z."}
-    for k, v in prov.items():
+    for key, v in prov.items():
         if v is not None:
-            root.SetCustomDataByKey(k, v if isinstance(v, (int, float)) else str(v))
+            root.SetCustomDataByKey(key, v if isinstance(v, (int, float)) else str(v))
     stage.GetRootLayer().comment = (f"MAST shot {meta.get('shot_id', '?')} ({meta.get('campaign', '?')}, "
                                     f"{meta.get('heating', '?')}). {ATTRIBUTION}. {GENERATOR}.")
 
@@ -271,7 +271,8 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
         _static_mesh(stage, "/MAST/Vessel", _revolve(wr, wz, phi), _quads(wr.size, phi.size, closed),
                      VESSEL_COLOR, VESSEL_OPACITY, double_sided=True, materials=materials)
     if "coil_R" in shot and np.size(shot["coil_R"]):
-        _static_mesh(stage, "/MAST/Coils", *_coil_mesh(shot, cutaway_deg), COIL_COLOR, materials=materials)
+        coil_pts, coil_quads = _coil_mesh(shot, cutaway_deg)
+        _static_mesh(stage, "/MAST/Coils", coil_pts, coil_quads, COIL_COLOR, materials=materials)
 
     # Plasma: resample per slice (a loop over ~70 slices; point counts differ), revolve all slices at once.
     z_mid = shot.get("Z_mag_m", np.full(nt, np.nan))
@@ -287,18 +288,20 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
     c_attr = plasma.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
     # Default (un-timed) value = the peak-current slice, for tools that read a stage without a time.
     k0 = int(np.nanargmax(shot["Ip_MA"])) if "Ip_MA" in shot else nt // 2
-    p_attr.Set(_vec3f(pts[k0])); e_attr.Set(_vec3f(ext[k0])); c_attr.Set(_vec3f(rgb[k0:k0 + 1]))
+    p_attr.Set(_vec3f(pts[k0]))
+    e_attr.Set(_vec3f(ext[k0]))
+    c_attr.Set(_vec3f(rgb[k0:k0 + 1]))
     glow = []
     if materials:   # the plasma glows: same colour on diffuse and emissive, animated with the mesh
         shader = _material(stage, plasma, rgb[k0])
         glow = [shader.GetInput("diffuseColor"), shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f)]
         glow[1].Set(Gf.Vec3f(*map(float, rgb[k0])))
-    for k in range(nt):
-        p_attr.Set(_vec3f(pts[k]), k)
-        e_attr.Set(_vec3f(ext[k]), k)
-        c_attr.Set(_vec3f(rgb[k:k + 1]), k)
+    for i in range(nt):
+        p_attr.Set(_vec3f(pts[i]), i)
+        e_attr.Set(_vec3f(ext[i]), i)
+        c_attr.Set(_vec3f(rgb[i:i + 1]), i)
         for inp in glow:
-            inp.Set(Gf.Vec3f(*map(float, rgb[k])), k)
+            inp.Set(Gf.Vec3f(*map(float, rgb[i])), i)
 
     prim = plasma.GetPrim()
     for name in _SCALARS:
@@ -306,8 +309,8 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
             continue
         v = np.asarray(shot[name], float)
         attr = prim.CreateAttribute(f"fusionlab:{name}", Sdf.ValueTypeNames.Double, custom=True)
-        for k in np.flatnonzero(np.isfinite(v)):      # NaN = not measured on this slice: leave it out
-            attr.Set(float(v[k]), int(k))
+        for j in np.flatnonzero(np.isfinite(v)):     # NaN = not measured on this slice: leave it out
+            attr.Set(float(v[j]), int(j))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if not stage.GetRootLayer().Export(str(path)):

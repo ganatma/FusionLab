@@ -91,7 +91,7 @@ def _cr_d(t: float):
 
 
 @wp.func
-def _psi(psi_n: wp.array3d(dtype=wp.float32), k: int, R: float, Z: float,
+def _psi(psi_n: wp.array3d(dtype=wp.float32), k: int, R: float, Z: float,  # type: ignore[valid-type]
          R0: float, Z0: float, inv_dR: float, inv_dZ: float):
     """(psi_N, dpsi_N/dR, dpsi_N/dZ) from one bicubic interpolant. Indices are clamped; the caller tests bounds."""
     x = (R - R0) * inv_dR
@@ -104,12 +104,12 @@ def _psi(psi_n: wp.array3d(dtype=wp.float32), k: int, R: float, Z: float,
     dx = _cr_d(tx)
     wy = _cr_w(ty)
     dy = _cr_d(ty)
-    val = float(0.0)
-    gR = float(0.0)
-    gZ = float(0.0)
+    val = 0.0
+    gR = 0.0
+    gZ = 0.0
     for a in range(4):
-        row_v = float(0.0)
-        row_d = float(0.0)
+        row_v = 0.0
+        row_d = 0.0
         for b in range(4):
             p = psi_n[k, iy - 1 + a, ix - 1 + b]
             row_v += wx[b] * p
@@ -121,7 +121,7 @@ def _psi(psi_n: wp.array3d(dtype=wp.float32), k: int, R: float, Z: float,
 
 
 @wp.func
-def _rhs(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp.float32), k: int, dpsi_Wb: float,
+def _rhs(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp.float32), k: int, dpsi_Wb: float,  # type: ignore[valid-type]
          R: float, Z: float, R0: float, Z0: float, inv_dR: float, inv_dZ: float):
     """(dR/dphi, dZ/dphi). F is linear in psi_N on a uniform 0-1 grid; outside the separatrix it is the edge value."""
     p = _psi(psi_n, k, R, Z, R0, Z0, inv_dR, inv_dZ)
@@ -134,16 +134,16 @@ def _rhs(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp.float32)
 
 
 @wp.kernel
-def _trace_kernel(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp.float32),
-                  dpsi_Wb: wp.array(dtype=wp.float32), R_mag: wp.array(dtype=wp.float32),
-                  Z_mag: wp.array(dtype=wp.float32), line_slice: wp.array(dtype=wp.int32),
-                  R_start: wp.array(dtype=wp.float32), Z_start: wp.array(dtype=wp.float32),
-                  direction: wp.array(dtype=wp.float32),
+def _trace_kernel(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp.float32),  # type: ignore[valid-type]
+                  dpsi_Wb: wp.array(dtype=wp.float32), R_mag: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+                  Z_mag: wp.array(dtype=wp.float32), line_slice: wp.array(dtype=wp.int32),  # type: ignore[valid-type]
+                  R_start: wp.array(dtype=wp.float32), Z_start: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+                  direction: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
                   R0: float, Z0: float, dR: float, dZ: float, dphi: float, n_steps: int, store_every: int,
-                  traj_R: wp.array2d(dtype=wp.float32), traj_Z: wp.array2d(dtype=wp.float32),
-                  out_psi0: wp.array(dtype=wp.float32), out_drift: wp.array(dtype=wp.float32),
-                  out_transits: wp.array(dtype=wp.int32), out_cross_step: wp.array(dtype=wp.float32),
-                  out_valid: wp.array(dtype=wp.int32)):
+                  traj_R: wp.array2d(dtype=wp.float32), traj_Z: wp.array2d(dtype=wp.float32),  # type: ignore[valid-type]
+                  out_psi0: wp.array(dtype=wp.float32), out_drift: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+                  out_transits: wp.array(dtype=wp.int32), out_cross_step: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+                  out_valid: wp.array(dtype=wp.int32)):  # type: ignore[valid-type]
     i = wp.tid()
     k = line_slice[i]
     R = R_start[i]
@@ -158,13 +158,13 @@ def _trace_kernel(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp
     Zm = Z_mag[k]
 
     psi0 = _psi(psi_n, k, R, Z, R0, Z0, inv_dR, inv_dZ)[0]
-    drift = float(0.0)
+    drift = float(0.0)   # noqa: UP018 - Warp DSL: the builtin call declares a dynamic (mutable) variable
     theta_prev = wp.atan2(Z - Zm, R - Rm)
-    theta = float(0.0)          # poloidal angle inside the current transit (kept small: float32 stays exact enough)
-    transits = int(0)
-    cross_step = float(0.0)
+    theta = float(0.0)   # noqa: UP018 - dynamic-variable declaration; poloidal angle inside the current transit
+    transits = int(0)    # noqa: UP018 - dynamic-variable declaration
+    cross_step = float(0.0)   # noqa: UP018 - dynamic-variable declaration
     valid = int(n_steps)
-    alive = int(1)
+    alive = int(1)   # noqa: UP018 - dynamic-variable declaration
     store = int(store_every > 0)
     if store == 1:
         traj_R[i, 0] = R
@@ -199,10 +199,9 @@ def _trace_kernel(psi_n: wp.array3d(dtype=wp.float32), F_Tm: wp.array2d(dtype=wp
             else:                                   # left the grid: freeze here
                 alive = 0
                 valid = s
-        if store == 1:
-            if (s + 1) % store_every == 0:
-                traj_R[i, (s + 1) / store_every] = R
-                traj_Z[i, (s + 1) / store_every] = Z
+        if store == 1 and (s + 1) % store_every == 0:
+            traj_R[i, (s + 1) / store_every] = R
+            traj_Z[i, (s + 1) / store_every] = Z
 
     out_psi0[i] = psi0
     out_drift[i] = drift
@@ -282,7 +281,8 @@ def trace_lines(shot: dict, slice_idx, psi_n_starts, *, n_turns: float = 5, step
     Rg, Zg = np.asarray(shot["psi_R"], float), np.asarray(shot["psi_Z"], float)
     n_steps = int(round(n_turns * steps_per_turn))
     n_store = n_steps // store_every + 1 if store_every > 0 else 1
-    f32 = lambda a: wp.array(np.ascontiguousarray(a, dtype=np.float32), dtype=wp.float32, device=device)
+    def f32(a):
+        return wp.array(np.ascontiguousarray(a, dtype=np.float32), dtype=wp.float32, device=device)
     dev_in = [wp.array(np.ascontiguousarray(shot["psi_n"], dtype=np.float32), dtype=wp.float32, device=device),
               f32(shot["F_Tm"]), f32(np.asarray(shot["psi_bnd_Wb"], float) - np.asarray(shot["psi_axis_Wb"], float)),
               f32(shot["R_mag_m"]), f32(shot["Z_mag_m"]), wp.array(k.astype(np.int32), dtype=wp.int32, device=device),
@@ -372,7 +372,8 @@ def first_launch_s(device: str, cold: bool) -> float:
     cold=True points Warp at an empty throw-away kernel cache, so the kernel is compiled from source;
     cold=False uses the normal cache (what a user sees on every run after the first). The difference is the compile.
     """
-    import subprocess
+    # B404: benchmark helper runs this repo's own interpreter on a module-built snippet
+    import subprocess  # nosec B404
     import tempfile
 
     code = ("import time\nfrom fusionlab import mast, fieldlines as fl\ns = mast.load_shot(mast.cached_shots()[0])\n"
@@ -382,7 +383,8 @@ def first_launch_s(device: str, cold: bool) -> float:
         # cold = no Warp kernel cache AND no NVIDIA driver JIT cache (which otherwise hides ~2 s of the CUDA build)
         env = {**os.environ, "WARP_CACHE_PATH": tmp, "CUDA_CACHE_DISABLE": "1"} if cold else dict(os.environ)
         for _ in range(1 if cold else 2):          # cached: the first run primes the cache, the second is the number
-            res = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, check=True)
+            # B603: fixed argv (sys.executable + module-built code), no shell, no untrusted input
+            res = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, check=True)  # nosec B603
     return float(res.stdout.strip().splitlines()[-1])
 
 

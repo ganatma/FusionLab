@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from functools import lru_cache
@@ -12,7 +13,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from fusionlab import mast
-from fusionlab.physics import BETA_N_LIMIT, LIMIT_NAMES, M_D, replay, tau_coeff_H, volume
+from fusionlab.physics import (
+    BETA_N_LIMIT,
+    LIMIT_NAMES,
+    M_D,
+    replay,
+    tau_coeff_H,
+    volume,
+)
 
 router = APIRouter()
 
@@ -125,7 +133,7 @@ def replay_fieldlines(shot_id: int, i: int):
     except Exception as e:   # no Warp / no usable device: the rest of the replay still works
         raise HTTPException(503, f"field-line tracing unavailable: {type(e).__name__}") from e
     return {"i": i, "t_s": float(s["t_s"][i]), "psi_n_start": list(USD_PSI_N), "device": device,
-            "lines": [{"x": _j(l[:, 0], 3), "y": _j(l[:, 1], 3), "z": _j(l[:, 2], 3)} for l in pts[i]],
+            "lines": [{"x": _j(line[:, 0], 3), "y": _j(line[:, 1], 3), "z": _j(line[:, 2], 3)} for line in pts[i]],
             "q95_traced": _j(q[i], 3), "q95_efit": _j(s["q95"][i], 3),
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
 
@@ -158,7 +166,8 @@ def _eq_psi(shot_id: int):
         return None
     ax, bd = s["psi_axis_Wb"][:, None, None], s["psi_bnd_Wb"][:, None, None]
     psi_efit = ax + s["psi_n"] * (bd - ax)
-    flat = lambda a: a.reshape(len(a), -1)
+    def flat(a):
+        return a.reshape(len(a), -1)
     rel = np.linalg.norm(flat(psi - psi_efit), axis=1) / np.linalg.norm(flat(psi_efit), axis=1)
     return {"psi_n": (psi - ax) / (bd - ax), "rel_l2": rel, "held_out": shot_id in held_out}
 
@@ -168,7 +177,8 @@ def _summary(s: dict, r: dict) -> dict:
     ok = r["steady"] & np.isfinite(r["H98"]) & np.isfinite(r["H89"])
     worst = np.nan_to_num(r["worst_limit"], nan=0.0)
     k = int(worst.argmax())
-    med = lambda a: round(float(np.median(a[ok])), 2) if ok.any() else None
+    def med(a):
+        return round(float(np.median(a[ok])), 2) if ok.any() else None
     return {"n_steady": int(ok.sum()), "H98_median": med(r["H98"]), "H89_median": med(r["H89"]),
             "peak_limit": LIMIT_NAMES[int(r["binding"][k])], "peak_limit_fraction": round(float(worst[k]), 2),
             "peak_limit_t_s": round(float(s["t_s"][k]), 3),
@@ -178,7 +188,9 @@ def _summary(s: dict, r: dict) -> dict:
 def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
     """IPB98 x learned correction on this shot, with its error beside plain IPB98 so it is never trusted blindly.
     Skipped when no trained model is on disk: the replay works without it."""
-    from fusionlab import surrogate   # imports torch; keep it off the import path of the rest of the API
+    from fusionlab import (
+        surrogate,  # imports torch; keep it off the import path of the rest of the API
+    )
     if not surrogate.available():
         return
     Hc = surrogate.correction(surrogate.shot_features(s, r["P_loss_MW"]))
@@ -187,7 +199,8 @@ def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
     summary["tau_correction_held_out"] = s["meta"]["shot_id"] // m.get("block_size", 100) in m.get("held_out_blocks", [])
     ok = r["steady"] & np.isfinite(r["H98"]) & (r["H98"] > 0)
     if ok.any():
-        rms = lambda a: round(float(np.sqrt(np.mean(np.log(a) ** 2))), 2)
+        def rms(a):
+            return round(float(np.sqrt(np.mean(np.log(a) ** 2))), 2)
         summary["rmse_ln_tau_ipb98"], summary["rmse_ln_tau_hybrid"] = rms(r["H98"][ok]), rms(r["H98"][ok] / Hc[ok])
 
 
@@ -195,10 +208,8 @@ def _warm_up():
     from fusionlab import surrogate
     if surrogate.available():
         surrogate.load()
-    try:   # builds/loads the Warp kernels and traces the landing shot
+    with contextlib.suppress(Exception):   # builds/loads the Warp kernels and traces the landing shot
         _lines(30166)
-    except Exception:
-        pass
     _eq_psi(30166)
 
 

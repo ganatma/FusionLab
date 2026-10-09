@@ -15,11 +15,22 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.16", "mypy>=2.4"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+
+[tool.ruff.lint]
+# ruff's default rule set (E4/E7/E9/F) plus bugbear, pyupgrade, flake8-simplify and isort.
+select = ["E4", "E7", "E9", "F", "B", "UP", "SIM", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+# the heavy deps (warp, pxr, physicsnemo) ship no type stubs
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
 
 [tool.uv]
 package = false

@@ -134,7 +134,7 @@ def passes(detail, check) -> bool:
     return all(out)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def replay_json(shot_id: int) -> dict:
     return client.get(f"/replay/{shot_id}").json()
 
@@ -184,7 +184,7 @@ def knob_grid(device: str, start: dict, free: list[str]) -> dict:
     axes = {k: np.linspace(*span[k], 25 if k == "P_aux" else coarse) for k in free if k != "n"}
     if "n" in free:
         axes["n_frac"] = np.linspace(0.05, 1.3, 26)            # the density slider spans 0.05 to 1.3 n_GW at the current Ip
-    mesh = dict(zip(axes, np.meshgrid(*axes.values(), indexing="ij"))) if axes else {}
+    mesh = dict(zip(axes, np.meshgrid(*axes.values(), indexing="ij"), strict=True)) if axes else {}
     grid = {**start, **{k: v for k, v in mesh.items() if k != "n_frac"}}
     if "n_frac" in mesh:
         grid["n"] = mesh["n_frac"] * np.asarray(grid["Ip"]) / (math.pi * d.a**2)

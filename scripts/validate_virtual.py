@@ -32,7 +32,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fusionlab import mast, surrogate  # noqa: E402
-from fusionlab.virtual import CLOSURES, baseline, refly_error, response_laws  # noqa: E402
+from fusionlab.virtual import (  # noqa: E402
+    CLOSURES,
+    baseline,
+    refly_error,
+    response_laws,
+)
 
 REFLY = mast.DATA / "refly"
 OUT = surrogate.MODELS / "virtual_metrics.json"
@@ -91,7 +96,8 @@ def refly_table() -> dict:
                 rows[c]["flat_beam" if beam else "flat_ohmic"].append(e["flat_top_median_abs_ln"])
             if e["beam_rise_median_abs_ln"] is not None:
                 rows[c]["rise"].append(e["beam_rise_median_abs_ln"])
-    med = lambda v: round(float(np.median(v)), 3) if v else None
+    def med(v):
+        return round(float(np.median(v)), 3) if v else None
     table = {c: {k: med(v) for k, v in r.items()} | {"n_flat": len(r["flat"]), "n_rise": len(r["rise"]),
                                                      "n_beam": len(r["flat_beam"]), "n_ohmic": len(r["flat_ohmic"])} for c, r in rows.items()}
     best = min((c for c in CLOSURES if table[c]["flat"] is not None), key=lambda c: table[c]["flat"], default=None)
@@ -102,6 +108,11 @@ def refly_table() -> dict:
 # ---------------------------------------------------------------- gate 2: matched pairs from the shot table
 ACTUATORS = {"Ip": "Ip_MA", "B": "B_T", "n": "n_e20", "P": "P_loss_MW"}
 OTHERS = ("Ip_MA", "B_T", "n_e20", "P_loss_MW", "R_m", "a_m", "kappa_a")
+
+
+def rmse(pred, ref):
+    """RMSE of pred against the measured deltas, rounded for the metrics JSON."""
+    return round(float(np.sqrt(np.mean((ref - pred) ** 2))), 3)
 
 
 def matched_pairs() -> dict:
@@ -131,11 +142,10 @@ def matched_pairs() -> dict:
             continue
         d_tau = np.concatenate(d_tau)
         d_x = {k: np.concatenate(v) for k, v in d_x.items()}
-        rmse = lambda pred: round(float(np.sqrt(np.mean((d_tau - pred) ** 2))), 3)
         slope = float(np.sum(d_tau * d_x[key]) / np.sum(d_x[key] ** 2))   # measured exponent in these pairs, through the origin
-        row = {"n_pairs": int(d_tau.size), "measured_exponent": round(slope, 2), "rmse_null": rmse(0.0)}
+        row = {"n_pairs": int(d_tau.size), "measured_exponent": round(slope, 2), "rmse_null": rmse(0.0, d_tau)}
         for law, e in laws.items():
-            row[f"rmse_{law}"] = rmse(sum(e[k] * d_x[k] for k in d_x))
+            row[f"rmse_{law}"] = rmse(sum(e[k] * d_x[k] for k in d_x), d_tau)
             row[f"exponent_{law}"] = round(e[key], 2)
         row["admissible"] = [law for law in laws if row[f"rmse_{law}"] <= NULL_SLACK * row["rmse_null"]]
         row["best"] = min(laws, key=lambda law: row[f"rmse_{law}"])
@@ -150,7 +160,8 @@ def matched_pairs() -> dict:
 def report(m: dict) -> str:
     r, p = m["refly"], m["matched_pairs"]
     NAMES = {"learned": "IPB98(y,2) × PhysicsNeMo correction", "ipb98": "IPB98(y,2)", "iter89": "ITER89-P"}
-    f = lambda v: "–" if v is None else f"{v:.3f}"
+    def f(v):
+        return "–" if v is None else f"{v:.3f}"
     lines = [f"Blind re-fly of {r['n_shots']} held-out shots, median |ln(W_refly / W_measured)| (0.10 ≈ 10%):", "",
              "| Closure | Flat top, all | beam-heated | ohmic | 50 ms after beam-on |", "|---|---|---|---|---|"]
     for c, row in r["closures"].items():
@@ -158,7 +169,8 @@ def report(m: dict) -> str:
                      f"{f(row['flat_beam'])} ({row['n_beam']}) | {f(row['flat_ohmic'])} ({row['n_ohmic']}) | {f(row['rise'])} ({row['n_rise']}) |")
     lines += ["", f"Matched pairs ({p['rule']}), RMSE of Δln τ_E:", "",
               "| Edited input | Pairs | Measured exponent | No change | IPB98(y,2) | Valovič 2009 | Refit power law | Slider |", "|---|---|---|---|---|---|---|---|"]
-    why = lambda row: "yes: " + ", ".join(row["admissible"]) if row["slider"] else ("no: too few pairs" if row["n_pairs"] < MIN_PAIRS else "no: every law contradicted")
+    def why(row):
+        return "yes: " + ", ".join(row["admissible"]) if row["slider"] else ("no: too few pairs" if row["n_pairs"] < MIN_PAIRS else "no: every law contradicted")
     LABEL = {"Ip": "Plasma current", "B": "Toroidal field", "n": "Density", "P": "Loss power"}
     for a, row in p["actuators"].items():
         if not row["n_pairs"]:
@@ -178,7 +190,7 @@ def main() -> None:
     if not args.no_fetch:
         ids, t0 = pick_shots(args.n), time.time()
         with ThreadPoolExecutor(WORKERS) as pool:
-            for k, (i, msg) in enumerate(zip(ids, pool.map(fetch, ids)), 1):
+            for k, (i, msg) in enumerate(zip(ids, pool.map(fetch, ids), strict=True), 1):
                 print(f"[{k}/{len(ids)}] {i}: {msg}  ({time.time() - t0:.0f} s)", flush=True)
     m = {"refly": refly_table(), "matched_pairs": matched_pairs(),
          "data": "UKAEA FAIR-MAST level 2, CC BY-SA 4.0; shots drawn from the tau_E correction's held_out_blocks (seed 0)"}

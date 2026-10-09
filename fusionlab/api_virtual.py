@@ -53,7 +53,7 @@ def virtual_gate():
                            "measured_exponent": (row or {}).get("measured_exponent")}
     return {"validated": v["validated"], "sliders": sliders, "refly": v["refly"], "matched_pairs": v["matched_pairs"],
             "closures": CLOSURE_NAMES, "default_closure": (v["refly"] or {}).get("default_closure") or "learned",
-            "laws": {LAW_NAMES.get(k, k): dict(zip(("Ip", "B", "n", "alpha"), e)) for k, e in virtual.gated_laws().items()},
+            "laws": {LAW_NAMES.get(k, k): dict(zip(("Ip", "B", "n", "alpha"), e, strict=True)) for k, e in virtual.gated_laws().items()},
             "caveats": CAVEATS}
 
 
@@ -77,7 +77,8 @@ def virtual_shot(shot_id: int, body: VirtualIn):
     for k, v in limits.items():
         over = np.flatnonzero(np.nan_to_num(v, nan=0.0) >= 1.0)
         crossing[k] = None if over.size == 0 else round(float(t[over[0]]), 3)
-    pct = lambda a: [round(100 * float(np.min(a)), 1), round(100 * float(np.max(a)), 1)]
+    def pct(a):
+        return [round(100 * float(np.min(a)), 1), round(100 * float(np.max(a)), 1)]
     return {
         "shot_id": shot_id, "attribution": ATTRIBUTION, "closure": closure, "closure_name": CLOSURE_NAMES[closure],
         "edit": body.edit.model_dump(), "is_identity": edit.is_identity(), "timing_edit": edit.nbi_shift_s != 0.0,

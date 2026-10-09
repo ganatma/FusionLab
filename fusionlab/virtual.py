@@ -119,7 +119,8 @@ def programme(shot: dict, dt: float = DT_S) -> dict:
     """The measured programme interpolated from the EFIT time base to a uniform grid."""
     ts = np.asarray(shot["t_s"], dtype=float)
     t = np.arange(ts[0], ts[-1] + 0.5 * dt, dt)
-    f = lambda k: np.interp(t, ts, _fill(shot[k]))
+    def f(k):
+        return np.interp(t, ts, _fill(shot[k]))
     p = {k: f(k) for k in ("Ip_MA", "B_T", "n_e20", "R_m", "a_m", "V_m3", "W_MJ", "dWdt_MW")}
     p["P_ohm_MW"] = np.maximum(f("P_ohm_MW"), 0.0)             # measured P_ohm dips below zero on a few slices
     p["t_s"], p["kappa_a"] = t, p["V_m3"] / volume(p["R_m"], p["a_m"], 1.0)
@@ -154,7 +155,7 @@ def integrate(P_heat, K, alpha: float, W0, dt: float = DT_S, heat_of_W=None):
 # ---------------------------------------------------------------- confinement level of the real shot
 def _learned_correction(shot: dict, p: dict, P_loss) -> np.ndarray:
     """IPB98 multiplier from the PhysicsNeMo model on the measured inputs, on the integration grid. 1.0 if untrained."""
-    from fusionlab import surrogate   # imports torch
+    from fusionlab import surrogate  # imports torch
     if not surrogate.available():
         return np.ones_like(p["t_s"])
     P_in = p["P_ohm_MW"] + p["P_nbi_MW"]
@@ -220,7 +221,8 @@ def run(shot: dict, edits: list[Edit] | Edit | None = None, closure: str = "lear
     for law in laws.values():
         Wb, P_nbi, r = _whatif(base, shot, edits, base["W_blind"], base["P_loss_blind"], base["tau_blind"], law, dt)
         Wa, _, _ = _whatif(base, shot, edits, base["W_meas"], base["P_loss_meas"], base["tau_meas"], law, dt)
-        blind.append(Wb[:, idx]); anchored.append(Wa[:, idx])
+        blind.append(Wb[:, idx])
+        anchored.append(Wa[:, idx])
     W_blind, W_anch = np.stack(blind, 1), np.stack(anchored, 1)                          # (E, L, nt)
 
     # limits scaled from the measured ones; W' / W_base uses the anchored IPB98 run, the most conservative pairing
@@ -232,7 +234,8 @@ def run(shot: dict, edits: list[Edit] | Edit | None = None, closure: str = "lear
     kink = 2.0 / (np.asarray(shot["q95"], float) * rB / rI)
 
     flat = np.asarray(shot["Ip_MA"], float) >= FLAT_TOP * np.nanmax(shot["Ip_MA"])
-    dW = lambda W, W0: np.nanmean(np.where(flat, W / np.maximum(W0, 1e-9) - 1.0, np.nan), axis=-1)
+    def dW(W, W0):
+        return np.nanmean(np.where(flat, W / np.maximum(W0, 1e-9) - 1.0, np.nan), axis=-1)
     return dict(
         t_s=ts, closure=closure, laws=list(laws), exponents=laws, edits=edits, flat_top=flat,
         W_meas_MJ=np.asarray(shot["W_MJ"], float), W_refly_MJ=base["W_blind"][idx],
@@ -252,7 +255,8 @@ def refly_error(shot: dict, W_refly) -> dict:
     flat = (np.asarray(shot["Ip_MA"], float) >= FLAT_TOP * np.nanmax(shot["Ip_MA"])) & np.isfinite(err)
     t_on = shot["meta"].get("t_nbi_start_s")
     rise = np.isfinite(err) & (t >= t_on) & (t <= t_on + 0.05) if t_on is not None else np.zeros_like(flat)
-    med = lambda m: float(np.median(err[m])) if m.any() else None
+    def med(m):
+        return float(np.median(err[m])) if m.any() else None
     return {"flat_top_median_abs_ln": med(flat), "beam_rise_median_abs_ln": med(rise), "n_flat": int(flat.sum()), "n_rise": int(rise.sum())}
 
 

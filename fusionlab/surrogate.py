@@ -83,7 +83,8 @@ def _fit_net(X, y, Xv, yv, device, epochs=2000, noise=0.1):
     correction smooth: the table is routine operation, not a designed scan. Returns (net, mu, sd, seconds)."""
     torch.manual_seed(SEED)
     mu, sd = X.mean(0), X.std(0) + 1e-6
-    t = lambda a: torch.as_tensor(a, dtype=torch.float32, device=device)
+    def t(a):
+        return torch.as_tensor(a, dtype=torch.float32, device=device)
     Xt, yt, Xvt, yvt = t((X - mu) / sd), t(y)[:, None], t((Xv - mu) / sd), t(yv)[:, None]
     net = _net(X.shape[1]).to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=3e-3, weight_decay=1e-2)
@@ -92,7 +93,8 @@ def _fit_net(X, y, Xv, yv, device, epochs=2000, noise=0.1):
     for _ in range(epochs):
         opt.zero_grad()
         torch.nn.functional.mse_loss(net(Xt + noise * torch.randn_like(Xt)), yt).backward()
-        opt.step(); sched.step()
+        opt.step()
+        sched.step()
         with torch.no_grad():
             v = torch.nn.functional.mse_loss(net(Xvt), yvt).item()
         if v < best:
@@ -143,6 +145,8 @@ def local_exponents(bundle, X, device) -> dict:
     mu, sd = (torch.as_tensor(bundle[k], dtype=torch.float32, device=device) for k in ("mu", "sd"))
     Xt = torch.as_tensor(X, dtype=torch.float32, device=device).requires_grad_(True)
     bundle["net"]((Xt - mu) / sd).sum().backward()
+    if Xt.grad is None:   # unreachable: requires_grad_() plus backward() always populate .grad
+        raise RuntimeError("no gradient")
     g = Xt.grad.mean(0).cpu().numpy()
     return {k: round(float(IPB98_EXP[k] + g[i]), 3) for i, k in enumerate(VARS) if k in IPB98_EXP}
 
@@ -159,11 +163,13 @@ def train(showcase=(27257, 29823, 30166, 30192, 30420)) -> dict:
     shown = np.isin(ids, np.asarray(showcase) // BLOCK)
     ids = np.concatenate([ids[~shown], ids[shown]])
     n_test, n_val = int(0.15 * ids.size), int(0.10 * ids.size)
-    rows = lambda b: np.flatnonzero(np.isin(block, b))
+    def rows(b):
+        return np.flatnonzero(np.isin(block, b))
     A = (rows(ids[: ids.size - n_test - n_val]), rows(ids[ids.size - n_test - n_val: ids.size - n_test]), rows(ids[ids.size - n_test:]))
     # split B: temporal. Train on campaigns M5-M8 (validation = held-out session blocks), test on M9 (2013)
     old = rng.permutation(np.unique(block[c["campaign"] < 9]))
-    in_old = lambda b: np.flatnonzero(np.isin(block, b) & (c["campaign"] < 9))
+    def in_old(b):
+        return np.flatnonzero(np.isin(block, b) & (c["campaign"] < 9))
     B = (in_old(old[int(0.1 * old.size):]), in_old(old[: int(0.1 * old.size)]), np.flatnonzero(c["campaign"] == 9))
 
     info_A, bundle = evaluate(c, *A, device)
@@ -189,8 +195,10 @@ def train(showcase=(27257, 29823, 30166, 30192, 30420)) -> dict:
         for name, i in (("session_block", info_A), ("temporal_M9", info_B))}
 
     MODELS.mkdir(exist_ok=True)
-    torch.save({"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": bundle["mu"], "sd": bundle["sd"],
-                "n_in": len(VARS) + 1}, MODEL_FILE)
+    # mu/sd are saved as tensors so the checkpoint contains only the torch.load weights_only-safe subset
+    # (no pickled numpy): the loader can then refuse arbitrary object types (bandit B614).
+    torch.save({"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": torch.as_tensor(bundle["mu"]),
+                "sd": torch.as_tensor(bundle["sd"]), "n_in": len(VARS) + 1}, MODEL_FILE)
     METRICS_FILE.write_text(json.dumps(metrics, indent=1))
     return metrics
 
@@ -207,10 +215,10 @@ def load():
     """Trained network + input normalisation, read once."""
     global _loaded
     if _loaded is None:
-        ck = torch.load(MODEL_FILE, map_location="cpu", weights_only=False)
+        ck = torch.load(MODEL_FILE, map_location="cpu", weights_only=True)   # checkpoint is tensor-only (B614)
         net = _net(ck["n_in"])
         net.load_state_dict(ck["state"])
-        _loaded = (net.eval(), ck["mu"], ck["sd"])
+        _loaded = (net.eval(), ck["mu"].numpy(), ck["sd"].numpy())
     return _loaded
 
 

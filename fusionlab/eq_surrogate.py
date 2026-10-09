@@ -52,6 +52,19 @@ def missing(x: torch.Tensor, zero_is_missing: torch.Tensor) -> torch.Tensor:
 class EqSurrogate(torch.nn.Module):
     """Normalisation + MLP + linear PCA decoder in one module, so inference is a single batched call."""
 
+    # torch's stubs cannot see buffers registered in __init__; declare their types for the typechecker
+    keep: torch.Tensor
+    zero_is_missing: torch.Tensor
+    x_mean: torch.Tensor
+    x_std: torch.Tensor
+    out_std: torch.Tensor
+    basis: torch.Tensor
+    psi_mean: torch.Tensor
+    psi_scale: torch.Tensor
+    lin_W: torch.Tensor
+    R_m: torch.Tensor
+    Z_m: torch.Tensor
+
     def __init__(self, ck: dict):
         super().__init__()
         self.cfg = ck["config"]

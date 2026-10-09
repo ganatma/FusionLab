@@ -157,14 +157,15 @@ def main() -> None:
     elements = coil_elements()
     G, dist = {}, {}
     for name, c in CIRCUITS.items():
-        Rc = np.concatenate([elements[s][0] for s in c["coils"]]); Zc = np.concatenate([elements[s][1] for s in c["coils"]])
+        Rc = np.concatenate([elements[s][0] for s in c["coils"]])
+        Zc = np.concatenate([elements[s][1] for s in c["coils"]])
         w = np.concatenate([np.full(elements[s][0].size, 1.0 / TURNS_DIVISOR[s]) for s in c["coils"]])
         G[name] = green(RR, ZZ, Rc, Zc, w)                                           # Wb/rad per unit of the column, on every coil of the circuit
-        dist[name] = np.sqrt(((RR[..., None] - Rc) ** 2 + (ZZ[..., None] - Zc) ** 2)).min(-1)
+        dist[name] = np.sqrt((RR[..., None] - Rc) ** 2 + (ZZ[..., None] - Zc) ** 2).min(-1)
 
     rows = {name: {"r_all": [], "r_near": [], "slope": [], "ratio": []} for name in CIRCUITS}
     n_slices, axis_err = 0, []
-    for sid, i, d in held_out_slices():
+    for _sid, i, d in held_out_slices():
         x = np.zeros((1, eqs.N_RAW), np.float32)
         x[0, N_PF0:N_PF0 + eqs.N_PF] = np.nan_to_num(d["pf_current"][i])
         x[0, -1] = d["ip_measured"][i]
@@ -177,7 +178,8 @@ def main() -> None:
         for name, c in CIRCUITS.items():
             dI = D_I if name != "P6" else 200.0
             xp, xm = x.copy(), x.copy()
-            xp[0, N_PF0 + np.array(c["cols"])] += dI; xm[0, N_PF0 + np.array(c["cols"])] -= dI
+            xp[0, N_PF0 + np.array(c["cols"])] += dI
+            xm[0, N_PF0 + np.array(c["cols"])] -= dI
             with torch.no_grad():
                 pp, pm = model(torch.as_tensor(np.concatenate([xp, xm]), device=dev)).cpu().numpy()
             dpsi = (pp - pm) / (2 * dI)                                                # Wb/rad per A, model
@@ -193,7 +195,8 @@ def main() -> None:
         n_slices += 1
     assert n_slices > 20 and np.median(axis_err) < 0.05, (n_slices, np.median(axis_err))
 
-    q = lambda v: {"median": round(float(np.median(v)), 3), "p10": round(float(np.percentile(v, 10)), 3), "p90": round(float(np.percentile(v, 90)), 3)}
+    def q(v):
+        return {"median": round(float(np.median(v)), 3), "p10": round(float(np.percentile(v, 10)), 3), "p90": round(float(np.percentile(v, 90)), 3)}
     table = {}
     for name, r in rows.items():
         s = {k: q(v) for k, v in r.items()} | {"n": len(r["r_all"]), "map": CIRCUITS[name]["map"], "n_turns": int(sum(dict(STEMS)[s] for s in CIRCUITS[name]["coils"]))}

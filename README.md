@@ -68,9 +68,33 @@ db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
 The dev server reads the data cache and the model weights once per process: restart it after re-fetching
 shots (`make data`, `fetch_mast.py`) or retraining (`make train`) to pick up the new artifacts.
 
+## User-provided compute (SSH)
+
+An NVIDIA GPU is optional, and it does not have to be *this* machine's. FusionLab can run the heavy
+parts — Warp field-line tracing, the PhysicsNeMo surrogates, benchmarks — on any SSH-reachable host
+you control: a lab box, a university cluster login, a gaming PC. A small worker process from this
+same repo runs there (`git clone` + `uv sync --extra remote`), the backend talks to it through the
+SSH tunnel using your existing keys and `~/.ssh/config` aliases — no new credentials, nothing
+stored in FusionLab — and results carry a `computed on <host>` label. If the remote side is
+unreachable, work falls back to this machine with a visible banner; the UI never blocks.
+
+```toml
+# fusionlab.toml (copy fusionlab.toml.example) — or FUSIONLAB_COMPUTE_* env vars, see .env.example
+[compute]
+provider = "ssh"            # "local" (default): everything in this process, zero config
+
+[compute.ssh]
+host = "gpu-lab"            # any ~/.ssh/config alias
+remote_dir = "~/FusionLab"  # the clone on that host
+autostart = true            # start the worker over SSH when none is answering
+```
+
+Full guide — prerequisites, what the chip and banner mean, and a first-run checklist against a real
+host: [docs/COMPUTE.md](docs/COMPUTE.md).
+
 ## Contents
 
-[Quick start](#quick-start) · [Why](#why) · [What's in it](#whats-in-it) · [A five-minute demo](#a-five-minute-demo) · [Guided and Lab modes](#guided-and-lab-modes) · [Virtual shot](#virtual-shot) · [What it found on real data](#what-it-found-on-real-data) · [Architecture](#architecture) · [Performance](#performance) · [Data & licence](#data--licence) · [Limitations](#limitations) · [Security posture](#security-posture) · [Optional AI agent](#optional-ai-agent) · [Credit](#credit)
+[Quick start](#quick-start) · [User-provided compute](#user-provided-compute-ssh) · [Why](#why) · [What's in it](#whats-in-it) · [A five-minute demo](#a-five-minute-demo) · [Guided and Lab modes](#guided-and-lab-modes) · [Virtual shot](#virtual-shot) · [What it found on real data](#what-it-found-on-real-data) · [Architecture](#architecture) · [Performance](#performance) · [Data & licence](#data--licence) · [Limitations](#limitations) · [Security posture](#security-posture) · [Optional AI agent](#optional-ai-agent) · [Credit](#credit)
 
 ## Why
 

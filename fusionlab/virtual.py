@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 
+from fusionlab.compute.status import capabilities as _compute_capabilities
+from fusionlab.compute.status import run_task
 from fusionlab.physics import BETA_N_LIMIT, M_D, tau_coeff_H, tau_coeff_L, volume
 
 MODELS = Path(__file__).resolve().parent.parent / "models"
@@ -155,13 +157,12 @@ def integrate(P_heat, K, alpha: float, W0, dt: float = DT_S, heat_of_W=None):
 # ---------------------------------------------------------------- confinement level of the real shot
 def _learned_correction(shot: dict, p: dict, P_loss) -> np.ndarray:
     """IPB98 multiplier from the PhysicsNeMo model on the measured inputs, on the integration grid. 1.0 if untrained."""
-    from fusionlab import surrogate  # imports torch
-    if not surrogate.available():
+    if not _compute_capabilities().get("surrogate_available"):
         return np.ones_like(p["t_s"])
     P_in = p["P_ohm_MW"] + p["P_nbi_MW"]
     x = {"Ip_MA": p["Ip_MA"], "B_T": p["B_T"], "n_e20": p["n_e20"], "P_loss_MW": P_loss, "R_m": p["R_m"], "a_m": p["a_m"],
          "kappa_a": p["kappa_a"], "f_nbi": np.where(P_in > 0, p["P_nbi_MW"] / np.maximum(P_in, 1e-9), 0.0)}
-    return surrogate.correction(x)
+    return run_task("run_surrogate", {"features": x})
 
 
 def baseline(shot: dict, closure: str = "learned", dt: float = DT_S) -> dict:

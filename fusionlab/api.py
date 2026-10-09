@@ -36,6 +36,19 @@ def health():
     return {"ok": True}
 
 
+@app.get("/compute")
+def compute_status():
+    """Where compute runs right now: the selected provider, the SSH worker's handshake when configured,
+    and the fallback state (design §7). Built against a short TTL cache with a single in-flight probe,
+    so the UI can poll it without hammering the tunnel — and an unreachable worker is a status here,
+    never an error."""
+    from fusionlab.compute import (
+        status,  # lazy: pulls LocalProvider (numpy), never asyncssh
+    )
+
+    return status.snapshot()
+
+
 @app.get("/devices")
 def devices():
     return {k: d.to_dict() for k, d in DEVICES.items()}

@@ -27,6 +27,7 @@
         <span class="mono" id="rp-tlabel">–</span>
         <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
         <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
+        <span class="status" id="rp-compute" title="Compute status">…</span>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -34,6 +35,8 @@
         A gauge turns red when a stability limit is crossed: try shot <b>#30192</b>.</span>
         <button type="button" id="rp-hint-x" class="tool" aria-label="Dismiss this hint">Got it</button></div>
 
+      <div class="cr-hint small fallback" id="rp-fallback" hidden><span id="rp-fallback-text"></span>
+        <button type="button" id="rp-fallback-x" class="tool" aria-label="Dismiss this banner">Dismiss</button></div>
       <div class="cr-hint small" id="rp-cmp-bar" hidden></div>
 
       <div class="cr-cell" id="cell-eq" data-guide="eq">
@@ -224,9 +227,55 @@
         $('rp-usd').removeAttribute('aria-busy');
       }
     });
-    const seen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
+    const hintSeen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
+    const seen = hintSeen;
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
+
+    // Compute chip (design §7): where compute runs, from a polled /compute status. Never blocks
+    // anything — a failed or slow poll keeps the last known state; the next one retries.
+    const POLL_MS = 5000, COMPUTE_TIMEOUT_MS = 8000;
+    let lastCompute = null;
+    function renderCompute(s) {
+      const chip = $('rp-compute');
+      let text, cls = 'status', tip = '';
+      if (s.provider === 'ssh' && s.reachable && s.worker) {
+        text = `${s.worker.cuda_available ? 'GPU' : 'CPU'}: ${s.host} (${s.worker.device_name || 'remote worker'})`;
+        tip = `fusionlab worker v${s.worker.worker_version} · torch ${s.worker.torch} · warp ${s.worker.warp || '–'} · cuda ${s.worker.cuda_available ? 'yes' : 'no'}`;
+        if (s.version_mismatch) { cls += ' warn'; tip += ` · version mismatch: local ${s.version_mismatch.local}, remote ${s.version_mismatch.remote}`; }
+      } else if (s.provider === 'ssh' && s.reachable === false) {
+        text = `Local CPU · ${s.host || 'remote'} unreachable`; cls += ' warn'; tip = s.reason || '';
+      } else if (s.provider === 'ssh') {
+        text = `Compute: ${s.host || 'remote'}…`; tip = 'asking the remote worker';
+      } else {
+        text = 'Local CPU'; tip = 'Compute runs in this process. Configure [compute] in fusionlab.toml to use your own GPU host — see docs/COMPUTE.md.';
+      }
+      chip.textContent = text; chip.className = cls; chip.title = tip;
+    }
+    // Fallback banner (design §7): the server reports that remote compute failed and the work fell
+    // back to local. Dismiss is per-visit; recovery — a successful remote run or a clean /compute —
+    // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
+    // Both notices render in the same grid row, so the banner takes the row while it is up: the
+    // operational status outranks the onboarding hint, and the hint comes back (per its own
+    // dismissed state) when the banner goes away.
+    let fallbackSeen = false;
+    function renderFallback(s) {
+      if (s && !s.fallback) fallbackSeen = false;
+      const show = !!s && !!s.fallback && !fallbackSeen;
+      $('rp-fallback').hidden = !show;
+      $('rp-hint').hidden = show ? true : hintSeen();
+      if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+    }
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });
+    async function pollCompute() {
+      try {
+        const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);
+        const r = await fetch('/compute', { signal: ctrl.signal });
+        clearTimeout(t);
+        if (r.ok) { const s = await r.json(); lastCompute = s; renderCompute(s); renderFallback(s); }
+      } catch (e) { /* unreachable remote is the server's status to report; the chip keeps its last state */ }
+    }
+    setInterval(pollCompute, POLL_MS); pollCompute();
     seg('rp-speed', v => { speed = +v; if (playTimer) play(true); });
     seg('rp-view', v => { if (use3) window.Vessel3D.setView(v); document.dispatchEvent(new CustomEvent('fusionlab:view', { detail: { view: v } })); });
     $('rp-eq-on').addEventListener('change', () => drawPsi(+$('rp-t').value));
@@ -416,7 +465,7 @@
     if (ohmic && q.P_loss_median_MW !== null && q.P_loss_median_MW > 2 * q.P_LH_median_MW && Math.abs(q.H89_median - 1) < 0.25)
       out.push(`The Martin 2008 L–H threshold gives only ${fmt(q.P_LH_median_MW)} MW here, and the plasma was losing ${fmt(q.P_loss_median_MW)} MW, yet the energy follows the L-mode law. That threshold was fitted to conventional-aspect-ratio tokamaks.`);
     if (q.rmse_ln_tau_hybrid !== undefined)
-      out.push(`Learned correction on this shot (${q.tau_correction_held_out ? 'its session was held out of training' : 'its session was in the training set, so this is not a test'}): scatter in ln τ<sub>E</sub> goes from ${fmt(q.rmse_ln_tau_ipb98)} with IPB98 to <b>${fmt(q.rmse_ln_tau_hybrid)}</b> with the correction. ${q.rmse_ln_tau_hybrid > q.rmse_ln_tau_ipb98 ? 'Worse here: it was trained on one point per shot at peak current, and this shot sits outside that.' : ''}`);
+      out.push(`Learned correction on this shot (${q.tau_correction_held_out ? 'its session was held out of training' : 'its session was in the training set, so this is not a test'}): scatter in ln τ<sub>E</sub> goes from ${fmt(q.rmse_ln_tau_ipb98)} with IPB98 to <b>${fmt(q.rmse_ln_tau_hybrid)}</b> with the correction${q.learned_computed_on ? ` (computed on ${esc(q.learned_computed_on)})` : ''}. ${q.rmse_ln_tau_hybrid > q.rmse_ln_tau_ipb98 ? 'Worse here: it was trained on one point per shot at peak current, and this shot sits outside that.' : ''}`);
     if ((s.meta.heating || '').toLowerCase() !== 'ohmic')
       out.push('Stored energy is EFIT total energy, which includes beam fast ions, so H98 reads high in beam-heated phases.');
     return out.map(p => `<p>${p}</p>`).join('');
@@ -645,7 +694,7 @@
     }
     $('rp-q-tr').textContent = fmt(f.q95_traced); $('rp-q-ef').textContent = fmt(f.q95_efit);
     const c = f.shot_check;
-    $('rp-3d-note').innerHTML = `Over all ${c.n_compared} slices of this shot the traced q<sub>95</sub> differs from EFIT's by a median <b>${(c.median_rel_err * 100).toFixed(2)}%</b> (95th percentile ${(c.p95_rel_err * 100).toFixed(2)}%), and a line drifts off its flux surface by at most ${c.psi_n_drift_max.toExponential(1)} in ψ<sub>N</sub>. Traced on ${esc(f.device)}.`;
+    $('rp-3d-note').innerHTML = `Over all ${c.n_compared} slices of this shot the traced q<sub>95</sub> differs from EFIT's by a median <b>${(c.median_rel_err * 100).toFixed(2)}%</b> (95th percentile ${(c.p95_rel_err * 100).toFixed(2)}%), and a line drifts off its flux surface by at most ${c.psi_n_drift_max.toExponential(1)} in ψ<sub>N</sub>. Traced on ${esc(f.device)}.${f.computed_on ? ` <span class="muted">Computed on ${esc(f.computed_on)}.</span>` : ''}`;
   }
 
   async function drawPsi(i) {
@@ -660,7 +709,8 @@
       Plotly.restyle('rp-xs', { z: [$('rp-eq-on').checked ? p.surrogate.psi_n : [[null]]] }, [1]);
       $('rp-eq-note').innerHTML = `A PhysicsNeMo network maps 93 magnetic signals (field probes, flux loops, coil currents, Rogowski I<sub>p</sub>) straight to the flux map. On this slice it differs from EFIT by <b>${(p.surrogate.rel_l2 * 100).toFixed(2)}%</b> (relative L2 of ψ); over the shot, median ${(q.median_rel_l2 * 100).toFixed(2)}%. ` +
         (q.held_out ? '<b>This shot was held out of training</b> (its whole session was).' : '<span class="muted">This shot was in the training sessions, so this is not a test: pick #27257 for a held-out one.</span>') +
-        ' <span class="muted">Contours use EFIT\'s axis and boundary flux. It is a surrogate of EFIT\'s reconstruction, not a check of it.</span>';
+        ' <span class="muted">Contours use EFIT\'s axis and boundary flux. It is a surrogate of EFIT\'s reconstruction, not a check of it.</span>' +
+        (q.computed_on ? ` <span class="muted">Computed on ${esc(q.computed_on)}.</span>` : '');
     }
     if (p.thomson) Plotly.restyle('rp-te', { x: [p.thomson.R], y: [p.thomson.Te_keV] }, [0]);
   }

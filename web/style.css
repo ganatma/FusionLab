@@ -44,6 +44,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
       grid-template-columns:minmax(250px, .85fr) 1.7fr 1.55fr; grid-template-rows:auto auto 1.1fr 1fr;
       grid-template-areas:"bar bar bar" "hint hint hint" "eq tr v3" "eq st v3"; }
 .cr-hint { grid-area:hint; display:flex; align-items:center; gap:16px; padding:7px 12px; background:#17120c; border-left:2px solid var(--accent); }
+.cr-hint.fallback { border-left-color:var(--warn); background:#1c150a; }
 .cr-hint span { flex:1; }
 .cr-bar { grid-area:bar; display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--bg); }
 .cr-bar select { width:auto; max-width:300px; }

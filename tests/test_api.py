@@ -207,6 +207,95 @@ def test_replay_psi_slice_matches_the_efit_grid():
     assert client.get("/replay/30420/psi/9999").status_code == 404
 
 
+# ---- multi-shot compare (A2), criterion 4: any shot id is replayable. An uncached catalog shot rides
+# mast.load_shot()'s existing cache-then-S3 path; the archive is mocked here — no test may touch the network.
+
+
+def _uncached_catalog_id():
+    """A shot the catalog lists but the repo cache does not ship."""
+    cached = set(mast.cached_shots())
+    ids = sorted(int(i) for i in mast.load_db()["shot_id"])
+    return next(i for i in ids if i > 30000 and i not in cached)
+
+
+def _fake_payload(real, shot_id):
+    return {**real, "meta": {**real["meta"], "shot_id": int(shot_id)}}
+
+
+def test_uncached_catalog_shot_is_fetched_and_cached(monkeypatch, tmp_path):
+    """The compare fan-out can open any catalog shot: one archive fetch, then the local cache serves repeats."""
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    calls = []
+
+    def fake_fetch(shot_id):
+        calls.append(int(shot_id))
+        return _fake_payload(real, shot_id)
+
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", fake_fetch)
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 200
+    j = r.json()
+    assert calls == [uncached]                                    # exactly one archive fetch
+    assert uncached in mast.cached_shots() and (tmp_path / f"{uncached}.npz").exists()
+    assert j["meta"]["shot_id"] == uncached and "measured" in j and "model" in j and "psi_grid" in j
+    assert j["limit_names"] == ["greenwald", "troyon", "kink"]    # fetched shots carry identical provenance structure
+    assert client.get(f"/replay/{uncached}/psi/10").status_code == 200   # per-slice routes ride the same path
+    assert client.get(f"/replay/{uncached}").status_code == 200 and calls == [uncached]   # second request: cache hit
+
+
+def test_concurrent_requests_share_one_fetch(monkeypatch, tmp_path):
+    """Two simultaneous requests for the same uncached id must not stampede the archive."""
+    import threading
+    import time as _time
+
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    calls = []
+
+    def slow_fetch(shot_id):
+        calls.append(int(shot_id))
+        _time.sleep(0.2)
+        return _fake_payload(real, shot_id)
+
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", slow_fetch)
+    out = []
+
+    def hit():
+        out.append(api_replay.replay_shot(uncached)["meta"]["shot_id"])
+
+    threads = [threading.Thread(target=hit) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert out == [uncached, uncached, uncached]
+    assert calls == [uncached]   # one archive fetch, three answers
+
+
+def test_uncached_shot_not_in_catalog_is_404(monkeypatch, tmp_path):
+    """A shot outside the catalog must not reach the archive."""
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", lambda sid: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    assert client.get("/replay/99999999").status_code == 404
+
+
+def test_failed_archive_fetch_is_502_and_leaves_no_cache(monkeypatch, tmp_path):
+    """When the archive is unreachable the client hears 502, and no partial cache file is left behind."""
+    uncached = _uncached_catalog_id()
+
+    def boom(shot_id):
+        raise RuntimeError("S3 unreachable")
+
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", boom)
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 502 and "fetch" in r.json()["detail"].lower()
+    assert uncached not in mast.cached_shots() and not (tmp_path / f"{uncached}.npz").exists()
+
+
 def test_db_operating_space():
     j = client.get("/db").json()
     assert j["n"] > 1000 and len(j["columns"]["H98"]) == j["n"] and "NaN" not in client.get("/db").text
@@ -408,3 +497,46 @@ def test_db_search_unfiltered_is_fast():
     j = client.get("/db/search").json()
     assert time.perf_counter() - t0 < 0.5
     assert j["total"] == 15_969 and len(j["rows"]) == 200
+
+
+def _no_nan_floats(node) -> bool:
+    """Strict JSON everywhere: no NaN/inf survived to the encoder (mirrors the _j null convention)."""
+    if isinstance(node, float):
+        return math.isfinite(node)
+    if isinstance(node, dict):
+        return all(_no_nan_floats(v) for v in node.values())
+    if isinstance(node, list):
+        return all(_no_nan_floats(v) for v in node)
+    return True
+
+
+def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypatch):
+    """A shot without line-average density (some M9 catalog rows) replays an all-NaN model. The summary
+    must answer null medians — the strict-JSON encoder turns a single NaN into a 500 (observed on 28788)."""
+    real = api_replay.replay
+    import numpy as _np
+
+    def nan_model(shot, H=1.0):
+        r = real(shot, H=H)
+        return {k: _np.full_like(v, _np.nan) if isinstance(v, _np.ndarray) and v.dtype.kind == "f" else v
+                for k, v in r.items()}
+
+    monkeypatch.setattr(api_replay, "replay", nan_model)
+    r = client.get("/replay/30420")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["summary"]["P_LH_median_MW"] is None
+    assert j["summary"]["H98_median"] is None and j["summary"]["H89_median"] is None
+    assert _no_nan_floats(j)
+
+
+def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch):
+    """Some catalog rows have no level-2 Zarr in FAIR-MAST (observed: 30004). The fetch path answers a
+    404 that names the gap — not a 502 that blames the archive, and never a half-written cache."""
+    from zarr.errors import GroupNotFoundError
+    uncached = next(int(i) for i in mast.load_db()["shot_id"] if int(i) not in mast.cached_shots())
+    monkeypatch.setattr(mast, "load_shot", lambda sid: (_ for _ in ()).throw(GroupNotFoundError(sid)))
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 404
+    assert "not published" in r.json()["detail"]
+    assert uncached not in mast.cached_shots()

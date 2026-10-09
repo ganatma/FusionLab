@@ -64,12 +64,29 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 
 /* strip charts: shared time axis, label left, live value right */
 .strips { flex:1 1 0; min-height:0; display:grid; grid-template-rows:1.6fr 1fr 1fr 1.25fr; }
+.strips.cmp-on { grid-template-rows:1.6fr 1fr 1fr 1.25fr 1.1fr; }   /* + the ΔW difference strip (A2) */
 .strip { position:relative; min-height:0; border-top:1px solid var(--line); }
 .strip:first-child { border-top:0; }
 .strip-label, .strip-val { position:absolute; top:2px; z-index:2; font:600 11px/1.3 var(--mono); pointer-events:none; }
 .strip-label { left:44px; color:var(--muted); }
 .strip-val { right:4px; width:58px; text-align:right; color:var(--fg); font-variant-numeric:tabular-nums; }
 .strip-val.warn { color:var(--warn); } .strip-val.bad { color:var(--bad); }
+
+/* multi-shot compare bar (A2): one chip per shot, state-colored, with retry/drop on failure */
+.cmp-title { font:600 11px/1.3 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+.cmp-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.cmp-chip { display:inline-flex; gap:6px; align-items:center; border:1px solid var(--line); background:rgba(11,13,17,.72);
+            padding:4px 8px; font:12px/1 var(--mono); color:var(--muted); cursor:pointer; }
+.cmp-chip b { color:var(--fg); font-variant-numeric:tabular-nums; }
+.cmp-chip.wait { cursor:default; }
+.cmp-chip.ref, .cmp-chip.ok { border-color:#2a4f80; }
+.cmp-chip.ok { color:var(--fg); }
+.cmp-chip.bad { border-color:var(--bad); color:var(--bad); }
+.cmp-actions { display:flex; gap:6px; margin-left:auto; }
+.cmp-note { color:var(--muted); }
+.cmp-errs { display:flex; flex-direction:column; gap:4px; }
+.cmp-err { display:flex; align-items:center; gap:8px; color:var(--bad); font-family:var(--mono); font-size:12px; }
+.cmp-err b, .cmp-err .tool { color:inherit; }
 
 /* dense parameter table */
 .params { display:grid; grid-template-columns:repeat(3, 1fr); gap:0 18px; margin-bottom:6px; font-family:var(--mono); }

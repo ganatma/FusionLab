@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from zarr.errors import GroupNotFoundError
 
 from fusionlab import mast
 from fusionlab.compute import warm_up as compute_warm_up
@@ -45,15 +46,59 @@ def _j(a, nd=4):
 
 
 @lru_cache(maxsize=16)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
-def _shot(shot_id: int) -> dict:
-    if shot_id not in mast.cached_shots():
-        raise HTTPException(404, f"shot {shot_id} is not in the local cache (scripts/fetch_mast.py {shot_id})")
+def _shot_cached(shot_id: int) -> dict:
     return mast.load_shot(shot_id)
+
+
+# One archive fetch per shot id, however many requests want it: compare fans out over ids in parallel.
+_inflight: dict[int, dict] = {}
+_inflight_lock = threading.Lock()
+_FETCH_WAIT_S = 600   # a fetch takes seconds to minutes; a waiter gives up and asks the client to retry
+
+
+def _shot(shot_id: int) -> dict:
+    """A cached shot from the process cache; an uncached catalog shot through load_shot()'s fetch-and-cache path."""
+    if shot_id in mast.cached_shots():
+        return _shot_cached(shot_id)
+    if not bool(np.any(_catalog()["shot_id"] == shot_id)):
+        raise HTTPException(404, f"shot {shot_id} is not in the MAST catalog (data/mast_db.npz)")
+    with _inflight_lock:
+        job = _inflight.get(shot_id)
+        if job is None:
+            job = _inflight[shot_id] = {"done": threading.Event(), "err": None}
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        if not job["done"].wait(_FETCH_WAIT_S):
+            raise HTTPException(503, f"shot {shot_id} is still being fetched from FAIR-MAST — retry shortly")
+        if job["err"] == "unpublished":
+            raise HTTPException(404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST")
+        if job["err"]:
+            raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST: {job['err']}")
+    else:
+        try:
+            mast.load_shot(shot_id)   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
+        except GroupNotFoundError as err:
+            job["err"] = "unpublished"   # waiters answer with the same 404, not a 502
+            raise HTTPException(
+                404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST"
+            ) from err
+        except Exception as e:
+            job["err"] = type(e).__name__
+            logger.warning("fetch of shot %s from FAIR-MAST failed", shot_id, exc_info=True)
+        finally:
+            with _inflight_lock:
+                _inflight.pop(shot_id, None)
+            job["done"].set()
+    if shot_id in mast.cached_shots():
+        return _shot_cached(shot_id)
+    raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST")
 
 
 @router.get("/shots")
 def shots():
-    """Cached shots with their logbook text. The app never fetches from the network."""
+    """Cached shots with their logbook text. Uncached catalog shots are fetched on demand by /replay/{id}."""
     out = []
     for sid in mast.cached_shots():
         s = _shot(sid)
@@ -188,16 +233,22 @@ def _eq_psi(shot_id: int):
 
 
 def _summary(s: dict, r: dict) -> dict:
-    """Numbers for the insight panel, taken over near-steady slices only."""
+    """Numbers for the insight panel, taken over near-steady slices only. Medians are null when the model
+    has nothing to say (a shot without line-average density has an all-NaN model) — never NaN: the JSON
+    encoder rejects it and the panel shows an honest gap."""
     ok = r["steady"] & np.isfinite(r["H98"]) & np.isfinite(r["H89"])
     worst = np.nan_to_num(r["worst_limit"], nan=0.0)
     k = int(worst.argmax())
     def med(a):
-        return round(float(np.median(a[ok])), 2) if ok.any() else None
+        if not ok.any():
+            return None
+        m = float(np.median(a[ok]))
+        return round(m, 2) if np.isfinite(m) else None
+    p_lh = float(np.nanmedian(r["P_LH_MW"])) if np.isfinite(r["P_LH_MW"]).any() else None
     return {"n_steady": int(ok.sum()), "H98_median": med(r["H98"]), "H89_median": med(r["H89"]),
             "peak_limit": LIMIT_NAMES[int(r["binding"][k])], "peak_limit_fraction": round(float(worst[k]), 2),
             "peak_limit_t_s": round(float(s["t_s"][k]), 3),
-            "P_LH_median_MW": round(float(np.nanmedian(r["P_LH_MW"])), 2), "P_loss_median_MW": med(r["P_loss_MW"])}
+            "P_LH_median_MW": round(p_lh, 2) if p_lh is not None else None, "P_loss_median_MW": med(r["P_loss_MW"])}
 
 
 def _add_hybrid(s: dict, r: dict, summary: dict) -> None:

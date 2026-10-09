@@ -8,7 +8,8 @@ Two anonymous sources:
   * level-2 Zarr on S3 (one per shot)  -> load_shot(): traces on the EFIT time base + geometry
 
 Everything leaves this module in project units: m, T, MA, 1e20 m^-3, keV, MW (plus MJ, s).
-The app only ever reads the cache, so the demo does not need the network.
+The shipped cache powers the demo with no network; /replay/{id} additionally exposes load_shot()'s
+fetch-and-cache path, so any shot in the catalog can be opened on demand (multi-shot compare).
 """
 
 from __future__ import annotations

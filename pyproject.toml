@@ -12,6 +12,9 @@ dependencies = [
   "usd-core>=26.8",
   "zarr>=3.1.6",
   "s3fs>=2026.9.0",
+  "anthropic>=1.13.0",
+  "pypdf>=6.20.0",
+  "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]

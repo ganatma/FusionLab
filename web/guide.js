@@ -254,7 +254,7 @@
     const q = new URLSearchParams(location.search), at = (id) => Math.max(0, L.steps.findIndex((s) => s.id === id));
     idx = at(q.get('lesson') || store.get('fusionlab-lesson'));
     // A deep link decides the mode; otherwise the last choice; otherwise ask once.
-    const want = q.get('mode') || (q.get('lesson') ? 'guided' : null) || (q.get('shot') || location.hash === '#sandbox' ? 'lab' : null) || store.get('fusionlab-mode');
+    const want = q.get('mode') || (q.get('lesson') ? 'guided' : null) || (q.get('shot') || q.get('compare') || location.hash === '#sandbox' ? 'lab' : null) || store.get('fusionlab-mode');
     if (want) setMode(want); else welcome.hidden = false;
   }
   boot().catch((e) => { console.error('guided study unavailable:', e); modeSeg.hidden = true; });

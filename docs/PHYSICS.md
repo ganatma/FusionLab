@@ -139,6 +139,9 @@ Check: traced q at ψ_N = 0.95 vs EFIT `q95`, median 0.11–0.22% over 209 slice
 (`models/fieldlines_check.json`, 512 steps per turn, chosen from a convergence study on the drift metric).
 Scope: these are the field lines of EFIT's axisymmetric reconstruction. No islands, no 3D or error fields.
 
+Tracing can also run on a user-provided GPU host over SSH instead of this process — see
+[COMPUTE.md](COMPUTE.md) for the setup and its limits.
+
 ## Known gaps
 * **Replay, seen on the four cached shots:** the Martin threshold gives 0.1–0.3 MW on MAST while the ohmic shot loses
   ~1 MW and still follows the L-mode law, so `replay` reports both laws and does not pick a mode from Martin.

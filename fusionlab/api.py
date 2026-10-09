@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def simulate_point(device: str = "iter", Ip: float | None = None, B: float | Non
             and 1e-3 <= H <= 100 and 1 <= Zeff <= 1000):
         raise HTTPException(422, "controls out of physical range")
     c = Controls(device=device, Ip=Ip, B=B, n=n, P_aux=P_aux, H=H, Zeff=Zeff)
-    return {"controls": c.__dict__, "result": simulate(c)}
+    return {"controls": c.__dict__, "result": _strict_json(simulate(c))}
 
 
 def _grid_json(x, shape):
@@ -63,6 +64,18 @@ def _grid_json(x, shape):
     out = x.astype(object)
     out[~np.isfinite(x)] = None
     return out.tolist()
+
+
+def _strict_json(x):
+    """Scalar counterpart of _grid_json: a non-finite number must reach the client as a 422,
+    never as Starlette's allow_nan=False encoder raising at render time (an unhandled 500)."""
+    if isinstance(x, dict):
+        return {k: _strict_json(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_strict_json(v) for v in x]
+    if isinstance(x, float) and not math.isfinite(x):
+        raise HTTPException(422, "result contains a non-finite value")
+    return x
 
 
 MAP_KEYS = ("Q", "T_keV", "P_fus_MW", "tau_E_s", "f_greenwald", "beta_N", "q95", "worst_limit",

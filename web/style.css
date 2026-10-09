@@ -231,3 +231,16 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
   .fig.mini .fig-svg { max-height:120px; } .fig.mini .fig-note { display:none; }
 }
 @media (max-width:700px) { .welcome-pick { grid-template-columns:1fr; } }
+
+/* Catalog search (db tab): one row of filters, scrollable results, shareable via URL */
+.db-filter { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:flex-end; }
+.db-filter label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+.db-filter .pair { display:flex; gap:4px; }
+.db-filter input { width:72px; background:var(--bg); color:var(--fg); border:1px solid var(--line); padding:5px 8px; font:12.5px/1.2 var(--mono); accent-color:var(--accent); }
+.db-filter input#rp-srch-q { width:160px; }
+.db-filter input#rp-srch-campaign { width:52px; }
+.db-filter .chk { flex-direction:row; align-items:center; gap:6px; padding-bottom:7px; }
+.db-filter .chk input { width:auto; }
+.srch-rows { max-height:480px; overflow:auto; }
+.srch-rows td { white-space:nowrap; }
+.bad { color:var(--bad); }

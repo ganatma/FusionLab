@@ -9,6 +9,7 @@ host environment must not turn the agent on behind the tests' backs.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from fusionlab import agent, api_agent, mast
+from fusionlab import agent, api_agent, mast, protocol
 from fusionlab.api import app
 from tests.agent_fakes import FakeClient, parse_sse, text_block, tool_use_block
 
@@ -61,6 +62,82 @@ def propose_export(monkeypatch: pytest.MonkeyPatch) -> str:
                                (["Proposed."], [text_block("Proposed.")])])
     events = chat("export the shot")
     return next(e for e in events if e["type"] == "action_proposed")["action_id"]
+
+
+# ---- the panel serving gate (blueprint verification row 1)
+
+
+def test_disabled_page_carries_no_agent_surface():
+    """With the agent off, `/` renders without the agent panel — not even a script tag — and
+    /static/agent.js is not served. The offline page is the file on disk, byte for byte."""
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "agent" not in page.text.lower()
+    assert client.get("/static/agent.js").status_code == 404
+
+
+def test_enabled_page_injects_the_panel_script_and_serves_it(monkeypatch):
+    """The enabled page's only delta is the agent.js tag (the panel itself is built client-side
+    after /agent/health confirms), and the script itself is now served."""
+    enable_agent(monkeypatch, [])
+    page = client.get("/")
+    assert page.status_code == 200
+    assert '<script src="/static/agent.js" defer></script>' in page.text
+    js = client.get("/static/agent.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"].lower()
+    assert "/agent/health" in js.text   # the panel checks the documented gate before rendering
+
+
+# ---- protocol accept: the reviewer's edits, or the draft as extracted
+
+
+def _seed_draft(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """One draft in a redirected protocols dir (the repo's data/ is never touched)."""
+    pid = "p_" + "0" * 12
+    monkeypatch.setattr(protocol, "PROTOCOLS_DIR", tmp_path / "protocols")
+    protocol.save_draft(pid, protocol.Protocol(
+        title="As extracted",
+        source=protocol.ProtocolSource(kind="pasted", sha256="ab" * 32, extracted_by="test-model",
+                                       extracted_at="2026-01-01T00:00:00Z"),
+        steps=[protocol.ProtocolStep(index=0, actuator="p_nbi", nominal="P_nbi_MW 2.5", slider=0.5)],
+        caveats=["Compared with MAST data."]))
+    return pid
+
+
+def test_accept_without_body_promotes_the_draft_as_extracted(tmp_path, monkeypatch):
+    _seed_draft(tmp_path, monkeypatch)
+    r = client.post(f"/agent/protocols/{'p_' + '0' * 12}/accept")
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["status"] == "accepted" and j["protocol"]["title"] == "As extracted"
+    assert j["protocol"]["source"]["sha256"] == "ab" * 32
+    assert client.post(f"/agent/protocols/{'p_' + '0' * 12}/accept").status_code == 404   # consumed
+
+
+def test_accept_with_a_reviewed_body_applies_the_edits_and_keeps_provenance(tmp_path, monkeypatch):
+    """The panel's review view sends the human's field edits; provenance stays server-built —
+    the body has no source field to forge."""
+    pid = _seed_draft(tmp_path, monkeypatch)
+    r = client.post(f"/agent/protocols/{pid}/accept", json={
+        "title": "Reviewed",
+        "steps": [{"index": 0, "actuator": "n", "nominal": "n 0.8 1e20 m^-3", "slider": 0.8,
+                   "t_start_s": 0.25, "note": "ramp held"}],
+        "caveats": [],
+    })
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["protocol"]["title"] == "Reviewed"
+    assert j["protocol"]["steps"][0]["actuator"] == "n"
+    assert j["protocol"]["source"]["sha256"] == "ab" * 32
+    accepted = json.loads((tmp_path / "protocols" / f"{pid}.json").read_text())
+    assert accepted["title"] == "Reviewed" and accepted["steps"][0]["actuator"] == "n"
+
+
+def test_a_reviewed_body_needs_a_draft(tmp_path, monkeypatch):
+    monkeypatch.setattr(protocol, "PROTOCOLS_DIR", tmp_path / "protocols")
+    r = client.post(f"/agent/protocols/{'p_' + '0' * 12}/accept", json={"title": "X", "steps": [], "caveats": []})
+    assert r.status_code == 404
 
 
 # ---- health

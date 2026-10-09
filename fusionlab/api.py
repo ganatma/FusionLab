@@ -8,9 +8,10 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from fusionlab.agent_config import agent_settings
 from fusionlab.api_agent import router as agent_router
 from fusionlab.api_replay import router as replay_router
 from fusionlab.api_replay import start_warm_up
@@ -128,12 +129,32 @@ def reactivity(n: int = 80):
 
 @app.get("/")
 def index():
-    return FileResponse(WEB / "index.html")
+    # The agent panel is additive. With the agent off, the page is the file on disk, byte for byte —
+    # zero agent markup, and /static/agent.js below answers 404 (the blueprint's verification row:
+    # "`/` renders without the agent panel and agent.js is not served"). With it on, the only delta
+    # is one script tag; the panel itself is built by agent.js after /agent/health confirms.
+    if not agent_settings().enabled:
+        return FileResponse(WEB / "index.html")
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    if "</head>" not in html:
+        return FileResponse(WEB / "index.html")   # unexpected shape: fail without the panel, never half-served
+    tag = '  <script src="/static/agent.js" defer></script>\n</head>'
+    return Response(html.replace("</head>", tag, 1), media_type="text/html")
 
 
 app.include_router(replay_router)
 app.include_router(virtual_router)
 app.include_router(agent_router)
+
+
+@app.get("/static/agent.js", include_in_schema=False)
+def agent_js():
+    """The panel script, served only when the agent is enabled — the /static mount would otherwise
+    serve it unconditionally. Registered before the mount, so this exact path wins; the offline core
+    loop's other static files are untouched."""
+    if not agent_settings().enabled:
+        raise HTTPException(404, "the agent is disabled — the assistant panel does not exist")
+    return FileResponse(WEB / "agent.js")
 
 
 class NoDotfiles(StaticFiles):

@@ -21,8 +21,9 @@ Protocol ingestion (blueprint "Protocol ingestion") shares the disabled gate and
 response shape: POST /agent/protocol/ingest reads a PDF (magic-byte check, size cap) or pasted
 text, makes the one schema-constrained extraction call (fusionlab/protocol.py), and answers with
 the draft protocol for review; POST /agent/protocols/{id}/accept promotes the reviewed draft to
-data/protocols/{id}.json and consumes it — accept makes no model call, so it works whenever a
-draft exists.
+data/protocols/{id}.json and consumes it — with an optional body carrying the reviewer's field
+edits (provenance always stays server-built), without one the draft is promoted as extracted.
+Accept makes no model call, so it works whenever a draft exists.
 """
 
 from __future__ import annotations
@@ -157,6 +158,16 @@ def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event, allow_nan=False)}\n\n"
 
 
+class ProtocolEditIn(BaseModel):
+    """The reviewer's fields of a protocol draft, sent by the panel's review view on accept.
+    Provenance is deliberately absent — the stored draft's server-built source block always wins,
+    so a tampered client cannot forge where a protocol came from."""
+
+    title: str = Field(min_length=1, max_length=300)
+    steps: list[protocol.ProtocolStep] = Field(default_factory=list, max_length=100)
+    caveats: list[str] = Field(default_factory=list, max_length=20)
+
+
 # ---------------------------------------------------------------- routes
 @router.get("/agent/health")
 def agent_health() -> dict[str, Any]:
@@ -231,12 +242,18 @@ def agent_protocol_ingest(file: UploadFile | None = None, text: str | None = For
 
 
 @router.post("/agent/protocols/{protocol_id}/accept")
-def agent_protocol_accept(protocol_id: str) -> dict[str, Any]:
+def agent_protocol_accept(protocol_id: str, edited: ProtocolEditIn | None = None) -> dict[str, Any]:
     """Second phase of protocol review: promote the reviewed draft to data/protocols/{id}.json and
-    consume the draft (protocol.accept_draft is the only writer there). Unknown and malformed ids
-    answer 404 — the id is validated before it can name a path, so a tampered client cannot reach
-    the filesystem, only promote a draft that exists."""
+    consume the draft (protocol.accept_draft is the only writer there). The body, when the panel's
+    review view sends it, is the human's field edits (title, steps, caveats) — applied to the stored
+    draft while its server-built provenance is kept; with no body the draft is promoted exactly as
+    extracted. Unknown and malformed ids answer 404 — the id is validated before it can name a path,
+    so a tampered client cannot reach the filesystem, only promote a draft that exists."""
     try:
+        if edited is not None:
+            stored = protocol.load_draft(protocol_id)   # no draft, nothing to review — 404 before any write
+            protocol.save_draft(protocol_id, protocol.Protocol(
+                title=edited.title, source=stored.source, steps=edited.steps, caveats=edited.caveats))
         accepted = protocol.accept_draft(protocol_id)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e

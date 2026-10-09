@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from fusionlab.atomicio import atomic_write
+
 REST = "https://mastapp.site"
 S3_ENDPOINT = "https://s3.echo.stfc.ac.uk"
 DATA = Path(__file__).resolve().parent.parent / "data"
@@ -58,7 +60,8 @@ _DB_COLS = {
 def fetch_db() -> dict:
     """Download the whole shot table (~64 MB, one request) and keep the numeric columns."""
     # B310: scheme and host are the module's fixed https REST constant, not user input
-    raw = urllib.request.urlopen(f"{REST}/ndjson/shots", timeout=180).read()   # nosec B310
+    with urllib.request.urlopen(f"{REST}/ndjson/shots", timeout=180) as r:   # nosec B310
+        raw = r.read()
     rows = [json.loads(line) for line in raw.split(b"\n") if line.strip()]
     def num(v):
         return float(v) if isinstance(v, (int, float)) else np.nan
@@ -71,11 +74,17 @@ def fetch_db() -> dict:
     return db
 
 
+def _savez(tmp: Path, **arrays) -> None:
+    """np.savez_compressed(Path) appends .npz to names not ending in it; a file object writes exactly where told."""
+    with tmp.open("wb") as fh:
+        np.savez_compressed(fh, **arrays)
+
+
 def load_db(refresh: bool = False) -> dict:
     """Shot table as a dict of equal-length arrays. Cached in data/mast_db.npz."""
     if refresh or not DB_FILE.exists():
         DATA.mkdir(exist_ok=True)
-        np.savez_compressed(DB_FILE, **fetch_db())
+        atomic_write(DB_FILE, lambda tmp: _savez(tmp, **fetch_db()))
     with np.load(DB_FILE) as z:
         return {k: z[k] for k in z.files}
 
@@ -222,7 +231,8 @@ _META_KEYS = {"campaign": "campaign", "heating": "heating", "timestamp": "timest
 def fetch_meta(shot_id: int) -> dict:
     """Logbook text and beam timing for one shot from the REST API."""
     # B310: fixed https REST constant; shot_id is an int
-    d = json.load(urllib.request.urlopen(f"{REST}/json/shots/{shot_id}", timeout=60))   # nosec B310
+    with urllib.request.urlopen(f"{REST}/json/shots/{shot_id}", timeout=60) as r:   # nosec B310
+        d = json.load(r)
     def clean(v):
         return v.strip().strip("'").strip() if isinstance(v, str) else v
     return {"shot_id": int(shot_id), **{k: clean(d.get(src)) for k, src in _META_KEYS.items()}}
@@ -242,7 +252,8 @@ def load_shot(shot_id: int, refresh: bool = False) -> dict:
     if refresh or not f.exists():
         s = fetch_shot(int(shot_id))
         SHOTS.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(f, meta=json.dumps(s.pop("meta")), **s)
+        meta = json.dumps(s.pop("meta"))
+        atomic_write(f, lambda tmp: _savez(tmp, meta=meta, **s))
     with np.load(f) as z:
         out = {k: z[k] for k in z.files if k != "meta"}
         out["meta"] = json.loads(str(z["meta"]))

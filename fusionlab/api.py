@@ -91,8 +91,11 @@ def operating_map(device: str = "iter", Ip: float | None = None, B: float | None
         raise HTTPException(404, f"unknown device '{device}'")
     d = DEVICES[device]
     Ip, B = Ip if Ip is not None else d.Ip_max, B if B is not None else d.B_max
-    if not (Ip > 0 and B > 0 and H > 0 and Zeff >= 1):
-        raise HTTPException(422, "need Ip > 0, B > 0, H > 0, Zeff >= 1")
+    # Finiteness belongs in the guard: inf passes every positivity check, but the raw Ip/B/H/Zeff
+    # scalars below are not grid-nulled, so they crashed the strict JSON encoder at render (a 500).
+    if not (Ip > 0 and B > 0 and H > 0 and Zeff >= 1
+            and np.isfinite([Ip, B, H, Zeff]).all()):
+        raise HTTPException(422, "need finite Ip > 0, B > 0, H > 0, Zeff >= 1")
     nx, ny = int(np.clip(nx, 2, MAP_MAX)), int(np.clip(ny, 2, MAP_MAX))
     n_gw = Ip / (np.pi * d.a**2)  # Greenwald density [1e20 m^-3]; sweep past it so the limit shows
     n_axis = np.linspace(0.05 * n_gw, 1.3 * n_gw, nx)

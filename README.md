@@ -57,6 +57,9 @@ db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
 
 `uv run python scripts/fetch_mast.py 29182` caches any other level-2 shot (~27 s, ~1 MB).
 
+The dev server reads the data cache and the model weights once per process: restart it after re-fetching
+shots (`make data`, `fetch_mast.py`) or retraining (`make train`) to pick up the new artifacts.
+
 ## A five-minute demo
 
 0. **First visit:** the app asks. **New to fusion** starts the guided study (about 15 minutes; `/?lesson=1.5` jumps
@@ -142,7 +145,7 @@ flowchart LR
   F --> U
   F --> A
   M --> U[usd_export.py<br/>time-sampled OpenUSD stage]
-  R --> A[FastAPI<br/>/shots /replay /db /surrogate /simulate /map]
+  R --> A[FastAPI<br/>/shots /replay /db /db/search /surrogate /simulate /map]
   S --> A
   U --> A
   E[physics.simulate<br/>0D power balance<br/>ITER · SPARC · JET · DIII-D · MAST] --> A

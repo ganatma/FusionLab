@@ -1,13 +1,20 @@
 import json
+import logging
 import math
+import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from fusionlab import api_replay, mast
 from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
 WEB = Path(__file__).resolve().parents[1] / "web"
+
+# Every spelling a query string can carry for a non-finite float; 1e309 parses to inf.
+NON_FINITE = ("NaN", "Infinity", "-Infinity", "1e309")
 
 
 def test_health_and_devices():
@@ -53,6 +60,24 @@ def test_simulate_non_finite_result_is_422_not_500(monkeypatch):
     assert client.get("/simulate", params={"device": "iter"}).status_code == 422
 
 
+@pytest.mark.parametrize("value", NON_FINITE)
+@pytest.mark.parametrize("param", ("Ip", "B", "n", "P_aux", "H", "Zeff"))
+def test_simulate_rejects_non_finite_param(param, value):
+    """Any non-finite control must 422 from the range guard, never a 5xx (API-01 probed matrix)."""
+    r = client.get("/simulate", params={"device": "iter", param: value})
+    assert r.status_code == 422
+    assert r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    ({"H": -2}, {"Zeff": 0}, {"P_aux": -100}, {"n": -5}, {"Ip": "1e300"}),
+)
+def test_simulate_rejects_out_of_domain_params(params):
+    """Domain parity: negative H/P_aux/n, Zeff < 1, and overflow-scale Ip are all refused."""
+    assert client.get("/simulate", params={"device": "iter", **params}).status_code == 422
+
+
 def test_index_served():
     assert "FusionLab" in client.get("/").text
 
@@ -78,6 +103,28 @@ def test_map_caps_grid_and_rejects_bad_input():
     assert m["nx"] == 100 and len(m["Q"]) == 3 and len(m["Q"][0]) == 100
     assert client.get("/map", params={"device": "nope"}).status_code == 404
     assert client.get("/map", params={"device": "iter", "Ip": 0}).status_code == 422
+
+
+@pytest.mark.parametrize("value", NON_FINITE)
+@pytest.mark.parametrize("param", ("Ip", "B", "H", "Zeff"))
+def test_map_rejects_non_finite_param(param, value):
+    """inf once passed the positivity guard and crashed the strict JSON encoder at render (500)."""
+    r = client.get("/map", params={"device": "iter", param: value})
+    assert r.status_code == 422
+    assert r.json()["detail"]
+
+
+@pytest.mark.parametrize("params", ({"H": -2}, {"Zeff": 0}, {"Ip": -1}, {"B": -1}))
+def test_map_rejects_out_of_domain_params(params):
+    assert client.get("/map", params={"device": "iter", **params}).status_code == 422
+
+
+def test_map_finite_extreme_never_5xx():
+    """A finite extreme overflows grid cells to inf, which _grid_json nulls: 200 with strict JSON —
+    the /map counterpart of /simulate's output-finiteness net."""
+    resp = client.get("/map", params={"device": "iter", "Ip": "1e300"})
+    assert resp.status_code == 200
+    json.loads(resp.text, parse_constant=_reject_constant)  # no NaN/Infinity literal in the body
 
 
 def test_nodotfiles_lookup_path():
@@ -187,6 +234,82 @@ def test_usd_download_is_a_usd_file():
     assert r.status_code == 200 and r.content[:8] == b"PXR-USDC" and len(r.content) > 100_000
 
 
+def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
+    """Overlapping downloads used to share one in-place output path and readers mid-write got truncated
+    stages: both export phases must land on a same-directory temp, published with one os.replace."""
+    out = Path(api_replay.__file__).resolve().parent.parent / "out" / "mast_30420.usda"
+    out.parent.mkdir(exist_ok=True)
+    out.unlink(missing_ok=True)   # the assertion is that the endpoint creates the served path
+    seen = {}
+
+    def fake_with_lines(shot, path):
+        seen["tmp"] = Path(path)
+        seen["final_exists_mid_export"] = out.exists()
+        Path(path).write_bytes(b"stage-bytes")
+
+    def plain_must_not_run(shot, path):
+        raise AssertionError("plain export ran although the field-line export succeeded")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", fake_with_lines)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", plain_must_not_run)
+    r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+    assert r.status_code == 200 and r.content == b"stage-bytes"
+    assert seen["tmp"] != out and seen["tmp"].parent == out.parent   # temp, same dir -> atomic replace
+    assert seen["final_exists_mid_export"] is False                  # the served path exists only after publish
+    assert out.exists() and not seen["tmp"].exists()
+    assert not list(out.parent.glob(f".{out.stem}.tmp*"))            # no temp litter on the success path
+
+
+def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch):
+    """A download that fails mid-write must not damage the previous stage nor leave a temp behind."""
+    out = Path(api_replay.__file__).resolve().parent.parent / "out" / "mast_30420.usda"
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(b"previous-good-stage")
+
+    def dies_mid_write(shot, path):
+        Path(path).write_bytes(b"half-written")
+        raise RuntimeError("export exploded mid-write")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", dies_mid_write)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", dies_mid_write)
+    with pytest.raises(RuntimeError, match="export exploded"):
+        client.get("/replay/30420/usd", params={"fmt": "usda"})   # a total failure still surfaces as a 500
+    assert out.read_bytes() == b"previous-good-stage"             # the old artifact is untouched
+    assert not list(out.parent.glob(f".{out.stem}.tmp*"))         # temp unlinked on failure
+
+
+def test_usd_plain_stage_fallback_logs_a_warning(caplog, monkeypatch):
+    """The plain-stage fallback used to be silent; degradation must be visible, traceback included."""
+
+    def broken(shot, path):
+        raise RuntimeError("no warp device here")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", broken)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", lambda shot, path: Path(path).write_bytes(b"plain-stage"))
+    with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
+        r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+    assert r.status_code == 200 and r.content == b"plain-stage"
+    warns = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+    assert len(warns) >= 1 and warns[0].exc_info is not None
+
+
+def test_eq_surrogate_fallback_logs_a_warning(caplog, monkeypatch):
+    """The eq-surrogate overlay's fail-open path used to swallow everything silently."""
+
+    def broken_model():
+        raise RuntimeError("torch exploded")
+
+    monkeypatch.setattr(api_replay, "_eq_model", broken_model)
+    api_replay._eq_psi.cache_clear()
+    try:
+        with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
+            assert api_replay._eq_psi(30420) is None   # the replay itself carries on
+        warns = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+        assert len(warns) >= 1 and warns[0].exc_info is not None
+    finally:
+        api_replay._eq_psi.cache_clear()   # do not leave the fallback result cached for later tests
+
+
 def test_fieldlines_slice_has_traced_q_next_to_efit():
     r = client.get("/replay/30420/fieldlines/20")
     if r.status_code == 503:   # Warp cannot run on this machine: the endpoint must say so, not crash
@@ -205,3 +328,83 @@ def test_equilibrium_surrogate_overlay_is_labelled_held_out_or_not():
     assert client.get("/replay/30166").json()["summary"]["eq_surrogate"]["held_out"] is False
     p = client.get("/replay/27257/psi/30").json()
     assert len(p["surrogate"]["psi_n"]) == len(p["psi_n"]) and 0 < p["surrogate"]["rel_l2"] < 0.2
+
+
+# ---- catalog search (A1): /db/search against direct numpy masks over the same table
+DB_SEARCH_FIELDS = {"shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
+                    "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
+                    "t_ipmax_s", "useful", "abort"}
+
+
+def test_db_search_rows_match_direct_numpy_masks():
+    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table."""
+    db = mast.load_db()
+    cases = [
+        ({"q": "30421"}, db["shot_id"] == 30421),
+        ({"q": "30400-30500"}, (db["shot_id"] >= 30400) & (db["shot_id"] <= 30500)),
+        ({"campaign": "M9"}, db["campaign"] == 9),
+        ({"campaign": "5"}, db["campaign"] == 5),
+        ({"ip_min": 0.8}, db["Ip_MA"] >= 0.8),
+        ({"ip_max": 0.6}, db["Ip_MA"] <= 0.6),
+        ({"bt_min": 0.5, "bt_max": 1.0}, (db["B_T"] >= 0.5) & (db["B_T"] <= 1.0)),
+        ({"pnbi_min": 2.0}, db["P_nbi_MW"] >= 2.0),
+        ({"pnbi_max": 0.0}, db["P_nbi_MW"] <= 0.0),            # ohmic shots: the beams were never on
+        ({"ne_min": 0.5, "ne_max": 1.0}, (db["n_e20"] >= 0.5) & (db["n_e20"] <= 1.0)),
+        ({"w_min": 0.05}, db["W_MJ"] >= 0.05),
+        ({"w_max": 0.1}, db["W_MJ"] <= 0.1),
+        ({"q95_min": 3.0}, db["q95"] >= 3.0),
+        ({"q95_max": 5.0}, db["q95"] <= 5.0),
+        ({"useful": True}, db["useful"] == 1),
+        ({"useful": False}, db["useful"] != 1),                # shots the archive never marked useful
+        ({"abort": True}, db["abort"] == 1),
+        ({"abort": False}, db["abort"] != 1),
+        ({"ip_min": 0.8, "campaign": "M9", "useful": True},    # filters AND together
+         (db["Ip_MA"] >= 0.8) & (db["campaign"] == 9) & (db["useful"] == 1)),
+    ]
+    for params, mask in cases:
+        j = client.get("/db/search", params=params).json()
+        assert j["total"] == int(mask.sum()), params
+        # the default page (limit 200) is the head of the ascending ids the mask selects
+        assert [r["shot_id"] for r in j["rows"]] == sorted(db["shot_id"][mask].tolist())[:200], params
+
+
+def test_db_search_rows_carry_every_metadata_field_as_strict_json():
+    r = client.get("/db/search", params={"limit": 5})
+    assert "NaN" not in r.text and "Infinity" not in r.text   # missing fields surface as null, never NaN
+    j = r.json()
+    assert set(j["rows"][0]) == DB_SEARCH_FIELDS
+    assert j["total"] == 15_969 and j["limit"] == 5 and j["offset"] == 0
+    assert {row["campaign"] for row in j["rows"]} <= {5, 6, 7, 8, 9}
+
+
+def test_db_search_pagination_windows():
+    """Criterion 2: windows slice the ascending match set; total never moves; overruns are 422, not 500."""
+    all_rows = client.get("/db/search", params={"limit": 1000}).json()
+    total, ids = all_rows["total"], [r["shot_id"] for r in all_rows["rows"]]
+    p1 = client.get("/db/search", params={"limit": 10}).json()
+    p2 = client.get("/db/search", params={"limit": 10, "offset": 10}).json()
+    assert p1["total"] == p2["total"] == total
+    assert [r["shot_id"] for r in p1["rows"]] == ids[:10]
+    assert [r["shot_id"] for r in p2["rows"]] == ids[10:20]
+    assert not {r["shot_id"] for r in p1["rows"]} & {r["shot_id"] for r in p2["rows"]}
+    last = client.get("/db/search", params={"offset": total - 1}).json()
+    assert [r["shot_id"] for r in last["rows"]] == [int(mast.load_db()["shot_id"].max())]
+    assert client.get("/db/search", params={"offset": total}).status_code == 422
+    assert client.get("/db/search", params={"offset": total + 500}).status_code == 422
+
+
+def test_db_search_rejects_malformed_params():
+    for params in ({"offset": -1}, {"limit": 0}, {"limit": 1001},                        # paging bounds
+                   {"ip_min": "abc"}, {"w_max": "lots"},                                 # malformed numbers
+                   {"q": "30400-30500-99999"}, {"q": "nope"}, {"q": "30500-30400"},      # malformed / inverted q
+                   {"campaign": "MX"}, {"useful": "maybe"}):                             # malformed campaign / bool
+        assert client.get("/db/search", params=params).status_code == 422, params
+
+
+def test_db_search_unfiltered_is_fast():
+    """Criterion 3: the full-catalog search is a vectorized mask, not per-row Python (catalog cached)."""
+    client.get("/db/search")   # warm the one-time npz read: the budget covers the route itself
+    t0 = time.perf_counter()
+    j = client.get("/db/search").json()
+    assert time.perf_counter() - t0 < 0.5
+    assert j["total"] == 15_969 and len(j["rows"]) == 200

@@ -32,6 +32,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fusionlab import mast, surrogate  # noqa: E402
+from fusionlab.atomicio import atomic_write  # noqa: E402
 from fusionlab.virtual import (  # noqa: E402
     CLOSURES,
     baseline,
@@ -194,7 +195,7 @@ def main() -> None:
                 print(f"[{k}/{len(ids)}] {i}: {msg}  ({time.time() - t0:.0f} s)", flush=True)
     m = {"refly": refly_table(), "matched_pairs": matched_pairs(),
          "data": "UKAEA FAIR-MAST level 2, CC BY-SA 4.0; shots drawn from the tau_E correction's held_out_blocks (seed 0)"}
-    OUT.write_text(json.dumps(m, indent=1) + "\n")
+    atomic_write(OUT, lambda tmp: tmp.write_text(json.dumps(m, indent=1) + "\n"))
     print("\n" + report(m) + f"\n\nwrote {OUT.relative_to(OUT.parent.parent)}")
 
 

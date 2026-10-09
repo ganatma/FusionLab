@@ -51,6 +51,15 @@ def test_ohmic_shot_has_no_beams_and_keeps_its_logbook(shot):
     assert "flux" in shot["meta"]["postshot"]
 
 
+def test_savez_writes_the_exact_temp_path(tmp_path):
+    """np.savez_compressed(Path) would append .npz and rename the temp file out from under atomic_write."""
+    t = tmp_path / ".shot.npz.tmp123"
+    mast._savez(t, a=np.arange(3))
+    assert t.exists() and not (tmp_path / ".shot.npz.tmp123.npz").exists()
+    with np.load(t) as z:
+        assert z["a"].tolist() == [0, 1, 2]
+
+
 def test_shot_table_cleaning():
     db = mast.load_db()
     c = mast.clean_db(db)

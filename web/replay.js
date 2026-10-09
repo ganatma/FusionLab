@@ -97,16 +97,39 @@
       </div>
     </div>`;
 
+  // Catalog search filter set (A1): the ranges the API exposes, one row each — [label, unit, url prefix].
+  const SRCH_RANGES = [['I<sub>p</sub>', 'MA', 'ip'], ['B', 'T', 'bt'], ['P<sub>nbi</sub>', 'MW', 'pnbi'],
+                       ['n<sub>e</sub>', '10²⁰ m⁻³', 'ne'], ['W', 'MJ', 'w'], ['q<sub>95</sub>', '', 'q95']];
+
   const dbRoot = document.getElementById('tab-db');
   if (dbRoot) dbRoot.innerHTML = `
-    <div class="panel stack">
-      <h2>The replayed shot among <span id="rp-db-n">…</span> real MAST shots (values at peak current)</h2>
-      <div id="rp-sur" class="small" data-guide="holdout"></div>
-      <div class="grid">
-        <div data-guide="db-tau"><div id="rp-db-tau" class="plot" style="height:360px"></div>
-          <div class="muted small">On the dashed line the IPB98(y,2) law matches the measurement. Energy includes beam fast ions.</div></div>
-        <div data-guide="db-ops"><div id="rp-db-ops" class="plot" style="height:360px"></div>
-          <div class="muted small">Dashed lines: Greenwald fraction 1.0 and β<sub>N</sub> 3.5. Orange: the replayed shot's path in time.</div></div>
+    <div class="stack">
+      <div class="panel stack" id="rp-srch-panel">
+        <h2>Search the catalog <span class="dim">every filter lives in the URL: share the view</span></h2>
+        <div class="db-filter">
+          <label>Shot<input id="rp-srch-q" type="text" placeholder="30421 or 30400-30500"></label>
+          <label>Campaign<input id="rp-srch-campaign" type="text" placeholder="M9"></label>
+          ${SRCH_RANGES.map(([n, u, k]) => `<label>${n}${u ? ` <span class="dim">${u}</span>` : ''}<span class="pair">
+              <input id="rp-srch-${k}-min" type="number" step="any" placeholder="min" aria-label="${n} min">
+              <input id="rp-srch-${k}-max" type="number" step="any" placeholder="max" aria-label="${n} max"></span></label>`).join('')}
+          <label class="chk"><input type="checkbox" id="rp-srch-useful">useful</label>
+          <label class="chk"><input type="checkbox" id="rp-srch-abort">aborted</label>
+          <button type="button" class="tool" id="rp-srch-clear">Clear</button>
+        </div>
+        <p class="small" id="rp-srch-status">…</p>
+        <div class="srch-rows"><table class="tbl" id="rp-srch-tbl"></table></div>
+        <p class="small muted" id="rp-srch-attr"></p>
+      </div>
+
+      <div class="panel stack">
+        <h2>The replayed shot among <span id="rp-db-n">…</span> real MAST shots (values at peak current)</h2>
+        <div id="rp-sur" class="small" data-guide="holdout"></div>
+        <div class="grid">
+          <div data-guide="db-tau"><div id="rp-db-tau" class="plot" style="height:360px"></div>
+            <div class="muted small">On the dashed line the IPB98(y,2) law matches the measurement. Energy includes beam fast ions.</div></div>
+          <div data-guide="db-ops"><div id="rp-db-ops" class="plot" style="height:360px"></div>
+            <div class="muted small">Dashed lines: Greenwald fraction 1.0 and β<sub>N</sub> 3.5. Orange: the replayed shot's path in time.</div></div>
+        </div>
       </div>
     </div>`;
 
@@ -193,6 +216,7 @@
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => r.json()).then(j => { db = j; drawDb(); });
+    initDbSearch();
     fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate);
     const asked = +new URLSearchParams(location.search).get('shot');   // deep link: /?shot=30192
     const want = list.shots.find(s => s.shot_id === asked) || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
@@ -589,6 +613,152 @@
     if (!($('rp-db-ops').data[2].x || []).length) pathDb();
     Plotly.restyle('rp-db-ops', { x: [[mo.f_greenwald[i]]], y: [[mo.troyon[i] === null ? null : mo.troyon[i] * db.beta_N_limit]] }, [3]);
     Plotly.restyle('rp-db-tau', { x: [[mo.tau_98_s[i]]], y: [[mo.tau_meas_s[i]]] }, [3]);
+  }
+
+  // ---- catalog search (A1): filter the full 15,969-shot table. Filters and the checked shots both live
+  // in the URL, so any view — and any selection for multi-shot compare (A2) — is shareable.
+  const SRCH_PAGE = 200, SRCH_MAX = 6;        // rows per page (the API's default); compare takes 2–6 shots (A2)
+  const SRCH_KEYS = ['q', 'campaign', ...SRCH_RANGES.flatMap(([, , k]) => [k + '_min', k + '_max'])];
+  const srchSel = new Set();                  // checked shot ids, mirrored to ?compare= for A2 to read
+  let srchSeq = 0, srchOffset = 0, srchResp = null, srchErr = null, srchNote = '';
+
+  const srchParams = () => {
+    const p = new URLSearchParams();
+    const text = (id, key) => { const v = $(id).value.trim(); if (v) p.set(key, v); };
+    text('rp-srch-q', 'q');
+    text('rp-srch-campaign', 'campaign');
+    SRCH_RANGES.forEach(([, , k]) => {
+      const lo = $('rp-srch-' + k + '-min').value, hi = $('rp-srch-' + k + '-max').value;
+      if (lo !== '') p.set(k + '_min', lo);
+      if (hi !== '') p.set(k + '_max', hi);
+    });
+    if ($('rp-srch-useful').checked) p.set('useful', 'true');
+    if ($('rp-srch-abort').checked) p.set('abort', 'true');
+    return p;
+  };
+
+  function srchSetUrl() {   // mirror filters + selection into the address bar; other params (shot, whatif) survive
+    const shared = new URLSearchParams(location.search);
+    [...SRCH_KEYS, 'useful', 'abort', 'offset', 'compare'].forEach(k => shared.delete(k));
+    for (const [k, v] of srchParams()) shared.set(k, v);
+    if (srchOffset) shared.set('offset', srchOffset);
+    if (srchSel.size) shared.set('compare', [...srchSel].sort((a, b) => a - b).join(','));
+    const qs = shared.toString();
+    history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+  }
+
+  function srchReadUrl() {   // a shared link restores the filters, the page and the selection
+    const q = new URLSearchParams(location.search), val = k => q.get(k) ?? '';
+    $('rp-srch-q').value = val('q');
+    $('rp-srch-campaign').value = val('campaign');
+    SRCH_RANGES.forEach(([, , k]) => {
+      $('rp-srch-' + k + '-min').value = val(k + '_min');
+      $('rp-srch-' + k + '-max').value = val(k + '_max');
+    });
+    $('rp-srch-useful').checked = ['1', 'true'].includes(val('useful'));
+    $('rp-srch-abort').checked = ['1', 'true'].includes(val('abort'));
+    srchOffset = Math.max(0, +val('offset') || 0);
+    (val('compare') || '').split(',').forEach(id => +id && srchSel.add(+id));
+  }
+
+  async function searchDb() {
+    const my = ++srchSeq;
+    srchNote = '';
+    srchSetUrl();
+    $('rp-srch-status').textContent = 'searching…';
+    const r = await fetch('/db/search?' + srchParams() + `&limit=${SRCH_PAGE}&offset=${srchOffset}`);
+    if (my !== srchSeq) return;   // a newer edit is in flight: the last filter state wins
+    srchErr = null;
+    if (!r.ok) {
+      const d = await r.json().catch(() => null);
+      const detail = typeof d?.detail === 'string' ? d.detail : '';
+      if (r.status === 422 && srchOffset && detail.includes('offset')) { srchOffset = 0; return searchDb(); }   // stale shared page
+      srchErr = detail || 'check the filter values';
+      srchResp = null;
+    } else srchResp = await r.json();
+    srchPaint();
+  }
+
+  function srchPaint() {
+    const flag = v => v == null ? '–' : v >= 1 ? '✓' : '✗';
+    const num = (v, nd = 2) => v == null ? '–' : Number(v).toFixed(nd);
+    const status = $('rp-srch-status');
+    if (srchErr) status.innerHTML = `<span class="bad">Filters rejected — ${esc(srchErr)}</span>`;
+    else if (!srchResp) status.textContent = '…';
+    else {
+      const pages = Math.max(1, Math.ceil(srchResp.total / SRCH_PAGE));
+      status.innerHTML = `<b>${srchResp.total.toLocaleString()}</b> shot${srchResp.total === 1 ? '' : 's'} match`
+        + (pages > 1 ? ` · page ${1 + srchOffset / SRCH_PAGE} of ${pages}
+            <button type="button" class="tool" id="rp-srch-prev"${srchOffset ? '' : ' disabled'}>‹ prev</button>
+            <button type="button" class="tool" id="rp-srch-next"${srchOffset + SRCH_PAGE >= srchResp.total ? ' disabled' : ''}>next ›</button>` : '')
+        + (srchSel.size ? ` · <b>${srchSel.size}</b> selected for compare` : '')
+        + (srchNote ? ` · <span class="bad">${esc(srchNote)}</span>` : '');
+    }
+    $('rp-srch-attr').textContent = srchResp ? srchResp.attribution : '';
+    $('rp-srch-tbl').innerHTML = !srchResp ? '' : `
+      <thead><tr><th></th><th>Shot</th><th>Camp</th><th class="num">I<sub>p</sub> MA</th><th class="num">B T</th>
+        <th class="num">P<sub>nbi</sub> MW</th><th class="num">n<sub>e</sub> 10²⁰</th><th class="num">W MJ</th>
+        <th class="num">q<sub>95</sub></th><th>useful</th><th>abort</th></tr></thead>
+      <tbody>${srchResp.rows.map(r => `
+        <tr><td><input type="checkbox" data-shot="${r.shot_id}" aria-label="select ${r.shot_id} for compare"${srchSel.has(r.shot_id) ? ' checked' : ''}></td>
+          <td><a href="?shot=${r.shot_id}" data-shot="${r.shot_id}">#${r.shot_id}</a></td><td>M${r.campaign}</td>
+          <td class="num">${num(r.Ip_MA)}</td><td class="num">${num(r.B_T)}</td><td class="num">${num(r.P_nbi_MW, 1)}</td>
+          <td class="num">${num(r.n_e20, 3)}</td><td class="num">${num(r.W_MJ, 3)}</td><td class="num">${num(r.q95)}</td>
+          <td>${flag(r.useful)}</td><td>${flag(r.abort)}</td></tr>`).join('')
+        || `<tr><td colspan="11" class="muted">No shots match. <button type="button" class="tool" id="rp-srch-empty-clear">Clear the filters</button></td></tr>`}</tbody>`;
+  }
+
+  function openReplay(id) {   // a search result clicked: the replay tab already deep-links on ?shot=
+    const shared = new URLSearchParams(location.search);
+    shared.set('shot', id);
+    history.replaceState(null, '', `?${shared}`);
+    window.FusionLab.showTab('replay');
+    window.FusionLab.replay.select(id);
+  }
+
+  function srchClear() {
+    ['rp-srch-q', 'rp-srch-campaign'].forEach(id => $(id).value = '');
+    SRCH_RANGES.forEach(([, , k]) => ['min', 'max'].forEach(s => $('rp-srch-' + k + '-' + s).value = ''));
+    $('rp-srch-useful').checked = $('rp-srch-abort').checked = false;
+    srchOffset = 0;
+    searchDb();
+  }
+
+  function initDbSearch() {
+    srchReadUrl();
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(() => { srchOffset = 0; searchDb(); }, 300); };
+    ['rp-srch-q', 'rp-srch-campaign'].forEach(id => $(id).addEventListener('input', soon));
+    SRCH_RANGES.forEach(([, , k]) => ['min', 'max'].forEach(s => $('rp-srch-' + k + '-' + s).addEventListener('input', soon)));
+    ['rp-srch-useful', 'rp-srch-abort'].forEach(id => $(id).addEventListener('change', () => { srchOffset = 0; searchDb(); }));
+    const panel = $('rp-srch-panel');
+    panel.addEventListener('click', e => {
+      if (e.target.id === 'rp-srch-clear' || e.target.id === 'rp-srch-empty-clear') return srchClear();
+      if (e.target.id === 'rp-srch-prev') {   // an out-of-range ?offset= lands on the last valid page, not nowhere
+        srchOffset = srchResp && srchOffset >= srchResp.total
+          ? Math.max(0, Math.floor((srchResp.total - 1) / SRCH_PAGE) * SRCH_PAGE)
+          : Math.max(0, srchOffset - SRCH_PAGE);
+        return searchDb();
+      }
+      if (e.target.id === 'rp-srch-next') { srchOffset += SRCH_PAGE; return searchDb(); }
+      const a = e.target.closest('a[data-shot]');
+      if (a) { e.preventDefault(); openReplay(+a.dataset.shot); }
+    });
+    panel.addEventListener('change', e => {
+      const box = e.target.closest('input[data-shot]');
+      if (!box) return;
+      const id = +box.dataset.shot;
+      if (box.checked && srchSel.size >= SRCH_MAX) {
+        box.checked = false;
+        srchNote = 'compare takes 2–6 shots — untick one first';
+      } else {
+        srchNote = '';
+        if (box.checked) srchSel.add(id); else srchSel.delete(id);
+      }
+      srchSetUrl();
+      srchPaint();
+    });
+    searchDb();
   }
 
   document.addEventListener('vessel3d:ready', () => {   // the module arrived after the first draw: swap the fallback out

@@ -30,6 +30,7 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from fusionlab import eq_surrogate as eqs  # noqa: E402
+from fusionlab.atomicio import atomic_write  # noqa: E402
 
 SHOTS = ROOT / "data" / "eq" / "shots"
 SEED = 0
@@ -178,6 +179,8 @@ def main():
                          "(what the operator sets -> psi), for the what-if spike. Use with --tag; never the shipped model")
     ap.add_argument("--tag", default="", help="ablation run: write to data/eq/runs/<tag>.* instead of models/")
     a = ap.parse_args()
+    if a.epochs < 1:
+        ap.error("--epochs must be >= 1")
     if a.tag:
         (ROOT / "data" / "eq" / "runs").mkdir(parents=True, exist_ok=True)
         eqs.MODEL_FILE, eqs.METRICS_FILE = (ROOT / "data" / "eq" / "runs" / f"{a.tag}{ext}" for ext in (".pt", ".json"))
@@ -308,7 +311,7 @@ def main():
           "out_std": out_std.cpu(), "basis": basis.cpu(), "psi_mean": psi_mean.cpu(), "psi_scale": psi_scale.cpu(),
           "lin_W": lin_W.cpu(), "R_m": R_m.cpu(), "Z_m": Z_m.cpu()}
     eqs.MODELS.mkdir(exist_ok=True)
-    torch.save(ck, eqs.MODEL_FILE)
+    atomic_write(eqs.MODEL_FILE, lambda tmp: torch.save(ck, tmp))
     eqs.load.cache_clear()
     model = eqs.load(str(dev))
     raw_test = T(d["x"][masks["test"]])
@@ -401,7 +404,7 @@ def main():
             metrics.setdefault("schedule_sweep_mlp_direct", {})[p.stem] = {
                 "epochs_run": m["training"]["epochs_run"], "val_rel_l2_median": c["val_rel_l2_median"],
                 "test_rel_l2_median": c["test_rel_l2"]["median"], "same_test_shots_as_headline": m["test_shot_ids"] == metrics["test_shot_ids"]}
-    eqs.METRICS_FILE.write_text(json.dumps(metrics, indent=1))
+    atomic_write(eqs.METRICS_FILE, lambda tmp: tmp.write_text(json.dumps(metrics, indent=1)))
     print(json.dumps({k: metrics[k] for k in ("test_metrics", "beats_linear", "throughput")}, indent=1))
 
 

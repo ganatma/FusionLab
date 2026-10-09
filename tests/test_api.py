@@ -175,10 +175,16 @@ def test_surrogate_metrics_and_hybrid_trace_are_served_together():
     assert len(j["model"]["W_hybrid_MJ"]) == len(j["measured"]["t_s"]) and "rmse_ln_tau_hybrid" in j["summary"]
 
 
+def test_usd_export_requires_post():
+    """Audit F1: the export recomputes the stage and writes out/ on every hit — a GET must not reach it."""
+    assert client.get("/replay/30420/usd").status_code == 405
+    assert client.post("/replay/1/usd").status_code == 404   # unknown shot: 404 from the cache allowlist, never 403
+    assert client.post("/replay/30420/usd", params={"fmt": "exe"}).status_code == 422
+
+
 def test_usd_download_is_a_usd_file():
-    r = client.get("/replay/30420/usd")
+    r = client.post("/replay/30420/usd")
     assert r.status_code == 200 and r.content[:8] == b"PXR-USDC" and len(r.content) > 100_000
-    assert client.get("/replay/30420/usd", params={"fmt": "exe"}).status_code == 422
 
 
 def test_fieldlines_slice_has_traced_q_next_to_efit():

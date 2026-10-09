@@ -1,12 +1,13 @@
 import json
 import logging
 import math
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from fusionlab import api_replay
+from fusionlab import api_replay, mast
 from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
@@ -321,3 +322,83 @@ def test_equilibrium_surrogate_overlay_is_labelled_held_out_or_not():
     assert client.get("/replay/30166").json()["summary"]["eq_surrogate"]["held_out"] is False
     p = client.get("/replay/27257/psi/30").json()
     assert len(p["surrogate"]["psi_n"]) == len(p["psi_n"]) and 0 < p["surrogate"]["rel_l2"] < 0.2
+
+
+# ---- catalog search (A1): /db/search against direct numpy masks over the same table
+DB_SEARCH_FIELDS = {"shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
+                    "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
+                    "t_ipmax_s", "useful", "abort"}
+
+
+def test_db_search_rows_match_direct_numpy_masks():
+    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table."""
+    db = mast.load_db()
+    cases = [
+        ({"q": "30421"}, db["shot_id"] == 30421),
+        ({"q": "30400-30500"}, (db["shot_id"] >= 30400) & (db["shot_id"] <= 30500)),
+        ({"campaign": "M9"}, db["campaign"] == 9),
+        ({"campaign": "5"}, db["campaign"] == 5),
+        ({"ip_min": 0.8}, db["Ip_MA"] >= 0.8),
+        ({"ip_max": 0.6}, db["Ip_MA"] <= 0.6),
+        ({"bt_min": 0.5, "bt_max": 1.0}, (db["B_T"] >= 0.5) & (db["B_T"] <= 1.0)),
+        ({"pnbi_min": 2.0}, db["P_nbi_MW"] >= 2.0),
+        ({"pnbi_max": 0.0}, db["P_nbi_MW"] <= 0.0),            # ohmic shots: the beams were never on
+        ({"ne_min": 0.5, "ne_max": 1.0}, (db["n_e20"] >= 0.5) & (db["n_e20"] <= 1.0)),
+        ({"w_min": 0.05}, db["W_MJ"] >= 0.05),
+        ({"w_max": 0.1}, db["W_MJ"] <= 0.1),
+        ({"q95_min": 3.0}, db["q95"] >= 3.0),
+        ({"q95_max": 5.0}, db["q95"] <= 5.0),
+        ({"useful": True}, db["useful"] == 1),
+        ({"useful": False}, db["useful"] != 1),                # shots the archive never marked useful
+        ({"abort": True}, db["abort"] == 1),
+        ({"abort": False}, db["abort"] != 1),
+        ({"ip_min": 0.8, "campaign": "M9", "useful": True},    # filters AND together
+         (db["Ip_MA"] >= 0.8) & (db["campaign"] == 9) & (db["useful"] == 1)),
+    ]
+    for params, mask in cases:
+        j = client.get("/db/search", params=params).json()
+        assert j["total"] == int(mask.sum()), params
+        # the default page (limit 200) is the head of the ascending ids the mask selects
+        assert [r["shot_id"] for r in j["rows"]] == sorted(db["shot_id"][mask].tolist())[:200], params
+
+
+def test_db_search_rows_carry_every_metadata_field_as_strict_json():
+    r = client.get("/db/search", params={"limit": 5})
+    assert "NaN" not in r.text and "Infinity" not in r.text   # missing fields surface as null, never NaN
+    j = r.json()
+    assert set(j["rows"][0]) == DB_SEARCH_FIELDS
+    assert j["total"] == 15_969 and j["limit"] == 5 and j["offset"] == 0
+    assert {row["campaign"] for row in j["rows"]} <= {5, 6, 7, 8, 9}
+
+
+def test_db_search_pagination_windows():
+    """Criterion 2: windows slice the ascending match set; total never moves; overruns are 422, not 500."""
+    all_rows = client.get("/db/search", params={"limit": 1000}).json()
+    total, ids = all_rows["total"], [r["shot_id"] for r in all_rows["rows"]]
+    p1 = client.get("/db/search", params={"limit": 10}).json()
+    p2 = client.get("/db/search", params={"limit": 10, "offset": 10}).json()
+    assert p1["total"] == p2["total"] == total
+    assert [r["shot_id"] for r in p1["rows"]] == ids[:10]
+    assert [r["shot_id"] for r in p2["rows"]] == ids[10:20]
+    assert not {r["shot_id"] for r in p1["rows"]} & {r["shot_id"] for r in p2["rows"]}
+    last = client.get("/db/search", params={"offset": total - 1}).json()
+    assert [r["shot_id"] for r in last["rows"]] == [int(mast.load_db()["shot_id"].max())]
+    assert client.get("/db/search", params={"offset": total}).status_code == 422
+    assert client.get("/db/search", params={"offset": total + 500}).status_code == 422
+
+
+def test_db_search_rejects_malformed_params():
+    for params in ({"offset": -1}, {"limit": 0}, {"limit": 1001},                        # paging bounds
+                   {"ip_min": "abc"}, {"w_max": "lots"},                                 # malformed numbers
+                   {"q": "30400-30500-99999"}, {"q": "nope"}, {"q": "30500-30400"},      # malformed / inverted q
+                   {"campaign": "MX"}, {"useful": "maybe"}):                             # malformed campaign / bool
+        assert client.get("/db/search", params=params).status_code == 422, params
+
+
+def test_db_search_unfiltered_is_fast():
+    """Criterion 3: the full-catalog search is a vectorized mask, not per-row Python (catalog cached)."""
+    client.get("/db/search")   # warm the one-time npz read: the budget covers the route itself
+    t0 = time.perf_counter()
+    j = client.get("/db/search").json()
+    assert time.perf_counter() - t0 < 0.5
+    assert j["total"] == 15_969 and len(j["rows"]) == 200

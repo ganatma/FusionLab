@@ -266,11 +266,11 @@ class SshProvider:
         if mismatch:
             logger.warning("fusionlab worker on %s runs version %s but this install is %s — "
                            "pull the same commit on both ends", self._session.base_url, remote_version, here)
-        models = {info["sha256"]: name for name, info in remote.get("models", {}).items()}
+        names = set(remote.get("models", {}))
         return {"provider": self.name, "host": getattr(self._session, "host", "127.0.0.1"),
                 "remote": remote, "version_mismatch": mismatch, "tasks": remote.get("tasks", []),
-                "surrogate_available": "surrogate.pt" in models,
-                "eq_surrogate_available": "eq_surrogate.pt" in models}
+                "surrogate_available": "surrogate.pt" in names,
+                "eq_surrogate_available": "eq_surrogate.pt" in names}
 
     def submit(self, task: str, inputs: dict) -> JobHandle:
         """Encode the inputs, satisfy the artifact refs, queue the job remotely. Returns at once;

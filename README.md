@@ -10,6 +10,68 @@ Runs on one workstation, offline, from a clone.
 > FusionLab is an educational and exploratory twin built on a reduced (0D) model.
 > It compares with the experiment; it does not predict it.
 
+## Quick start
+
+Linux, macOS or Windows. An NVIDIA GPU is optional — everything runs CPU-only without one. The repo ships the data
+cache and the trained models, so nothing needs the network or an API key after the clone.
+
+Install [uv](https://docs.astral.sh/uv/) if you don't have it. uv also fetches the Python 3.11–3.12 interpreter this
+project needs, so there is nothing else to install first:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then, from the repo root:
+
+```bash
+make setup        # uv sync: numpy, torch, nvidia-physicsnemo, usd-core, zarr, s3fs, fastapi
+make dev          # http://localhost:8000
+```
+
+No `make`? (Windows without build tools, say.) The same two steps by hand:
+
+```bash
+uv sync
+cp .env.example .env                     # if you don't have a .env yet
+uv run uvicorn fusionlab.api:app --reload --port 8000    # http://localhost:8000
+```
+
+(`make setup` also wires the git hooks: `git config core.hooksPath .githooks`.)
+
+On a machine without an NVIDIA GPU, Warp prints `Could not find or load the NVIDIA CUDA driver` at startup.
+It is benign — field-line tracing just runs on the CPU.
+
+Other commands:
+
+| | |
+|---|---|
+| `make test` | unit + API tests (`uv run pytest -q`) |
+| `make train` | retrain the IPB98 correction, rewrites its metrics |
+| `make bench` | timings |
+| `make usd` | OpenUSD export to `out/` |
+| `make fieldlines` | Warp field-line q check + benchmark |
+| `make validate-virtual` | the virtual shot's gates: fetches ~120 held-out shots |
+| `make data` | re-download the FAIR-MAST cache (the repo already ships it) |
+
+```python
+from fusionlab import mast
+from fusionlab.physics import replay
+
+s = mast.load_shot(30166)     # dict of arrays on the EFIT time base, in MA, T, 1e20 m^-3, keV, MW, MJ
+r = replay(s)                 # IPB98 / ITER89-P on measured P_loss, H98(t), Greenwald / Troyon / kink fractions
+db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
+```
+
+`uv run python scripts/fetch_mast.py 29182` caches any other level-2 shot (~27 s, ~1 MB).
+
+The dev server reads the data cache and the model weights once per process: restart it after re-fetching
+shots (`make data`, `fetch_mast.py`) or retraining (`make train`) to pick up the new artifacts.
+
+## Contents
+
+[Quick start](#quick-start) · [Why](#why) · [What's in it](#whats-in-it) · [A five-minute demo](#a-five-minute-demo) · [Guided and Lab modes](#guided-and-lab-modes) · [Virtual shot](#virtual-shot) · [What it found on real data](#what-it-found-on-real-data) · [Architecture](#architecture) · [Performance](#performance) · [Data & licence](#data--licence) · [Limitations](#limitations) · [Security posture](#security-posture) · [Credit](#credit)
+
 ## Why
 
 NVIDIA's fusion twins with General Atomics (DIII-D), CFS/Siemens (SPARC) and UKAEA follow one pattern: measured data,
@@ -31,34 +93,6 @@ week of plumbing; a student gets a real discharge to scrub through and watch hit
 | **Python loader** | `mast.load_shot()` and a cleaned shot table, in consistent units on one time base. |
 
 Every panel in the UI is tagged **measured / model / learned / computed**, so data is never mistaken for model.
-
-## Quick start
-
-Requires Python 3.11–3.12 and [uv](https://docs.astral.sh/uv/). Linux, macOS or Windows. An NVIDIA GPU is optional.
-The repo ships the data cache and the trained models, so nothing needs the network or an API key.
-
-```bash
-make setup        # uv sync: numpy, torch, nvidia-physicsnemo, usd-core, zarr, s3fs, fastapi
-make dev          # http://localhost:8000
-```
-
-Other commands: `make test` · `make train` (retrain the correction, rewrites its metrics) · `make bench` ·
-`make usd` (OpenUSD export to `out/`) · `make fieldlines` (Warp q check + benchmark) ·
-`make validate-virtual` (the virtual shot's gates: fetches ~120 held-out shots) · `make data` (re-download the FAIR-MAST cache).
-
-```python
-from fusionlab import mast
-from fusionlab.physics import replay
-
-s = mast.load_shot(30166)     # dict of arrays on the EFIT time base, in MA, T, 1e20 m^-3, keV, MW, MJ
-r = replay(s)                 # IPB98 / ITER89-P on measured P_loss, H98(t), Greenwald / Troyon / kink fractions
-db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
-```
-
-`uv run python scripts/fetch_mast.py 29182` caches any other level-2 shot (~27 s, ~1 MB).
-
-The dev server reads the data cache and the model weights once per process: restart it after re-fetching
-shots (`make data`, `fetch_mast.py`) or retraining (`make train`) to pick up the new artifacts.
 
 ## A five-minute demo
 

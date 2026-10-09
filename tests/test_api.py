@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -225,6 +226,38 @@ def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch
         client.get("/replay/30420/usd", params={"fmt": "usda"})   # a total failure still surfaces as a 500
     assert out.read_bytes() == b"previous-good-stage"             # the old artifact is untouched
     assert not list(out.parent.glob(f".{out.stem}.tmp*"))         # temp unlinked on failure
+
+
+def test_usd_plain_stage_fallback_logs_a_warning(caplog, monkeypatch):
+    """The plain-stage fallback used to be silent; degradation must be visible, traceback included."""
+
+    def broken(shot, path):
+        raise RuntimeError("no warp device here")
+
+    monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", broken)
+    monkeypatch.setattr("fusionlab.usd_export.export_shot", lambda shot, path: Path(path).write_bytes(b"plain-stage"))
+    with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
+        r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+    assert r.status_code == 200 and r.content == b"plain-stage"
+    warns = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+    assert len(warns) >= 1 and warns[0].exc_info is not None
+
+
+def test_eq_surrogate_fallback_logs_a_warning(caplog, monkeypatch):
+    """The eq-surrogate overlay's fail-open path used to swallow everything silently."""
+
+    def broken_model():
+        raise RuntimeError("torch exploded")
+
+    monkeypatch.setattr(api_replay, "_eq_model", broken_model)
+    api_replay._eq_psi.cache_clear()
+    try:
+        with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
+            assert api_replay._eq_psi(30420) is None   # the replay itself carries on
+        warns = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+        assert len(warns) >= 1 and warns[0].exc_info is not None
+    finally:
+        api_replay._eq_psi.cache_clear()   # do not leave the fallback result cached for later tests
 
 
 def test_fieldlines_slice_has_traced_q_next_to_efit():

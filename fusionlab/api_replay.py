@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
 import os
 import threading
 from functools import lru_cache
@@ -28,6 +28,8 @@ router = APIRouter()
 ATTRIBUTION = "MAST data: UKAEA FAIR-MAST (mastapp.site), CC BY-SA 4.0"
 _TRACES = ("t_s", "Ip_MA", "B_T", "n_e20", "P_ohm_MW", "P_nbi_MW", "P_rad_MW", "W_MJ", "q95", "beta_N", "kappa",
            "a_m", "R_m", "Te0_keV", "R_mag_m", "Z_mag_m")
+
+logger = logging.getLogger(__name__)
 
 
 def _j(a, nd=4):
@@ -108,6 +110,7 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
             from fusionlab.fieldlines import export_shot_with_field_lines
             export_shot_with_field_lines(_shot(shot_id), tmp)
         except Exception:
+            logger.warning("USD field-line export failed; falling back to plain stage", exc_info=True)
             export_shot(_shot(shot_id), tmp)
         os.replace(tmp, out)   # atomic same-directory publish: readers only ever see a complete stage
     except Exception:
@@ -170,6 +173,7 @@ def _eq_psi(shot_id: int):
             x = torch.as_tensor(s["eq_inputs"], dtype=torch.float32, device=model.x_mean.device)
             psi = model(x).cpu().numpy()
     except Exception:   # the replay works without the surrogate
+        logger.warning("equilibrium surrogate overlay failed; serving the replay without it", exc_info=True)
         return None
     ax, bd = s["psi_axis_Wb"][:, None, None], s["psi_bnd_Wb"][:, None, None]
     psi_efit = ax + s["psi_n"] * (bd - ax)
@@ -215,8 +219,10 @@ def _warm_up():
     from fusionlab import surrogate
     if surrogate.available():
         surrogate.load()
-    with contextlib.suppress(Exception):   # builds/loads the Warp kernels and traces the landing shot
+    try:   # builds/loads the Warp kernels and traces the landing shot
         _lines(30166)
+    except Exception:
+        logger.warning("warm-up field-line trace failed; the first replay request pays for it instead", exc_info=True)
     _eq_psi(30166)
 
 

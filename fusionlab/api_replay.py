@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -28,6 +29,8 @@ ATTRIBUTION = "MAST data: UKAEA FAIR-MAST (mastapp.site), CC BY-SA 4.0"
 _TRACES = ("t_s", "Ip_MA", "B_T", "n_e20", "P_ohm_MW", "P_nbi_MW", "P_rad_MW", "W_MJ", "q95", "beta_N", "kappa",
            "a_m", "R_m", "Te0_keV", "R_mag_m", "Z_mag_m")
 
+logger = logging.getLogger(__name__)
+
 
 def _j(a, nd=4):
     """numpy -> JSON-safe nested lists: rounded, NaN/inf as null."""
@@ -38,7 +41,7 @@ def _j(a, nd=4):
     return np.where(np.isfinite(a), a, None).tolist()
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=16)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _shot(shot_id: int) -> dict:
     if shot_id not in mast.cached_shots():
         raise HTTPException(404, f"shot {shot_id} is not in the local cache (scripts/fetch_mast.py {shot_id})")
@@ -101,15 +104,22 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
     if f".{fmt}" not in FORMATS:
         raise HTTPException(422, f"fmt must be one of {sorted(x.lstrip('.') for x in FORMATS)}")
     out = Path(__file__).resolve().parent.parent / "out" / f"mast_{shot_id}.{fmt}"
-    try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
-        from fusionlab.fieldlines import export_shot_with_field_lines
-        export_shot_with_field_lines(_shot(shot_id), out)
+    tmp = out.with_name(f".{out.stem}.tmp{os.getpid()}{out.suffix}")   # dotfile, pid-unique, extension kept (export_shot validates the suffix)
+    try:
+        try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
+            from fusionlab.fieldlines import export_shot_with_field_lines
+            export_shot_with_field_lines(_shot(shot_id), tmp)
+        except Exception:
+            logger.warning("USD field-line export failed; falling back to plain stage", exc_info=True)
+            export_shot(_shot(shot_id), tmp)
+        os.replace(tmp, out)   # atomic same-directory publish: readers only ever see a complete stage
     except Exception:
-        export_shot(_shot(shot_id), out)
+        tmp.unlink(missing_ok=True)
+        raise
     return FileResponse(out, filename=out.name, media_type="application/octet-stream")
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _lines(shot_id: int):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""
     from fusionlab import fieldlines
@@ -138,7 +148,7 @@ def replay_fieldlines(shot_id: int, i: int):
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_model():
     """Equilibrium surrogate + the shots it never saw. None when no trained model is on disk."""
     from fusionlab import eq_surrogate
@@ -148,7 +158,7 @@ def _eq_model():
     return eq_surrogate.load(), held_out
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _eq_psi(shot_id: int):
     """PhysicsNeMo reconstruction of psi from the magnetic sensors, every slice of the shot in one batch.
     Normalised with EFIT's axis and boundary flux so the two maps share contour levels; error is on psi itself."""
@@ -163,6 +173,7 @@ def _eq_psi(shot_id: int):
             x = torch.as_tensor(s["eq_inputs"], dtype=torch.float32, device=model.x_mean.device)
             psi = model(x).cpu().numpy()
     except Exception:   # the replay works without the surrogate
+        logger.warning("equilibrium surrogate overlay failed; serving the replay without it", exc_info=True)
         return None
     ax, bd = s["psi_axis_Wb"][:, None, None], s["psi_bnd_Wb"][:, None, None]
     psi_efit = ax + s["psi_n"] * (bd - ax)
@@ -208,8 +219,10 @@ def _warm_up():
     from fusionlab import surrogate
     if surrogate.available():
         surrogate.load()
-    with contextlib.suppress(Exception):   # builds/loads the Warp kernels and traces the landing shot
+    try:   # builds/loads the Warp kernels and traces the landing shot
         _lines(30166)
+    except Exception:
+        logger.warning("warm-up field-line trace failed; the first replay request pays for it instead", exc_info=True)
     _eq_psi(30166)
 
 
@@ -240,7 +253,7 @@ def surrogate_metrics():
     return json.loads(METRICS_FILE.read_text())
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _db_view() -> dict:
     """The usable shot table in operating-space coordinates, with IPB98(y,2) evaluated on every row at once."""
     c = mast.clean_db(mast.load_db())

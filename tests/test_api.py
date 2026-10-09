@@ -2,12 +2,16 @@ import json
 import math
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
 WEB = Path(__file__).resolve().parents[1] / "web"
+
+# Every spelling a query string can carry for a non-finite float; 1e309 parses to inf.
+NON_FINITE = ("NaN", "Infinity", "-Infinity", "1e309")
 
 
 def test_health_and_devices():
@@ -53,6 +57,24 @@ def test_simulate_non_finite_result_is_422_not_500(monkeypatch):
     assert client.get("/simulate", params={"device": "iter"}).status_code == 422
 
 
+@pytest.mark.parametrize("value", NON_FINITE)
+@pytest.mark.parametrize("param", ("Ip", "B", "n", "P_aux", "H", "Zeff"))
+def test_simulate_rejects_non_finite_param(param, value):
+    """Any non-finite control must 422 from the range guard, never a 5xx (API-01 probed matrix)."""
+    r = client.get("/simulate", params={"device": "iter", param: value})
+    assert r.status_code == 422
+    assert r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    ({"H": -2}, {"Zeff": 0}, {"P_aux": -100}, {"n": -5}, {"Ip": "1e300"}),
+)
+def test_simulate_rejects_out_of_domain_params(params):
+    """Domain parity: negative H/P_aux/n, Zeff < 1, and overflow-scale Ip are all refused."""
+    assert client.get("/simulate", params={"device": "iter", **params}).status_code == 422
+
+
 def test_index_served():
     assert "FusionLab" in client.get("/").text
 
@@ -78,6 +100,28 @@ def test_map_caps_grid_and_rejects_bad_input():
     assert m["nx"] == 100 and len(m["Q"]) == 3 and len(m["Q"][0]) == 100
     assert client.get("/map", params={"device": "nope"}).status_code == 404
     assert client.get("/map", params={"device": "iter", "Ip": 0}).status_code == 422
+
+
+@pytest.mark.parametrize("value", NON_FINITE)
+@pytest.mark.parametrize("param", ("Ip", "B", "H", "Zeff"))
+def test_map_rejects_non_finite_param(param, value):
+    """inf once passed the positivity guard and crashed the strict JSON encoder at render (500)."""
+    r = client.get("/map", params={"device": "iter", param: value})
+    assert r.status_code == 422
+    assert r.json()["detail"]
+
+
+@pytest.mark.parametrize("params", ({"H": -2}, {"Zeff": 0}, {"Ip": -1}, {"B": -1}))
+def test_map_rejects_out_of_domain_params(params):
+    assert client.get("/map", params={"device": "iter", **params}).status_code == 422
+
+
+def test_map_finite_extreme_never_5xx():
+    """A finite extreme overflows grid cells to inf, which _grid_json nulls: 200 with strict JSON —
+    the /map counterpart of /simulate's output-finiteness net."""
+    resp = client.get("/map", params={"device": "iter", "Ip": "1e300"})
+    assert resp.status_code == 200
+    json.loads(resp.text, parse_constant=_reject_constant)  # no NaN/Infinity literal in the body
 
 
 def test_nodotfiles_lookup_path():

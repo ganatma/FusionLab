@@ -164,7 +164,7 @@
   let psiTimer = null;
 
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
-  const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
   const scale = (a, k) => a.map(v => v === null ? null : v * k);
 
   function gauge(id, v) {

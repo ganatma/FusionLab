@@ -27,6 +27,7 @@
   const fmt = (x, d = 2) => (x == null || !isFinite(x)) ? '–' : (Math.abs(x) >= 1000 ? x.toFixed(0) : x.toFixed(d));
   const query = (keys) => new URLSearchParams([['device', $('device').value], ...keys.map((k) => [k, val(k)])]);
   const nGW = (d, Ip) => Ip / (Math.PI * d.a * d.a);  // Greenwald density [1e20 m^-3]
+  const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));   // same esc() as replay.js
 
   function setRange(k, min, max, value) {
     const el = $(k);
@@ -144,7 +145,7 @@
 
   const ready = fetch('/devices').then((r) => r.json()).then((d) => {
     devices = d;
-    $('device').innerHTML = Object.entries(d).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
+    $('device').innerHTML = Object.entries(d).map(([k, v]) => `<option value="${k}">${esc(v.name)}</option>`).join('');
     $('device').value = 'iter' in d ? 'iter' : Object.keys(d)[0];
     loadDevice();
   }).catch((e) => { $('status').textContent = 'API error: ' + e; $('status').className = 'status bad'; });

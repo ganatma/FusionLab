@@ -78,3 +78,18 @@ def test_fire_and_forget_panels_render_their_errors():
     replay = _served("replay.js")
     assert ".catch(() => { $('tab-db').innerHTML" in replay
     assert ".catch(() => { const el = $('rp-sur'); if (el) el.innerHTML" in replay
+
+
+def test_agent_panel_drives_only_public_hooks(monkeypatch):
+    """JS-08: the agent driver follows the guide.js discipline — it checks /agent/health before
+    rendering, reads the SSE frames as data lines, and drives the app only through public hooks and
+    input/change dispatch, never another script's internals. (agent.js is served only when enabled,
+    so the test turns the flag on for the served fetch.)"""
+    monkeypatch.setenv("FUSIONLAB_AGENT_ENABLED", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    agent_js = _served("agent.js")
+    assert "fetch('/agent/health')" in agent_js                       # the documented gate
+    assert "l.startsWith('data:')" in agent_js                        # SSE frames parsed as data lines
+    assert "window.FusionLab.replay" in agent_js                      # public hooks only
+    assert "dispatchEvent(new Event('input', { bubbles: true }))" in agent_js
+    assert "EventSource" not in agent_js                              # the chat is a POST; EventSource is GET-only

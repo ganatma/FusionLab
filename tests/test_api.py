@@ -311,10 +311,16 @@ def test_surrogate_metrics_and_hybrid_trace_are_served_together():
     assert len(j["model"]["W_hybrid_MJ"]) == len(j["measured"]["t_s"]) and "rmse_ln_tau_hybrid" in j["summary"]
 
 
+def test_usd_export_requires_post():
+    """Audit F1: the export recomputes the stage and writes out/ on every hit — a GET must not reach it."""
+    assert client.get("/replay/30420/usd").status_code == 405
+    assert client.post("/replay/1/usd").status_code == 404   # unknown shot: 404 from the cache allowlist, never 403
+    assert client.post("/replay/30420/usd", params={"fmt": "exe"}).status_code == 422
+
+
 def test_usd_download_is_a_usd_file():
-    r = client.get("/replay/30420/usd")
+    r = client.post("/replay/30420/usd")
     assert r.status_code == 200 and r.content[:8] == b"PXR-USDC" and len(r.content) > 100_000
-    assert client.get("/replay/30420/usd", params={"fmt": "exe"}).status_code == 422
 
 
 def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
@@ -335,7 +341,7 @@ def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", fake_with_lines)
     monkeypatch.setattr("fusionlab.usd_export.export_shot", plain_must_not_run)
-    r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+    r = client.post("/replay/30420/usd", params={"fmt": "usda"})
     assert r.status_code == 200 and r.content == b"stage-bytes"
     assert seen["tmp"] != out and seen["tmp"].parent == out.parent   # temp, same dir -> atomic replace
     assert seen["final_exists_mid_export"] is False                  # the served path exists only after publish
@@ -356,7 +362,7 @@ def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", dies_mid_write)
     monkeypatch.setattr("fusionlab.usd_export.export_shot", dies_mid_write)
     with pytest.raises(RuntimeError, match="export exploded"):
-        client.get("/replay/30420/usd", params={"fmt": "usda"})   # a total failure still surfaces as a 500
+        client.post("/replay/30420/usd", params={"fmt": "usda"})   # a total failure still surfaces as a 500
     assert out.read_bytes() == b"previous-good-stage"             # the old artifact is untouched
     assert not list(out.parent.glob(f".{out.stem}.tmp*"))         # temp unlinked on failure
 
@@ -370,7 +376,7 @@ def test_usd_plain_stage_fallback_logs_a_warning(caplog, monkeypatch):
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", broken)
     monkeypatch.setattr("fusionlab.usd_export.export_shot", lambda shot, path: Path(path).write_bytes(b"plain-stage"))
     with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
-        r = client.get("/replay/30420/usd", params={"fmt": "usda"})
+        r = client.post("/replay/30420/usd", params={"fmt": "usda"})
     assert r.status_code == 200 and r.content == b"plain-stage"
     warns = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
     assert len(warns) >= 1 and warns[0].exc_info is not None

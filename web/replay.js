@@ -26,7 +26,7 @@
         <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
         <span class="mono" id="rp-tlabel">–</span>
         <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
-        <a id="rp-usd" class="tool" href="#" download title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</a>
+        <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -174,7 +174,7 @@
   const replayCache = new Map();
 
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
-  const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
   const scale = (a, k) => a.map(v => v === null ? null : v * k);
 
   function gauge(id, v) {
@@ -196,6 +196,25 @@
     $('rp-shot').addEventListener('change', e => { play(false); loadShot(+e.target.value); });
     $('rp-t').addEventListener('input', e => { play(false); scrub(+e.target.value); });
     $('rp-play').addEventListener('click', () => play(!playTimer));
+    // Export recomputes the stage and writes out/ — state-changing, so it POSTs (audit F1) and saves the blob under the served filename.
+    $('rp-usd').addEventListener('click', async () => {
+      if (!shot) return;
+      const id = shot.meta.shot_id;
+      $('rp-usd').setAttribute('aria-busy', 'true');
+      try {
+        const r = await fetch(`/replay/${id}/usd`, { method: 'POST' });
+        if (!r.ok) throw new Error(`export failed: ${r.status}`);
+        const blob = await r.blob();
+        const name = (r.headers.get('content-disposition') || '').match(/filename="?(.+?)"?(;|$)/)?.[1] ?? `mast_${id}.usdc`;
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (e) {
+        console.error('USD export failed:', e);
+      } finally {
+        $('rp-usd').removeAttribute('aria-busy');
+      }
+    });
     const seen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
@@ -312,7 +331,6 @@
       (m.preshot ? `<p><span class="muted">Before:</span> ${esc(m.preshot)}</p>` : '') +
       (m.postshot ? `<p><span class="muted">After:</span> ${esc(m.postshot)}</p>` : '');
     $('rp-insight').innerHTML = insight(shot);
-    $('rp-usd').href = `/replay/${id}/usd`;
 
     drawStrips();
 

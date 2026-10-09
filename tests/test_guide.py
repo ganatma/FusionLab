@@ -60,6 +60,18 @@ def test_the_page_loads_the_study_and_the_hooks_it_needs():
         assert re.search(rf"\b{path}\b", SOURCES["replay.js"].split("function sliceState")[1].split("}")[0] + "}"), path
 
 
+def test_esc_helpers_escape_quotes_and_the_device_picker_uses_them():
+    # F4/F5 hardening (spec art_ZVNDb0lq): both esc() helpers also escape quotes — element content renders
+    # identically and the attribute-injection class stays closed — and app.js renders device names through esc().
+    for f in ("replay.js", "guide.js"):
+        esc_line = next(line for line in SOURCES[f].splitlines() if "const esc" in line)
+        assert "/[&<>'\"]/g" in esc_line and "&#39;" in esc_line and "&quot;" in esc_line, f
+    app_esc = next(line for line in SOURCES["app.js"].splitlines() if "const esc" in line)
+    assert "/[&<>'\"]/g" in app_esc and "&#39;" in app_esc and "&quot;" in app_esc   # identical helper, per Fix 5
+    picker = next(line for line in SOURCES["app.js"].splitlines() if "device').innerHTML" in line)
+    assert "${esc(v.name)}" in picker and "${v.name}" not in picker                  # no raw interpolation left
+
+
 def test_steps_are_ordered_unique_and_short():
     ids = [s["id"] for s in STEPS]
     assert len(ids) == len(set(ids)) and len(STEPS) >= 30

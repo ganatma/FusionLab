@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 from fusionlab import mast
+from fusionlab.atomicio import atomic_write
 from fusionlab.physics import M_D, tau_coeff_H, volume
 
 MODELS = Path(__file__).resolve().parent.parent / "models"
@@ -197,9 +198,10 @@ def train(showcase=(27257, 29823, 30166, 30192, 30420)) -> dict:
     MODELS.mkdir(exist_ok=True)
     # mu/sd are saved as tensors so the checkpoint contains only the torch.load weights_only-safe subset
     # (no pickled numpy): the loader can then refuse arbitrary object types (bandit B614).
-    torch.save({"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": torch.as_tensor(bundle["mu"]),
-                "sd": torch.as_tensor(bundle["sd"]), "n_in": len(VARS) + 1}, MODEL_FILE)
-    METRICS_FILE.write_text(json.dumps(metrics, indent=1))
+    atomic_write(MODEL_FILE, lambda tmp: torch.save(
+        {"state": {k: v.cpu() for k, v in bundle["net"].state_dict().items()}, "mu": torch.as_tensor(bundle["mu"]),
+         "sd": torch.as_tensor(bundle["sd"]), "n_in": len(VARS) + 1}, tmp))
+    atomic_write(METRICS_FILE, lambda tmp: tmp.write_text(json.dumps(metrics, indent=1)))
     return metrics
 
 

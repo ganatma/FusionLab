@@ -41,6 +41,8 @@ from pathlib import Path
 import numpy as np
 import warp as wp
 
+from fusionlab.atomicio import atomic_write
+
 wp.config.log_level = wp.LOG_WARNING      # no init banner in the API logs
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -569,7 +571,7 @@ def main(argv=None) -> int:
           f"{usd['time_samples']} time samples")
 
     CHECK_FILE.parent.mkdir(exist_ok=True)
-    CHECK_FILE.write_text(json.dumps({
+    atomic_write(CHECK_FILE, lambda tmp: tmp.write_text(json.dumps({
         "what": "Field lines of the EFIT reconstruction (axisymmetric) traced with NVIDIA Warp; q at psi_N = 0.95 "
                 "from the traced lines vs EFIT q95, per cached FAIR-MAST shot. Relative errors are |q_traced - q95| / q95.",
         "date": _dt.datetime.now().astimezone().isoformat(timespec="seconds"), "warp_version": wp.__version__,
@@ -577,7 +579,7 @@ def main(argv=None) -> int:
         "first_launch": first, "interpolation": "bicubic Catmull-Rom on the 65x65 EFIT grid, analytic gradient",
         "integrator": f"RK4 in toroidal angle, float32, {Q_STEPS_PER_TURN} steps per turn for q, {STEPS_PER_TURN} for the USD lines",
         "q_check": {str(k): v for k, v in checks.items()}, "convergence_shot": shot_id, "convergence": conv,
-        "benchmark": bench, "usd": usd}, indent=2) + "\n")
+        "benchmark": bench, "usd": usd}, indent=2) + "\n"))
     print(f"wrote {CHECK_FILE}")
     return 0
 

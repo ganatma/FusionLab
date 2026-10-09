@@ -88,3 +88,13 @@ def test_compute_chip_polls_status_and_escapes_remote_strings():
     for name in ("f.computed_on", "q.computed_on", "q.learned_computed_on"):
         assert f"esc({name})" in replay
 
+
+def test_fallback_banner_is_dismissible_and_self_rearming():
+    """JS-09 (PR 3): the banner renders from the same /compute poll as the chip — dismissal is
+    per-visit, recovery re-arms it, and the server-provided reason is escaped."""
+    replay = _served("replay.js")
+    banner = replay.split("function renderFallback")[1].split("async function pollCompute")[0]
+    assert "fallbackSeen = false" in banner
+    assert "esc(s.reason || '')" in banner
+    assert "'rp-fallback-x'" in replay
+

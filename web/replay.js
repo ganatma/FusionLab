@@ -35,6 +35,9 @@
         A gauge turns red when a stability limit is crossed: try shot <b>#30192</b>.</span>
         <button type="button" id="rp-hint-x" class="tool" aria-label="Dismiss this hint">Got it</button></div>
 
+      <div class="cr-hint small fallback" id="rp-fallback" hidden><span id="rp-fallback-text"></span>
+        <button type="button" id="rp-fallback-x" class="tool" aria-label="Dismiss this banner">Dismiss</button></div>
+
       <div class="cr-cell" id="cell-eq" data-guide="eq">
         <h2>Equilibrium ${TAG.meas} <span class="dim">EFIT, real vessel</span></h2>
         <div class="keyline small"><span style="color:#3987e5">━ flux surfaces</span> <span style="color:#ff8a3d">━ last closed surface ✚ axis</span> <span style="color:#c3c2b7">━ wall</span> <span class="muted">▪ PF coils</span></div>
@@ -222,6 +225,7 @@
     // Compute chip (design §7): where compute runs, from a polled /compute status. Never blocks
     // anything — a failed or slow poll keeps the last known state; the next one retries.
     const POLL_MS = 5000, COMPUTE_TIMEOUT_MS = 8000;
+    let lastCompute = null;
     function renderCompute(s) {
       const chip = $('rp-compute');
       let text, cls = 'status', tip = '';
@@ -238,12 +242,23 @@
       }
       chip.textContent = text; chip.className = cls; chip.title = tip;
     }
+    // Fallback banner (design §7): the server reports that remote compute failed and the work fell
+    // back to local. Dismiss is per-visit; recovery — a successful remote run or a clean /compute —
+    // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
+    let fallbackSeen = false;
+    function renderFallback(s) {
+      if (s && !s.fallback) fallbackSeen = false;
+      const show = !!s && !!s.fallback && !fallbackSeen;
+      $('rp-fallback').hidden = !show;
+      if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+    }
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });
     async function pollCompute() {
       try {
         const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);
         const r = await fetch('/compute', { signal: ctrl.signal });
         clearTimeout(t);
-        if (r.ok) renderCompute(await r.json());
+        if (r.ok) { const s = await r.json(); lastCompute = s; renderCompute(s); renderFallback(s); }
       } catch (e) { /* unreachable remote is the server's status to report; the chip keeps its last state */ }
     }
     setInterval(pollCompute, POLL_MS); pollCompute();

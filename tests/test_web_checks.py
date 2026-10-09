@@ -97,4 +97,6 @@ def test_fallback_banner_is_dismissible_and_self_rearming():
     assert "fallbackSeen = false" in banner
     assert "esc(s.reason || '')" in banner
     assert "'rp-fallback-x'" in replay
+    # one notice per grid row: while the banner is up it takes the row from the onboarding hint
+    assert "$('rp-hint').hidden = show ? true : hintSeen()" in banner
 

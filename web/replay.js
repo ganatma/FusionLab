@@ -218,7 +218,8 @@
         $('rp-usd').removeAttribute('aria-busy');
       }
     });
-    const seen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
+    const hintSeen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
+    const seen = hintSeen;
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
 
@@ -245,11 +246,15 @@
     // Fallback banner (design §7): the server reports that remote compute failed and the work fell
     // back to local. Dismiss is per-visit; recovery — a successful remote run or a clean /compute —
     // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
+    // Both notices render in the same grid row, so the banner takes the row while it is up: the
+    // operational status outranks the onboarding hint, and the hint comes back (per its own
+    // dismissed state) when the banner goes away.
     let fallbackSeen = false;
     function renderFallback(s) {
       if (s && !s.fallback) fallbackSeen = false;
       const show = !!s && !!s.fallback && !fallbackSeen;
       $('rp-fallback').hidden = !show;
+      $('rp-hint').hidden = show ? true : hintSeen();
       if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
     }
     $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });

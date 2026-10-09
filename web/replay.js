@@ -34,6 +34,8 @@
         A gauge turns red when a stability limit is crossed: try shot <b>#30192</b>.</span>
         <button type="button" id="rp-hint-x" class="tool" aria-label="Dismiss this hint">Got it</button></div>
 
+      <div class="cr-hint small" id="rp-cmp-bar" hidden></div>
+
       <div class="cr-cell" id="cell-eq" data-guide="eq">
         <h2>Equilibrium ${TAG.meas} <span class="dim">EFIT, real vessel</span></h2>
         <div class="keyline small"><span style="color:#3987e5">━ flux surfaces</span> <span style="color:#ff8a3d">━ last closed surface ✚ axis</span> <span style="color:#c3c2b7">━ wall</span> <span class="muted">▪ PF coils</span></div>
@@ -47,9 +49,10 @@
       </div>
 
       <div class="cr-cell" id="cell-tr" data-guide="traces">
-        <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim">laws are fed the measured power</span></h2>
+        <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim" id="rp-tr-note">laws are fed the measured power</span></h2>
         <div class="strips">
           ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
+          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">kJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
         </div>
       </div>
 
@@ -163,6 +166,13 @@
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
   let psiTimer = null;
 
+  // ---- multi-shot compare (A2) state. The reference (first id) keeps the single-shot panels (3D vessel,
+  // equilibrium, what-if, logbook); every other shot adds one measured trace per time panel. Payloads cache
+  // per shot id, so the compare fan-out and a single pick share one fetch.
+  const CMP_COLORS = ['#d95926', '#199e70', '#c98500', '#d55181', '#9a7fd6'];   // per-shot slots 2–6; the reference keeps the blue
+  const cmp = { on: false, ids: [], ref: null, data: new Map(), st: new Map(), err: new Map(), seq: 0, ctrls: new Map() };
+  const replayCache = new Map();
+
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
   const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const scale = (a, k) => a.map(v => v === null ? null : v * k);
@@ -195,15 +205,22 @@
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
-    [...TIME_PLOTS, 'rp-xs', 'rp-te'].forEach(id => fit.observe($(id)));
+    [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => r.json()).then(j => { db = j; drawDb(); });
     initDbSearch();
     fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate);
-    const asked = +new URLSearchParams(location.search).get('shot');   // deep link: /?shot=30192
-    const want = list.shots.find(s => s.shot_id === asked) || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
-    if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
-    // deep link to a what-if: /?shot=30192&whatif=1&P_nbi=1.3&nbi_shift_s=-0.03 (edits the gate refuses are ignored)
     const q = new URLSearchParams(location.search);
+    const asked = +q.get('shot');   // deep link: /?shot=30192
+    const cmpIds = (q.get('compare') || '').split(',').map(Number).filter(Boolean);   // deep link: /?compare=30166,30420
+    // An uncached ?shot= id is replayable too — the dropdown list only knows the shipped cache.
+    const want = list.shots.find(s => s.shot_id === asked) || (asked ? { shot_id: asked } : null)
+      || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
+    if (cmpIds.length >= 2) startCompare(cmpIds);   // compare drives the reference render itself
+    else {
+      if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
+      if (cmpIds.length === 1) startCompare(cmpIds);   // a one-id link: the prompt shows beside the shot
+    }
+    // deep link to a what-if: /?shot=30192&whatif=1&P_nbi=1.3&nbi_shift_s=-0.03 (edits the gate refuses are ignored)
     if (q.get('whatif')) {
       await whatIf(true);
       WI.forEach(([k]) => { const el = $('rp-wi-' + k); if (q.get(k) !== null && el && !el.disabled) el.value = q.get(k); });
@@ -222,10 +239,12 @@
 
   // Play the shot: step the time slider through the EFIT slices (≈5 slices/s at 1x), stop at the end.
   function play(on) {
+    const was = !!playTimer;
     clearInterval(playTimer); playTimer = null;
     on = !!on && !!shot;   // nothing to play until a shot has loaded
     $('rp-play').textContent = on ? '❚❚ PAUSE' : '▶ PLAY';
     $('rp-play').classList.toggle('on', !!on);
+    if (!on && was && cmp.on) cmpThomson();   // on pause the compared shots' Thomson profiles catch up with the cursor
     if (!on || !shot) return;
     const slider = $('rp-t');
     if (+slider.value >= +slider.max) { slider.value = 0; scrub(0); }
@@ -257,13 +276,37 @@
     }
   }
 
+  // Shared replay payload cache: the compare fan-out and a single pick hit the same promise per shot id.
+  // A failed fetch is not cached — a retry refetches.
+  function getReplay(id, signal) {
+    const cached = replayCache.get(id);
+    if (cached) return cached;
+    const p = fetch('/replay/' + id, { signal }).then(async r => {
+      if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => null))?.detail || 'HTTP ' + r.status), { status: r.status });
+      return r.json();
+    }).catch(e => { replayCache.delete(id); throw e; });
+    replayCache.set(id, p);
+    return p;
+  }
+
   async function loadShot(id) {
+    if (cmp.on) return cmpSetRef(id);   // in compare, every pick — dropdown, search row — re-points the reference
     const seq = ++loadSeq;
-    const next = await (await fetch('/replay/' + id)).json();
+    let next;
+    try {
+      next = await getReplay(id);
+    } catch (e) {
+      if (seq === loadSeq) $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
+      return;
+    }
     if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
+    renderShot(next);
+  }
+
+  function renderShot(next) {
     shot = next;
     psiCache.clear(); lineCache.clear(); linesNow.clear();
-    const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s;
+    const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s, id = m.shot_id;
     $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length} EFIT slices`;
     $('rp-log').innerHTML =
       (m.preshot ? `<p><span class="muted">Before:</span> ${esc(m.preshot)}</p>` : '') +
@@ -271,24 +314,7 @@
     $('rp-insight').innerHTML = insight(shot);
     $('rp-usd').href = `/replay/${id}/usd`;
 
-    Plotly.react('rp-w', [
-      line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
-      line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
-      line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
-      ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
-                                 { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
-    ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
-    Plotly.react('rp-p', [
-      line(t, me.P_ohm_MW, 'Ohmic (measured)', C.yellow),
-      line(t, me.P_nbi_MW, 'Beams (logged peak, box)', C.magenta, { line: { color: C.magenta, width: 2, shape: 'hv' } }),
-    ], stripLayout(false), CFG);
-    Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
-    Plotly.react('rp-lim', [
-      line(t, mo.f_greenwald, 'Greenwald', C.blue),
-      line(t, mo.troyon, 'Troyon β_N / 3.5', C.orange),
-      line(t, mo.kink, 'Kink 2 / q95', C.aqua),
-    ], stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
-              shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
+    drawStrips();
 
     wi.res = null;
     if (wi.on) askWhatIf();
@@ -301,7 +327,34 @@
     slider.value = peak;
     document.dispatchEvent(new CustomEvent('fusionlab:shot', { detail: { shot_id: id, n: t.length, heating: m.heating || '' } }));
     scrub(peak);
+    if (cmp.on) { cmpTeSetup(); drawDw(); }   // the difference strip and the other shots' Thomson traces
     Promise.all([getPsi(id, peak), getLines(id, peak)]).then(() => prefetch(id, t.length));
+  }
+
+  // The four time strips. P, Ip and — in single-shot mode — W and the limits are the shot's own measured +
+  // model traces; in compare mode W and limits become one measured trace per shot (per-shot colour, legend,
+  // unchanged units) and the reference's model curves step aside while the difference strip carries the rest.
+  function drawStrips() {
+    const me = shot.measured, mo = shot.model, t = me.t_s;
+    Plotly.react('rp-p', [
+      line(t, me.P_ohm_MW, 'Ohmic (measured)', C.yellow),
+      line(t, me.P_nbi_MW, 'Beams (logged peak, box)', C.magenta, { line: { color: C.magenta, width: 2, shape: 'hv' } }),
+    ], stripLayout(false), CFG);
+    Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
+    if (cmp.on) { drawCmpW(); drawCmpLim(); return; }
+    Plotly.react('rp-w', [
+      line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
+      line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
+      line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
+      ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
+                                 { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
+    ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
+    Plotly.react('rp-lim', [
+      line(t, mo.f_greenwald, 'Greenwald', C.blue),
+      line(t, mo.troyon, 'Troyon β_N / 3.5', C.orange),
+      line(t, mo.kink, 'Kink 2 / q95', C.aqua),
+    ], stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
+              shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
   }
 
   function insight(s) {
@@ -368,11 +421,7 @@
     const L = wi.on && wi.res && !wi.res.is_identity ? wi.res.limits : { greenwald: mo.f_greenwald, troyon: mo.troyon, kink: mo.kink };
     gauge('greenwald', L.greenwald[i]); gauge('troyon', L.troyon[i]); gauge('kink', L.kink[i]);
 
-    const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: t, x1: t, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
-    TIME_PLOTS.forEach(id => {
-      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || s.name === 'ood');
-      Plotly.relayout(id, { shapes: [...keep, cursor] });
-    });
+    drawCursor(t);
 
     const n = $('rp-xs').data.length;   // LCFS and axis are always the last two traces
     Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
@@ -380,7 +429,7 @@
     if (db) markDb(i);
     if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
     clearTimeout(psiTimer);
-    psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); }, 40);
+    psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); cmpThomson(); }, 40);   // cmpThomson: the compared shots' profiles follow the cursor
     document.dispatchEvent(new CustomEvent('fusionlab:slice', { detail: sliceState(i) }));
   }
 
@@ -624,7 +673,11 @@
     [...SRCH_KEYS, 'useful', 'abort', 'offset', 'compare'].forEach(k => shared.delete(k));
     for (const [k, v] of srchParams()) shared.set(k, v);
     if (srchOffset) shared.set('offset', srchOffset);
-    if (srchSel.size) shared.set('compare', [...srchSel].sort((a, b) => a - b).join(','));
+    if (srchSel.size) {
+      const sel = [...srchSel];
+      const ref = cmp.on && srchSel.has(cmp.ref) ? cmp.ref : null;   // a live compare keeps its reference first in the URL
+      shared.set('compare', (ref != null ? [ref, ...sel.filter(x => x !== ref).sort((a, b) => a - b)] : sel.sort((a, b) => a - b)).join(','));
+    }
     const qs = shared.toString();
     history.replaceState(null, '', qs ? '?' + qs : location.pathname);
   }
@@ -673,7 +726,8 @@
         + (pages > 1 ? ` · page ${1 + srchOffset / SRCH_PAGE} of ${pages}
             <button type="button" class="tool" id="rp-srch-prev"${srchOffset ? '' : ' disabled'}>‹ prev</button>
             <button type="button" class="tool" id="rp-srch-next"${srchOffset + SRCH_PAGE >= srchResp.total ? ' disabled' : ''}>next ›</button>` : '')
-        + (srchSel.size ? ` · <b>${srchSel.size}</b> selected for compare` : '')
+        + (srchSel.size ? ` · <b>${srchSel.size}</b> selected for compare`
+          + (srchSel.size >= 2 ? ` <button type="button" class="tool" id="rp-srch-cmp">compare them →</button>` : '') : '')
         + (srchNote ? ` · <span class="bad">${esc(srchNote)}</span>` : '');
     }
     $('rp-srch-attr').textContent = srchResp ? srchResp.attribution : '';
@@ -723,6 +777,7 @@
         return searchDb();
       }
       if (e.target.id === 'rp-srch-next') { srchOffset += SRCH_PAGE; return searchDb(); }
+      if (e.target.id === 'rp-srch-cmp') { window.FusionLab.showTab('replay'); return startCompare([...srchSel]); }
       const a = e.target.closest('a[data-shot]');
       if (a) { e.preventDefault(); openReplay(+a.dataset.shot); }
     });
@@ -739,9 +794,289 @@
       }
       srchSetUrl();
       srchPaint();
+      if (cmp.on) startCompare([...srchSel]);   // the live compare follows the selection
     });
     searchDb();
   }
+
+  // ---- multi-shot compare (A2): one replay view over 2–6 shots. Everything is composed client-side from the
+  // existing per-shot endpoints — the server stays stateless. The reference (first id) keeps the single-shot
+  // panels: 3D vessel, equilibrium, what-if, logbook, per-slice psi fetches. Every other shot adds one
+  // measured trace per time panel; psi and fieldline fetches stay reference-scoped so the payload stays bounded.
+  function cmpData(id) { return cmp.data.get(id) || (shot && shot.meta.shot_id === id ? shot : null); }
+
+  function cmpColor(id) {   // the reference keeps the blue; the rest take the palette slots in selection order
+    if (id === cmp.ref) return C.blue;
+    return CMP_COLORS[Math.max(0, cmp.ids.filter(x => x !== cmp.ref).indexOf(id)) % CMP_COLORS.length];
+  }
+
+  const cmpReadyIds = () => cmp.ids.filter(id => cmp.st.get(id) === 'ready' && cmpData(id));
+
+  const cmpUrlParam = () => [cmp.ref, ...cmp.ids.filter(id => id !== cmp.ref).sort((a, b) => a - b)].join(',');
+
+  function cmpUrl() {   // the selection lives in the URL, reference first: the shared link reproduces the comparison
+    const shared = new URLSearchParams(location.search);
+    if (cmp.on && cmp.ref != null && cmp.ids.length) shared.set('compare', cmpUrlParam());
+    else shared.delete('compare');
+    history.replaceState(null, '', shared.toString() ? '?' + shared : location.pathname);
+  }
+
+  function cmpSyncSel() {   // the db-view checkboxes mirror the live compare selection
+    srchSel.clear();
+    cmp.ids.forEach(id => srchSel.add(id));
+    srchPaint();
+  }
+
+  function cmpChrome() {   // bar, difference strip and the W-strip note swap on entering/leaving compare
+    const showing = cmp.on && cmp.ids.length >= 2;
+    $('rp-cmp-bar').hidden = !cmp.on;
+    $('rp-dw-strip').hidden = !showing;
+    document.querySelector('#cell-tr .strips').classList.toggle('cmp-on', showing);
+    $('rp-tr-note').textContent = cmp.on ? 'one measured trace per shot' : 'laws are fed the measured power';
+    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">kJ · dashed W/W<sub>ref</sub> · computed</span>`;
+  }
+
+  async function startCompare(idsIn) {
+    cmp.seq++;
+    cmp.ctrls.forEach(c => c.abort());
+    cmp.ctrls.clear();
+    cmp.ids = [...new Set((idsIn || []).map(Number).filter(Boolean))].slice(0, SRCH_MAX);
+    cmp.ref = cmp.ids[0] ?? null;
+    cmp.on = true;
+    cmp.st.clear(); cmp.err.clear();
+    cmpChrome(); cmpUrl(); cmpSyncSel();
+    if (cmp.ids.length < 2) { cmpPaint(); return; }   // Empty: a prompt with a shortcut back to the catalog
+    // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
+    if (shot && shot.meta.shot_id === cmp.ref) { cmp.st.set(cmp.ref, 'ready'); drawStrips(); scrub(+$('rp-t').value); }
+    for (const id of cmp.ids) {
+      if (cmp.st.get(id) === 'ready') continue;
+      cmp.st.set(id, 'fetching');
+      cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
+    }
+    cmpPaint();
+  }
+
+  // One payload per shot: on resolve, a non-reference shot redraws the overlays; the reference goes through
+  // renderShot like any single pick. An error (or a cancel) lands in the per-shot error list.
+  async function cmpFetch(id, my, onReady) {
+    const ctrl = new AbortController();
+    cmp.ctrls.set(id, ctrl);
+    try {
+      const payload = await getReplay(id, ctrl.signal);
+      if (my !== cmp.seq) return;
+      cmp.data.set(id, payload);
+      cmp.st.set(id, 'ready');
+      cmp.err.delete(id);
+      if (onReady) onReady(payload);
+      else if (id !== cmp.ref) { drawCmpW(); drawCmpLim(); drawDw(); cmpThomson(); }
+    } catch (e) {
+      if (my !== cmp.seq) return;
+      cmp.st.set(id, 'error');
+      cmp.err.set(id, e?.name === 'AbortError' ? 'fetch cancelled' : (e?.message || 'fetch failed'));
+    } finally {
+      cmp.ctrls.delete(id);
+      if (my === cmp.seq) cmpPaint();
+    }
+  }
+
+  async function cmpSetRef(id) {   // chips, dropdown picks and search rows all land here
+    if (!cmp.ids.includes(id)) {   // a pick from outside the set: back to the single-shot view, selection kept
+      exitCompare();
+      return loadShot(id);
+    }
+    const my = ++loadSeq;          // the same last-click-wins guard the single-shot pick uses
+    if (id !== cmp.ref) { cmp.ref = id; cmpUrl(); cmpChrome(); }
+    if (shot && shot.meta.shot_id === id) {
+      drawStrips(); drawDw(); scrub(+$('rp-t').value);
+      cmpPaint();
+      return sliceState(+$('rp-t').value);
+    }
+    if (cmp.st.get(id) === 'ready') { renderShot(cmpData(id)); return sliceState(+$('rp-t').value); }
+    cmp.st.set(id, 'fetching');    // the reference itself still has to arrive (the Failed state retries through here)
+    cmp.err.delete(id);
+    cmpPaint();
+    await cmpFetch(id, cmp.seq, p => { if (my === loadSeq) renderShot(p); });
+    return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+  }
+
+  function cmpDrop(id) {   // from the Partial/Failed error list, or when the selection drops below two
+    cmp.ids = cmp.ids.filter(x => x !== id);
+    cmp.st.delete(id); cmp.err.delete(id); cmp.data.delete(id);
+    const ctrl = cmp.ctrls.get(id);
+    if (ctrl) { ctrl.abort(); cmp.ctrls.delete(id); }
+    if (cmp.ref === id) {
+      cmp.ref = (cmp.ids.find(x => cmp.st.get(x) === 'ready') ?? cmp.ids[0]) ?? null;
+      cmpChrome();
+      const next = cmpData(cmp.ref);
+      if (next && shot && shot.meta.shot_id !== cmp.ref) renderShot(next);
+      else if (next) { drawStrips(); drawDw(); scrub(+$('rp-t').value); }
+    }
+    cmpChrome(); cmpUrl(); cmpSyncSel(); cmpTeSetup(); drawCmpW(); drawCmpLim(); drawDw(); cmpPaint();
+  }
+
+  function exitCompare() {
+    if (!cmp.on) return;
+    cmp.seq++;
+    cmp.ctrls.forEach(c => c.abort());
+    cmp.ctrls.clear();
+    cmp.on = false;
+    cmp.ids = []; cmp.ref = null; cmp.st.clear(); cmp.err.clear(); cmp.data.clear();
+    cmpUrl(); cmpChrome();
+    srchPaint();               // the checkboxes stay; the compare button can re-enter
+    if (shot) { drawStrips(); drawSection(); scrub(+$('rp-t').value); }
+  }
+
+  function cmpPaint() {   // the compare bar: per-shot chips, the state, and the actions the state allows
+    if (!cmp.on) return;
+    const n = cmp.ids.length;
+    const readyN = cmp.ids.filter(id => cmp.st.get(id) === 'ready').length;
+    const fetching = cmp.ids.some(id => (cmp.st.get(id) || 'queued') !== 'ready' && cmp.st.get(id) !== 'error');
+    const failed = cmp.ids.filter(id => cmp.st.get(id) === 'error');
+    const STATE = { queued: 'queued', fetching: 'fetching from the archive…', ready: 'ready', error: 'failed' };
+    const chips = n ? cmp.ids.map(id => {
+      const s = cmp.st.get(id) || 'queued';
+      const cls = s === 'ready' ? 'ok' : s === 'error' ? 'bad' : 'wait';
+      const ref = id === cmp.ref;
+      return `<button type="button" class="cmp-chip ${cls}${ref ? ' ref' : ''}" data-ref="${id}" ${ref ? '' : 'title="Make this the reference"'}>`
+        + `<b>#${id}</b>${ref ? ' · reference' : ''} — ${STATE[s]}</button>`;
+    }).join('') : '<span class="muted">no shots selected</span>';
+    const errs = failed.map(id => `<div class="cmp-err"><b>#${id}</b> — ${esc(cmp.err.get(id) || 'failed')}
+      <button type="button" class="tool" data-retry="${id}">Retry</button>
+      <button type="button" class="tool" data-drop="${id}">Drop</button></div>`).join('');
+    $('rp-cmp-bar').innerHTML =
+      `<span class="cmp-title">Compare ${readyN}/${n}</span><span class="cmp-chips">${chips}</span>`
+      + `<span class="cmp-actions">${fetching ? '<button type="button" class="tool" data-act="cancel">Cancel</button>' : ''}`
+      + `${failed.length ? '<button type="button" class="tool" data-act="retry">Retry failed</button>' : ''}`
+      + '<button type="button" class="tool" data-act="exit">Exit compare</button></span>'
+      + (n < 2 ? '<span class="cmp-note">Pick 2–6 shots — tick them in <button type="button" class="tool" data-act="search">the catalog</button> and they join this compare.</span>'
+               : `<div class="cmp-errs">${errs}</div>`)
+      + (failed.includes(cmp.ref) ? '<div class="cmp-err">The reference failed, so the overlays are incomplete — retry it or click a ready shot to make it the reference.</div>' : '');
+  }
+
+  $('rp-cmp-bar').addEventListener('click', e => {
+    const chip = e.target.closest('[data-ref]');
+    if (chip) return void cmpSetRef(+chip.dataset.ref);
+    const b = e.target.closest('[data-act],[data-retry],[data-drop]');
+    if (!b) return;
+    if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
+    if (b.dataset.act === 'exit') return exitCompare();
+    if (b.dataset.act === 'search') return window.FusionLab.showTab('db');
+    if (b.dataset.retry) {
+      const id = +b.dataset.retry;
+      cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();
+      return void cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
+    }
+    if (b.dataset.drop) return cmpDrop(+b.dataset.drop);
+  });
+
+  // rp-te carries one trace per compared shot: index 0 is the reference's, as in single-shot mode.
+  const cmpTeIdx = id => 1 + cmp.ids.filter(x => x !== cmp.ref).indexOf(id);
+
+  function cmpTeSetup() {
+    const el = $('rp-te');
+    if (!el.data || !cmp.on) return;
+    const want = 1 + cmp.ids.filter(id => id !== cmp.ref).length;
+    while (el.data.length > want) Plotly.deleteTraces(el, el.data.length - 1);
+    while (el.data.length < want) Plotly.addTraces(el, { x: [], y: [], mode: 'markers', name: '', hoverinfo: 'skip', marker: { size: 5 } });
+  }
+
+  // The compared shots' Thomson profiles follow the shared cursor (the reference's own slice fetch is the
+  // existing drawPsi path). Uncached slices arrive from the server's per-slice cache — no new endpoints.
+  async function cmpThomson() {
+    if (!cmp.on || !shot) return;
+    const tCursor = shot.measured.t_s[+$('rp-t').value] ?? 0;
+    for (const id of cmp.ids) {
+      if (id === cmp.ref) continue;
+      const d = cmpData(id);
+      if (!d || cmp.st.get(id) !== 'ready') continue;
+      if (playTimer) continue;   // playback: the reference's profile follows the slider; the others catch up on pause
+      const t = d.measured.t_s;
+      let k = 0;
+      for (let j = 1; j < t.length; j++) if (Math.abs(t[j] - tCursor) < Math.abs(t[k] - tCursor)) k = j;
+      const p = await getPsi(id, k);
+      if (!p || !p.thomson || !cmp.on) continue;
+      Plotly.restyle('rp-te', { x: [p.thomson.R], y: [p.thomson.Te_keV], name: [`#${id} Te (measured)`],
+                                marker: { size: 5, color: cmpColor(id) } }, [cmpTeIdx(id)]);
+    }
+  }
+
+  // W and limits: one measured trace per shot, per-shot colour, legend, unchanged units. The limits panel
+  // plots each shot's worst limit fraction with the binding limit named in the hover.
+  function drawCmpW() {
+    const traces = cmpReadyIds().map(id => {
+      const d = cmpData(id), c = cmpColor(id), ref = id === cmp.ref;
+      return line(d.measured.t_s, scale(d.measured.W_MJ, 1e3), `#${id} measured${ref ? ' · reference' : ''}`, c,
+                  { line: { color: c, width: ref ? 3 : 2 } });
+    });
+    Plotly.react('rp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);
+  }
+
+  function drawCmpLim() {
+    const traces = cmpReadyIds().map(id => {
+      const d = cmpData(id), c = cmpColor(id), ref = id === cmp.ref;
+      return line(d.measured.t_s, d.model.worst_limit, `#${id} worst limit${ref ? ' · reference' : ''}`, c,
+        { line: { color: c, width: ref ? 3 : 2 }, customdata: d.model.binding.map(b => LIMIT_LABEL[d.limit_names[b]] || ''),
+          hovertemplate: '%{customdata} at %{x:.3f} s: %{y:.2f}× limit<extra>#' + id + '</extra>' });
+    });
+    Plotly.react('rp-lim', traces, stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
+              shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
+  }
+
+  // Linear interpolation of one shot's W onto the reference's time base — the difference panel needs one
+  // shared t, and null outside the shot's own span (no invented data).
+  function interpOnto(t0, t, y) {
+    const pts = [];
+    for (let i = 0; i < t.length; i++) if (y[i] != null && isFinite(y[i])) pts.push([t[i], y[i]]);
+    const out = [];
+    let k = 0;
+    for (const x of t0) {
+      while (k < pts.length && pts[k][0] < x) k++;
+      const a = pts[k - 1], b = pts[k];
+      out.push(!k || k >= pts.length ? null : a[0] === b[0] ? a[1] : a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]));
+    }
+    return out;
+  }
+
+  // The difference strip: ΔW(t) in kJ (solid) and W/W_ref (dotted, right axis), both computed from the
+  // measured EFIT stored energies relative to the reference shot.
+  function drawDw() {
+    if (!cmp.on) return;
+    const ref = cmpData(cmp.ref);
+    if (!ref) return;
+    const t0 = ref.measured.t_s, W0 = ref.measured.W_MJ;
+    const traces = [];
+    for (const id of cmp.ids) {
+      if (id === cmp.ref) continue;
+      const d = cmpData(id);
+      if (!d) continue;
+      const Wi = cmp.st.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
+      const c = cmpColor(id);
+      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i]) * 1e3) : [],
+                       `ΔW #${id} − #${cmp.ref} (computed)`, c, { line: { color: c, width: 2 } }));
+      traces.push(line(t0, Wi ? Wi.map((w, i) => (!w || W0[i] == null) ? null : w / W0[i]) : [],
+                       `#${id} / #${cmp.ref} W (computed)`, c,
+                       { line: { color: c, width: 1.5, dash: 'dot' }, yaxis: 'y2', showlegend: false }));
+    }
+    Plotly.react('rp-dw', traces, stripLayout(true, {
+      margin: { l: 44, r: 64, t: 18, b: 30 },
+      yaxis: { gridcolor: C.grid, zeroline: true, zerolinecolor: C.muted, tickfont: { size: 10 } },
+      yaxis2: { overlaying: 'y', side: 'right', showgrid: false, zeroline: false, tickfont: { size: 10, color: C.muted } },
+    }), CFG);
+  }
+
+  // The synchronized time cursor: one vertical line across every time-based panel, driven by the slider's
+  // scrub and by hover on any panel — the panel-to-panel sync the compare view is read through.
+  function drawCursor(tSec) {
+    const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: tSec, x1: tSec, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
+    [...TIME_PLOTS, ...($('rp-dw').data ? ['rp-dw'] : [])].forEach(id => {
+      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || s.name === 'ood');
+      Plotly.relayout(id, { shapes: [...keep, cursor] });
+    });
+  }
+  [...TIME_PLOTS, 'rp-dw'].forEach(id => {
+    $(id).addEventListener('plotly_hover', e => { const x = e?.points?.[0]?.x; if (x != null) drawCursor(x); });
+    $(id).addEventListener('plotly_unhover', () => { if (shot) drawCursor(shot.measured.t_s[+$('rp-t').value]); });
+  });
 
   document.addEventListener('vessel3d:ready', () => {   // the module arrived after the first draw: swap the fallback out
     if (!shot || use3) return;
@@ -752,7 +1087,7 @@
   document.addEventListener('fusionlab:tab', e => {
     if (e.detail !== 'replay' && e.detail !== 'db') return;
     init().then(() => {
-      [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-3d', 'rp-db-tau', 'rp-db-ops'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
+      [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw', 'rp-3d', 'rp-db-tau', 'rp-db-ops'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
       if (use3) window.Vessel3D.resize();
     });
   });

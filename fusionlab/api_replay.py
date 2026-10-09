@@ -77,9 +77,11 @@ def _shot(shot_id: int) -> dict:
     else:
         try:
             mast.load_shot(shot_id)   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
-        except GroupNotFoundError:
+        except GroupNotFoundError as err:
             job["err"] = "unpublished"   # waiters answer with the same 404, not a 502
-            raise HTTPException(404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST")
+            raise HTTPException(
+                404, f"shot {shot_id} is in the catalog but its level-2 data is not published in FAIR-MAST"
+            ) from err
         except Exception as e:
             job["err"] = type(e).__name__
             logger.warning("fetch of shot %s from FAIR-MAST failed", shot_id, exc_info=True)

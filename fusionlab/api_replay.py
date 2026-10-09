@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from fusionlab import mast
@@ -272,3 +273,95 @@ def db():
     v = _db_view()
     return {"n": int(v["shot_id"].size), "attribution": ATTRIBUTION, "beta_N_limit": BETA_N_LIMIT, "q95_limit": 2.0,
             "H98_median": round(float(np.nanmedian(v["H98"])), 3), "columns": {k: _j(a) for k, a in v.items()}}
+
+
+# ---- catalog search over the full shot table (the db view above is the cleaned analysis subset)
+
+_ROW_FIELDS = ("shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
+               "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
+               "t_ipmax_s", "useful", "abort")
+
+
+@lru_cache(maxsize=1)
+def _catalog() -> dict:
+    """The full FAIR-MAST shot table (data/mast_db.npz), read once per process and shared by every search."""
+    return mast.load_db()
+
+
+def _q_mask(c: dict, q: str | None) -> np.ndarray | None:
+    """Mask for one shot number or an inclusive range like 30400-30500."""
+    if q is None:
+        return None
+    if not (m := re.fullmatch(r"(\d{1,6})(?:-(\d{1,6}))?", q.strip())):
+        raise HTTPException(422, "q must be a shot number or a range like 30400-30500")
+    lo, hi = int(m.group(1)), m.group(2)
+    if hi is not None:
+        if int(hi) < lo:
+            raise HTTPException(422, "q range must go from the lower shot number to the higher")
+        return (c["shot_id"] >= lo) & (c["shot_id"] <= int(hi))
+    return c["shot_id"] == lo
+
+
+def _campaign_mask(c: dict, campaign: str | None) -> np.ndarray | None:
+    """Mask for one campaign, named like the archive names them (M9) or as a bare number (9)."""
+    if campaign is None:
+        return None
+    m = re.fullmatch(r"M?(\d+)", campaign.strip(), re.IGNORECASE)
+    if not m:
+        raise HTTPException(422, "campaign must look like M9 (bare digits work too)")
+    return c["campaign"] == int(m.group(1))
+
+
+def _range_mask(c: dict, field: str, lo: float | None, hi: float | None) -> np.ndarray | None:
+    """Inclusive min/max mask on one numeric field; shots missing that field (NaN) never match."""
+    if lo is None and hi is None:
+        return None
+    a, m = c[field], np.ones(c["shot_id"].size, dtype=bool)
+    if lo is not None:
+        m &= a >= lo
+    if hi is not None:
+        m &= a <= hi
+    return m
+
+
+def _flag_mask(c: dict, field: str, flag: bool | None) -> np.ndarray | None:
+    """useful/abort toggle: True keeps rows the archive marked with 1, False the rest; None does not filter."""
+    if flag is None:
+        return None
+    marked = c[field] == 1
+    return marked if flag else ~marked
+
+
+@router.get("/db/search")
+def db_search(q: str | None = None, campaign: str | None = None,
+              ip_min: float | None = None, ip_max: float | None = None,   # MA
+              bt_min: float | None = None, bt_max: float | None = None,   # T
+              pnbi_min: float | None = None, pnbi_max: float | None = None,   # MW
+              ne_min: float | None = None, ne_max: float | None = None,   # 1e20 m^-3
+              w_min: float | None = None, w_max: float | None = None,   # MJ
+              q95_min: float | None = None, q95_max: float | None = None,
+              useful: bool | None = None, abort: bool | None = None,
+              limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0)) -> dict:
+    """Vectorized filter over the full FAIR-MAST catalog (15,969 rows), beside /db's cleaned analysis view.
+
+    Filters combine (AND); the UI mirrors them into the URL so any result set is shareable. total counts
+    the whole match set, independent of the limit/offset window. Units are the repo's: MA, T, MW,
+    1e20 m^-3, MJ. There is no H-mode filter: the archive's metadata table has no H-mode flag.
+    """
+    c = _catalog()
+    mask = np.ones(c["shot_id"].size, dtype=bool)
+    for m in (_q_mask(c, q), _campaign_mask(c, campaign),
+              _range_mask(c, "Ip_MA", ip_min, ip_max), _range_mask(c, "B_T", bt_min, bt_max),
+              _range_mask(c, "P_nbi_MW", pnbi_min, pnbi_max), _range_mask(c, "n_e20", ne_min, ne_max),
+              _range_mask(c, "W_MJ", w_min, w_max), _range_mask(c, "q95", q95_min, q95_max),
+              _flag_mask(c, "useful", useful), _flag_mask(c, "abort", abort)):
+        if m is not None:
+            mask &= m
+    total = int(mask.sum())
+    if offset and offset >= total:   # offset 0 stays valid on an empty match: that is the "no shots" state
+        raise HTTPException(422, f"offset {offset} is beyond the {total} matching shots")
+    idx = np.where(mask)[0]
+    idx = idx[np.argsort(c["shot_id"][idx], kind="stable")][offset:offset + limit]   # ascending ids: stable pages
+    cols = {k: _j(c[k][idx]) for k in _ROW_FIELDS}
+    rows = [dict(zip(_ROW_FIELDS, row, strict=True)) for row in zip(*cols.values(), strict=True)]
+    return {"total": total, "limit": limit, "offset": offset, "rows": rows, "attribution": ATTRIBUTION}

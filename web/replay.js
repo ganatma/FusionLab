@@ -861,22 +861,27 @@
   async function cmpFetch(id, my, onReady) {
     const ctrl = new AbortController();
     cmp.ctrls.set(id, ctrl);
+    // Fetch and render are separate try-scopes: a rendering exception must surface as an error in the
+    // console, never masquerade as a fetch failure on the shot.
+    let payload;
     try {
-      const payload = await getReplay(id, ctrl.signal);
-      if (my !== cmp.seq) return;
-      cmp.data.set(id, payload);
-      cmp.st.set(id, 'ready');
-      cmp.err.delete(id);
-      if (onReady) onReady(payload);
-      else if (id !== cmp.ref) { drawCmpW(); drawCmpLim(); drawDw(); cmpThomson(); }
+      payload = await getReplay(id, ctrl.signal);
     } catch (e) {
       if (my !== cmp.seq) return;
       cmp.st.set(id, 'error');
       cmp.err.set(id, e?.name === 'AbortError' ? 'fetch cancelled' : (e?.message || 'fetch failed'));
-    } finally {
       cmp.ctrls.delete(id);
-      if (my === cmp.seq) cmpPaint();
+      cmpPaint();
+      return;
     }
+    if (my !== cmp.seq) return;
+    cmp.data.set(id, payload);
+    cmp.st.set(id, 'ready');
+    cmp.err.delete(id);
+    cmp.ctrls.delete(id);
+    if (onReady) onReady(payload);
+    else if (id !== cmp.ref) { drawCmpW(); drawCmpLim(); drawDw(); cmpThomson(); }
+    if (my === cmp.seq) cmpPaint();
   }
 
   async function cmpSetRef(id) {   // chips, dropdown picks and search rows all land here
@@ -1009,6 +1014,7 @@
                   { line: { color: c, width: ref ? 3 : 2 } });
     });
     Plotly.react('rp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);
+    redrawCursor();
   }
 
   function drawCmpLim() {
@@ -1020,6 +1026,7 @@
     });
     Plotly.react('rp-lim', traces, stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
               shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
+    redrawCursor();
   }
 
   // Linear interpolation of one shot's W onto the reference's time base — the difference panel needs one
@@ -1062,21 +1069,34 @@
       yaxis: { gridcolor: C.grid, zeroline: true, zerolinecolor: C.muted, tickfont: { size: 10 } },
       yaxis2: { overlaying: 'y', side: 'right', showgrid: false, zeroline: false, tickfont: { size: 10, color: C.muted } },
     }), CFG);
+    redrawCursor();
   }
 
   // The synchronized time cursor: one vertical line across every time-based panel, driven by the slider's
   // scrub and by hover on any panel — the panel-to-panel sync the compare view is read through.
+  // The compare re-draws (Plotly.react) rebuild each panel and wipe the cursor shape, so the cursor
+  // time is tracked and re-drawn after every overlay update.
+  let cursorT = null;
   function drawCursor(tSec) {
+    cursorT = tSec;
     const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: tSec, x1: tSec, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
     [...TIME_PLOTS, ...($('rp-dw').data ? ['rp-dw'] : [])].forEach(id => {
+      if (!$(id).layout) return;   // a panel mid-boot: no shapes to preserve, skip it
       const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || s.name === 'ood');
       Plotly.relayout(id, { shapes: [...keep, cursor] });
     });
   }
   [...TIME_PLOTS, 'rp-dw'].forEach(id => {
+    // Hover moves the shared cursor and leaves it at the last hovered time — no unhover redraw: a
+    // relayout under the mouse fires a spurious plotly_unhover, which would race the sync loop.
     $(id).addEventListener('plotly_hover', e => { const x = e?.points?.[0]?.x; if (x != null) drawCursor(x); });
-    $(id).addEventListener('plotly_unhover', () => { if (shot) drawCursor(shot.measured.t_s[+$('rp-t').value]); });
   });
+
+  // A Plotly.react rebuild (any compare overlay update) wipes cursor shapes — every compare re-draw
+  // calls this afterwards so the shared cursor stays visible and in sync.
+  function redrawCursor() {
+    if (shot) drawCursor(cursorT ?? shot.measured.t_s[+$('rp-t').value]);
+  }
 
   document.addEventListener('vessel3d:ready', () => {   // the module arrived after the first draw: swap the fallback out
     if (!shot || use3) return;

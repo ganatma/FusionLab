@@ -98,9 +98,12 @@ def replay_psi(shot_id: int, i: int):
     return out
 
 
-@router.get("/replay/{shot_id}/usd")
+@router.post("/replay/{shot_id}/usd")
 def replay_usd(shot_id: int, fmt: str = "usdc"):
-    """OpenUSD export (Omniverse-compatible): vessel, PF coils and the plasma boundary time-sampled over the shot."""
+    """OpenUSD export (Omniverse-compatible): vessel, PF coils and the plasma boundary time-sampled over the shot.
+
+    POST, not GET: the export recomputes the stage and writes out/ on every hit — a state-changing
+    operation must not be triggerable by navigation, prefetch or crawlers (audit F1)."""
     from fusionlab.usd_export import FORMATS, export_shot
     if f".{fmt}" not in FORMATS:
         raise HTTPException(422, f"fmt must be one of {sorted(x.lstrip('.') for x in FORMATS)}")

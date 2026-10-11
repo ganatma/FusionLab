@@ -154,13 +154,13 @@ def test_map_matches_simulate_at_a_grid_point():
 
 
 def test_static_assets_served():
-    for path in ("/static/app.js", "/static/style.css", "/static/replay.js", "/static/vessel3d.js",
+    for path in ("/static/app.js", "/static/workspaces.js", "/static/style.css", "/static/replay.js", "/static/vessel3d.js",
                  "/static/vendor/three.module.min.js", "/static/vendor/OrbitControls.js"):
         assert client.get(path).status_code == 200, path
     assert "fusionlab:tab" in client.get("/static/app.js").text
     assert client.get("/static/vendor/plotly.min.js").status_code == 200
     html = client.get("/").text
-    assert 'id="tab-replay"' in html and 'id="tab-db"' in html and 'id="tab-sandbox"' in html
+    assert 'id="tab-replay"' in html and 'id="tab-compare"' in html and 'id="tab-explore"' in html
     # the demo never needs the network: no CDN in the page or in any script of ours (vendored libraries aside)
     ours = [html] + [p.read_text() for p in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.json"))]
     for text in ours:

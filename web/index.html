@@ -8,6 +8,7 @@
   <script type="importmap">{"imports":{"three":"/static/vendor/three.module.min.js"}}</script>
   <script src="/static/vendor/plotly.min.js" defer></script>
   <script type="module" src="/static/vessel3d.js"></script>
+  <script src="/static/workspaces.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/replay.js" defer></script>
   <script src="/static/figures.js" defer></script>
@@ -26,17 +27,18 @@
     </div>
     <span class="seg" id="mode" role="group" aria-label="Mode" title="Guided: a 15-minute study that teaches you to read this screen. Lab: the full app.">
       <button type="button" data-v="guided">Guided</button><button type="button" data-v="lab" class="on">Lab</button></span>
-    <nav class="tabs">
-      <button type="button" data-tab="replay">Replay a real shot</button>
-      <button type="button" data-tab="db">Shot database</button>
-      <button type="button" data-tab="sandbox" class="active">What-if sandbox</button>
+    <button type="button" id="cmdk" class="tool" disabled title="Command palette (Ctrl/Cmd+K) — arriving with the palette change">⌘K</button>
+    <nav class="tabs" role="tablist" aria-label="Workspaces">
+      <button type="button" role="tab" id="tabbtn-replay" data-tab="replay" aria-selected="true" aria-controls="tab-replay">Replay</button>
+      <button type="button" role="tab" id="tabbtn-compare" data-tab="compare" aria-selected="false" aria-controls="tab-compare">Compare</button>
+      <button type="button" role="tab" id="tabbtn-explore" data-tab="explore" aria-selected="false" aria-controls="tab-explore">Explore</button>
     </nav>
   </header>
 
-  <section id="tab-replay" hidden></section>
-  <section id="tab-db" hidden></section>
+  <section id="tab-replay" role="tabpanel" aria-labelledby="tabbtn-replay" tabindex="0" hidden></section>
+  <section id="tab-compare" role="tabpanel" aria-labelledby="tabbtn-compare" tabindex="0" hidden></section>
 
-  <section id="tab-sandbox">
+  <section id="tab-explore" role="tabpanel" aria-labelledby="tabbtn-explore" tabindex="0" hidden>
     <div class="grid">
       <div class="panel">
         <h2>Device</h2>
@@ -91,9 +93,10 @@
       <h1>FUSIONLAB<span class="dim"> · open-data tokamak twin</span></h1>
       <p class="muted">Real shots of the MAST tokamak, beside the physics models, with learned corrections and their errors stated. Where would you like to start?</p>
       <div class="welcome-pick">
-        <button type="button" data-mode="guided"><b>New to fusion</b><span>A guided study, about 15 minutes. What a tokamak is trying to do, what each knob means, and how to read a real shot. It runs on this very screen, so you finish knowing the app.</span><i>Start the guided study →</i></button>
-        <button type="button" data-mode="lab"><b>I know tokamaks</b><span>Straight to the lab: replay real shots, the 6,353-shot database, the what-if sandbox. Every panel has a <b>?</b> that opens its lesson if you want one.</span><i>Open the lab →</i></button>
+        <button type="button" data-mode="guided" data-landing="replay"><b>New to fusion</b><span>A guided study, about 15 minutes. What a tokamak is trying to do, what each knob means, and how to read a real shot. It runs on this very screen, so you finish knowing the app.</span><i>Start the guided study →</i></button>
+        <button type="button" data-mode="lab" data-landing="replay"><b>I know tokamaks</b><span>Straight to the lab: replay real shots, compare shots in the catalog, and edit a shot's programme. Every panel has a <b>?</b> that opens its lesson if you want one.</span><i>Open the lab →</i></button>
       </div>
+      <p class="welcome-alt small"><button type="button" data-mode="lab" data-landing="explore">Explore the model</button> — the what-if sliders on their own: pick a machine, turn the knobs, and watch the operating limits respond.</p>
       <p class="small dim">You can switch at any time with Guided | Lab in the header.</p>
     </div>
   </div>

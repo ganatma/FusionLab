@@ -115,7 +115,7 @@ def test_a_proposal_goes_to_the_sink_as_an_event_and_never_into_the_model_contex
     fake, events = run_turn(monkeypatch, script)
     proposed = next(e for e in events if e["type"] == "action_proposed")
     assert proposed == {"type": "action_proposed", "action_id": "a_test", "tool": "export_usd",
-                        "args": {"shot_id": 30420}, "math": "", "expires_s": 600}
+                        "args": {"shot_id": "30420"}, "math": "", "expires_s": 600}   # canonical tool args, not the raw call
     block = fake.calls[1]["messages"][-1]["content"][0]
     assert "nothing is applied yet" in block["content"]
     assert "apply" not in block["content"]   # the driver's payload stays server-side

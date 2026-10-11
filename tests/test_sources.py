@@ -189,3 +189,171 @@ def test_user_bundles_env_points_the_source_at_a_directory(tmp_path, monkeypatch
     monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
     monkeypatch.setenv("FUSIONLAB_DATA_SOURCE", "user-file")
     assert sources.get_source().cached_shots() == ["X-1"]
+
+
+# ---------------------------------------------------------------- the API: bring-your-own-data end to end
+
+# The API section rides the bundle fixtures defined above; these imports land mid-file on purpose.
+from fastapi.testclient import TestClient  # noqa: E402
+
+from fusionlab.api import app  # noqa: E402
+
+client = TestClient(app)
+
+
+def _upload(s: dict, shot_id: str = "AUG-34578", meta_json: str | None = None):
+    """POST the bundle bytes through the import route, exactly as the UI does."""
+    data = {"meta_json": meta_json} if meta_json is not None else {}
+    return client.post(f"/data/bundles/{shot_id}", data=data,
+                       files={"file": ("aug.npz", npz_bytes(s), "application/octet-stream")})
+
+
+def test_uploaded_bundle_replays_compares_and_exports_end_to_end(tmp_path, monkeypatch):  # _api_section_appended
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    r = _upload(synthetic_bundle())
+    assert r.status_code == 200, r.text
+    row = r.json()
+    assert row["shot_id"] == "AUG-34578" and row["source"] == "user-file"
+    assert row["equilibrium"] is True and "psi_n" in row["fields"]
+
+    # /shots lists the import beside the archive's cache, tagged with its source
+    ids = {str(sh["shot_id"]): sh for sh in client.get("/shots").json()["shots"]}
+    assert "AUG-34578" in ids and ids["AUG-34578"]["source"] == "user-file"
+
+    # replay: the synthetic machine's own numbers come back (not a MAST re-skin), with its meta
+    rep = client.get("/replay/AUG-34578").json()
+    assert rep["meta"]["shot_id"] == "AUG-34578"
+    assert rep["attribution"] == synthetic_bundle()["meta"]["attribution"]
+    assert all(v == 2.4 for v in rep["measured"]["B_T"])
+    assert rep["lcfs"] is not None and rep["psi_grid"] is not None
+
+    # compare export: the imported id rides beside an archive shot number, order kept
+    cmp_csv = client.get("/export", params={"shots": "30166, AUG-34578"})
+    assert cmp_csv.status_code == 200, cmp_csv.text
+    assert 'filename="fusionlab_shots_30166_AUG-34578.csv"' in cmp_csv.headers["content-disposition"]
+
+    # take-away export: the CSV's values are the replay bundle's own, provenance labelled
+    import csv as _csv
+    rows = list(_csv.DictReader(io.StringIO(client.get("/export/AUG-34578").text)))
+    assert {r["shot_id"] for r in rows} == {"AUG-34578"}
+    assert {"measured", "model", "computed"} <= {r["provenance"] for r in rows}
+    t0 = rep["measured"]["t_s"][0]
+    w = next(float(r["value"]) for r in rows
+             if r["quantity"] == "W_MJ" and r["t_s"] and abs(float(r["t_s"]) - t0) < 1e-9)
+    assert w == pytest.approx(rep["measured"]["W_MJ"][0], abs=1e-3)
+
+    # delete: the import is gone, the route 404s afterwards, no litter stays behind
+    assert client.delete("/data/bundles/AUG-34578").json() == {"deleted": "AUG-34578"}
+    assert client.get("/replay/AUG-34578").status_code == 404
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_psi_free_bundle_replays_trace_only_with_the_hint(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    s = synthetic_bundle("NO-EQ-1")
+    for k in ("lcfs_R", "lcfs_Z", "psi_n", "psi_R", "psi_Z"):
+        s.pop(k)
+    assert _upload(s, shot_id="NO-EQ-1").status_code == 200
+    rep = client.get("/replay/NO-EQ-1").json()   # previously the 500-class breakage the contract guards
+    assert rep["lcfs"] is None and rep["psi_grid"] is None
+    assert "no equilibrium reconstruction" in rep["equilibrium_absent"]
+    assert client.get("/replay/NO-EQ-1/psi/0").status_code == 404
+    # the trace-only replay still exports its numbers
+    assert client.get("/export/NO-EQ-1").status_code == 200
+
+
+def test_malformed_upload_400_names_the_field_and_leaves_no_partial_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    s = synthetic_bundle()
+    del s["W_MJ"]   # the first missing required field
+    r = _upload(s)
+    assert r.status_code == 400
+    assert "W_MJ" in r.json()["detail"]
+    # a truncated npz is a readable-file error, still a 400 naming the problem
+    raw = npz_bytes(synthetic_bundle())
+    r = client.post("/data/bundles/truncated", files={"file": ("t.npz", raw[:200], "application/octet-stream")})
+    assert r.status_code == 400
+    assert "npz" in r.json()["detail"]
+    assert list(tmp_path.iterdir()) == []   # no partial write in either case
+
+
+def test_upload_rejects_bad_ids_and_bad_meta_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    s = synthetic_bundle()
+    assert _upload(s, shot_id="30420").status_code == 422    # bare shot numbers are the archive's
+    assert _upload(s, shot_id="bad*id").status_code == 422
+    r = _upload(s, meta_json="{oops")
+    assert r.status_code == 422 and "meta_json" in r.json()["detail"]
+    assert _upload(s, meta_json='[1, 2]').status_code == 422
+    # the honest merge path: a meta_json object overrides/extends the bundle's own meta
+    r = _upload(s, meta_json=json.dumps({"operator": "TK"}))
+    assert r.status_code == 200 and r.json()["operator"] == "TK"
+
+
+def test_delete_never_touches_the_archive_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    assert client.delete("/data/bundles/30420").status_code == 404   # digit ids are the archive's, never deletable
+    assert (mast.SHOTS / "30420.npz").is_file()
+    assert client.delete("/data/bundles/ghost").status_code == 404
+
+
+def test_benchmark_runs_on_an_uploaded_bundle(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    assert _upload(synthetic_bundle()).status_code == 200
+    r = client.post("/compute/benchmark", params={"source": "user-file", "shot": "AUG-34578"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["shot"] == "AUG-34578" and out["n_slices"] > 0
+    assert any("user-file" in row["label"] for row in out["rows"])
+    assert client.post("/compute/benchmark", params={"source": "nope"}).status_code == 422
+
+
+def test_imported_catalog_rows_surface_in_db_search(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    monkeypatch.setenv("FUSIONLAB_DATA_SOURCE", "user-file")
+    from fusionlab.api_replay import _catalog
+    _catalog.cache_clear()   # the per-process catalog cache keys on source name, not directory
+    try:
+        assert _upload(synthetic_bundle()).status_code == 200
+        r = client.get("/db/search")
+        assert r.status_code == 200, r.text
+        rows = [row for row in r.json()["rows"] if row["shot_id"] == "AUG-34578"]
+        assert len(rows) == 1
+        assert rows[0]["useful"] == 1 and rows[0]["abort"] == 0
+        assert rows[0]["Ip_MA"] == pytest.approx(0.9, abs=0.01)   # the peak-current slice's value
+        assert r.json()["attribution"]                           # the source's attribution rides the search too
+    finally:
+        _catalog.cache_clear()
+
+
+def _uncached_catalog_id_tail() -> int:
+    """A catalog shot the repo cache does not ship - the tail id, distinct from test_api's head pick."""
+    cached = set(mast.cached_shots())
+    ids = sorted(int(i) for i in mast.load_db()["shot_id"] if int(i) > 30000 and int(i) not in cached)
+    return ids[-1]
+
+
+def test_bare_post_imports_an_uncached_archive_shot(tmp_path, monkeypatch):
+    """The UI's self-import fallback: a digit-id POST with no file fetches through the loader's
+    cache-then-S3 path - exactly what a replay would do - and populates the cache."""
+    uncached = _uncached_catalog_id_tail()
+    real = mast.load_shot(30420)
+
+    def fake_fetch(shot_id):
+        return {**real, "meta": {**real["meta"], "shot_id": int(shot_id)}}
+
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", fake_fetch)
+    r = client.post(f"/data/bundles/{uncached}")     # bare POST, no multipart body
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert str(j["shot_id"]) == str(uncached) and j["source"] == "fair-mast" and j["equilibrium"] is True
+    assert (tmp_path / f"{uncached}.npz").is_file()   # the fetch-and-cache path populated the cache
+    assert client.get(f"/replay/{uncached}").status_code == 200   # and the shot replays from it
+
+
+def test_bare_post_on_a_non_digit_id_422s_with_the_multipart_hint(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUSIONLAB_USER_BUNDLES", str(tmp_path))
+    r = client.post("/data/bundles/AUG-34578")
+    assert r.status_code == 422
+    assert "multipart" in r.json()["detail"]

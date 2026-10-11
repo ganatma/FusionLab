@@ -181,7 +181,7 @@ def test_run_whatif_proposes_instead_of_applying():
     r = agent_tools.run_tool("run_whatif", shot_id=30166, p_nbi_MW=1.2, n_scale=1.1)
     assert r.error is None and r.proposal is not None
     p = r.proposal
-    assert p["tool"] == "run_whatif" and p["args"]["shot_id"] == 30166 and p["args"]["p_nbi_MW"] == 1.2
+    assert p["tool"] == "run_whatif" and p["args"]["shot_id"] == "30166" and p["args"]["p_nbi_MW"] == 1.2
     assert set(p["apply"]["sliders"]) == {"P_nbi", "n"} and "× P_nbi_max" in p["math"]
     assert r.data["edit"]["P_nbi"] == pytest.approx(1.2 / pmax) and r.data["is_identity"] is False
     assert "t_s" not in r.data and "anchored" not in r.data       # bands, not arrays, reach the model
@@ -239,9 +239,9 @@ def test_export_usd_proposes_and_executes_nothing(monkeypatch):
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", bomb)
     monkeypatch.setattr("fusionlab.usd_export.export_shot", bomb)
-    r = agent_tools.run_tool("export_usd", shot_id=30166)
+    r = agent_tools.run_tool("export_usd", shot_id="30166")
     assert r.error is None and r.proposal is not None
-    assert r.proposal["args"] == {"shot_id": 30166}
+    assert r.proposal["args"] == {"shot_id": "30166"}   # DATA-2: string ids, imported bundles included
     assert r.proposal["apply"]["download"] == {"method": "POST", "url": "/replay/30166/usd"}
 
 

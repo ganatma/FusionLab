@@ -442,12 +442,12 @@ def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
     out.unlink(missing_ok=True)   # the assertion is that the endpoint creates the served path
     seen = {}
 
-    def fake_with_lines(shot, path):
+    def fake_with_lines(shot, path, machine=None):
         seen["tmp"] = Path(path)
         seen["final_exists_mid_export"] = out.exists()
         Path(path).write_bytes(b"stage-bytes")
 
-    def plain_must_not_run(shot, path):
+    def plain_must_not_run(shot, path, machine=None):
         raise AssertionError("plain export ran although the field-line export succeeded")
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", fake_with_lines)
@@ -466,7 +466,7 @@ def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch
     out.parent.mkdir(exist_ok=True)
     out.write_bytes(b"previous-good-stage")
 
-    def dies_mid_write(shot, path):
+    def dies_mid_write(shot, path, machine=None):
         Path(path).write_bytes(b"half-written")
         raise RuntimeError("export exploded mid-write")
 
@@ -485,7 +485,8 @@ def test_usd_plain_stage_fallback_logs_a_warning(caplog, monkeypatch):
         raise RuntimeError("no warp device here")
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", broken)
-    monkeypatch.setattr("fusionlab.usd_export.export_shot", lambda shot, path: Path(path).write_bytes(b"plain-stage"))
+    monkeypatch.setattr("fusionlab.usd_export.export_shot",
+                        lambda shot, path, machine=None: Path(path).write_bytes(b"plain-stage"))
     with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
         r = client.post("/replay/30420/usd", params={"fmt": "usda"})
     assert r.status_code == 200 and r.content == b"plain-stage"
@@ -713,7 +714,7 @@ def test_compare_export_groups_rows_by_shot_and_validates():
     assert [s["meta"]["shot_id"] for s in j["shots"]] == [30420, 30166]   # deduped, request order kept
     rows = list(csv.DictReader(io.StringIO(client.get("/export", params={"shots": "30420,30166"}).text)))
     assert {r["shot_id"] for r in rows} == {"30420", "30166"}
-    assert client.get("/export", params={"shots": "30420,nope"}).status_code == 422
+    assert client.get("/export", params={"shots": "30420,nope"}).status_code == 404   # unresolvable id
     assert client.get("/export", params={"shots": "1,2,3,4,5,6,7"}).status_code == 422   # cap: 7 distinct ids
     assert client.get("/export", params={"shots": ",".join(["30166"] * 7)}).status_code == 200   # dupes dedupe first
     assert client.get("/export/1").status_code == 404   # not in the catalog

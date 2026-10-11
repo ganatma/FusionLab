@@ -81,7 +81,7 @@ def test_failed_shot_switch_reverts_the_select():
     replay = _served("replay.js")
     load = replay.split("async function loadShot")[1].split("async function insight")[0]
     assert "if (!r.ok) throw" in load
-    assert "$('rp-shot').value = shot ? shot.meta.shot_id : ''" in load
+    assert "$('rp-shot').value = shot ? String(shot.meta.shot_id) : ''" in load
 
 
 def test_fire_and_forget_panels_render_their_errors():

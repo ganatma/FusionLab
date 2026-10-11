@@ -112,7 +112,7 @@ def test_load_shot_reports_the_cache_boundary_and_suggests_search():
 def test_load_shot_returns_a_compact_summary_without_the_time_arrays():
     r = agent_tools.run_tool("load_shot", shot_id=30166)
     assert r.error is None
-    assert r.data["shot_id"] == 30166 and r.data["n_slices"] == mast.load_shot(30166)["t_s"].size
+    assert r.data["shot_id"] == "30166" and r.data["n_slices"] == mast.load_shot(30166)["t_s"].size
     assert "summary" in r.data and "measured" not in r.data   # traces are the UI's job, not the model's context
 
 
@@ -124,7 +124,7 @@ def test_limit_distances_answers_the_over_time_question():
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None
     d = r.data
-    assert d["shot_id"] == 30166 and d["limit_names"] == ["greenwald", "troyon", "kink"]
+    assert d["shot_id"] == "30166" and d["limit_names"] == ["greenwald", "troyon", "kink"]
     assert d["n_slices"] == mast.load_shot(30166)["t_s"].size
     for name in d["limit_names"]:
         c, x = d["closest"][name], d["first_cross_s"][name]
@@ -155,11 +155,11 @@ def test_limit_distances_carries_the_catalog_abort_flag(monkeypatch):
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None and r.data["archive"]["abort"] is False
     assert "abort" not in r.summary.lower()
-    c = dict(api_replay._catalog())
+    c = dict(api_replay._catalog("fair-mast"))
     i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
     c["abort"] = c["abort"].copy()
     c["abort"][i] = 1.0
-    monkeypatch.setattr(api_replay, "_catalog", lambda: c)
+    monkeypatch.setattr(api_replay, "_catalog", lambda source="fair-mast": c)
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None and r.data["archive"]["abort"] is True
     assert "flags this shot aborted" in r.summary

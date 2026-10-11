@@ -26,6 +26,7 @@ from fusionlab.atomicio import atomic_write
 from fusionlab.data import reader
 from fusionlab.data.bundle import BundleValidationError, ShotBundle
 from fusionlab.data.ingestors.fair_mast import _DB_COLS
+from fusionlab.data.lh_mode import derive_mode
 from fusionlab.data.machine import CleanLimits, MachineConfig
 
 # A bundle id names its file ({id}.npz) and rides in URLs and export filenames: letters,
@@ -128,6 +129,7 @@ def _default_user_config() -> MachineConfig:
         te_usd_ramp_max_kev=10.0,
         warmup_shot=None,
         clean_limits=CleanLimits(tau_E_max_s=float("inf"), kappa_min=0.0, a_min_m=0.0),
+        lh_enhancement_min=1.5,   # the generic ITER89-P cut (docs, FEAT-4): not MAST-calibrated; set yours
     )   # imported catalogs are hand-curated: no machine-calibrated filtering
 
 
@@ -252,7 +254,10 @@ class UserFileSource:
                 "t_ipmax_s": float(s["t_s"][i]), "useful": 1, "abort": 0,
             }.items():
                 cols[k].append(v)
-        return {k: np.asarray(v) for k, v in cols.items()}
+        db = {k: np.asarray(v) for k, v in cols.items()}
+        db["mode_derived"] = derive_mode(   # FEAT-4's derived flag, this machine's cut
+            db, isotope_md=self.config.isotope_md, enhancement_min=self.config.lh_enhancement_min)
+        return db
 
     def clean_db(self, db: dict) -> dict:
         """The imported catalog is hand-curated; the source's clean_limits (default: no filtering)

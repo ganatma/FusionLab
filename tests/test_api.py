@@ -241,7 +241,7 @@ def test_limit_distances_match_the_map_limit_formulas():
 def test_archive_flags_align_with_the_catalog():
     """FEAT-3: the bundle's archive block is the catalog's own cpf_useful/cpf_abort row — None where
     the archive never graded the shot (NaN), so absent flags degrade silently downstream."""
-    c = api_replay._catalog()
+    c = api_replay._catalog("fair-mast")
     for sid in mast.cached_shots():
         i = int(np.nonzero(c["shot_id"] == sid)[0][0])
         def row_flag(col, i=i):
@@ -255,11 +255,11 @@ def test_abort_marker_aligns_with_a_flagged_catalog_row(monkeypatch):
     """Where the archive DOES flag a shot, the bundle carries abort=True and the UI marker aligns
     with the catalog by construction. No cached shot ships flagged, so the alignment is proven on a
     synthetic catalog row (the shipped cache exercises only the silent-degradation path)."""
-    c = dict(api_replay._catalog())
+    c = dict(api_replay._catalog("fair-mast"))
     i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
     c["abort"] = c["abort"].copy()
     c["abort"][i] = 1.0
-    monkeypatch.setattr(api_replay, "_catalog", lambda: c)
+    monkeypatch.setattr(api_replay, "_catalog", lambda source="fair-mast": c)
     b = client.get("/replay/30166").json()
     assert b["archive"] == {"useful": True, "abort": True}
     assert client.get("/replay/30420").json()["archive"]["abort"] is False   # unflagged rows stay False

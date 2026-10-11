@@ -16,6 +16,17 @@ def _served(name: str) -> str:
     return client.get(f"/static/{name}").text
 
 
+def test_replay_guards_absent_equilibrium():
+    """DATA-1: a bundle without equilibrium replays its traces — replay.js reads the
+    `equilibrium_absent` hint instead of dereferencing lcfs/psi_grid unconditionally."""
+    replay = _served("replay.js")
+    assert "s.equilibrium_absent" in replay          # the hint surfaces in the insight panel
+    assert "grid ? grid.R : []" in replay            # the section view tolerates a missing ψ grid
+    assert "shot.psi_grid ?" in replay               # the header omits the EFIT tag without one
+    assert "shot.psi_grid ? 'EFIT, real vessel'" in replay   # the panel sub-label keeps its
+    assert "'no reconstruction — trace-only replay'" in replay   # provenance honest without one
+
+
 def test_stale_failures_are_seq_guarded_in_app_js():
     """JS-01: the seq guard extends into the catch blocks — a superseded failure may not
     overwrite the fresh status bar or heatmap."""

@@ -27,15 +27,13 @@ def test_time_base_and_shapes(shot):
 
 
 def test_project_units_are_sane_for_mast(shot):
-    """MAST: ~0.4-1 MA, ~0.45 T, few 1e19 m^-3, tens of kJ, R ~0.85 m, a ~0.6 m. Catches a missed SI conversion."""
+    """Mid-shot values sit inside the configured machine's unit ranges — catches a missed SI conversion.
+    The ranges live in MachineConfig.unit_sanity (formerly hard-coded here): a second machine carries
+    its own bounds, and the contract test asserts this table against every cached fixture."""
     i = shot["t_s"].size // 2
-    assert 0.3 < shot["Ip_MA"][i] < 1.5
-    assert 0.3 < shot["B_T"][i] < 0.7            # sign removed
-    assert 0.05 < shot["n_e20"][i] < 1.0
-    assert 0.005 < shot["W_MJ"][i] < 0.3         # plasma_energy, not the diamagnetic "wmhd"
-    assert 0.1 < shot["P_ohm_MW"][i] < 5.0
-    assert 0.1 < shot["Te0_keV"][i] < 3.0
-    assert 0.6 < shot["R_m"][i] < 1.0 and 0.4 < shot["a_m"][i] < 0.7 and 1.4 < shot["kappa"][i] < 2.5
+    for field, lo, hi in mast.CONFIG.unit_sanity:
+        v = shot[field][i]
+        assert lo < v < hi, (field, float(v))
 
 
 def test_flux_map_is_oriented_time_z_r(shot):

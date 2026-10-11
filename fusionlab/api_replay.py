@@ -23,7 +23,6 @@ from fusionlab.compute.status import provenance, run_task
 from fusionlab.physics import (
     BETA_N_LIMIT,
     LIMIT_NAMES,
-    M_D,
     replay,
     tau_coeff_H,
     volume,
@@ -32,7 +31,8 @@ from fusionlab.virtual import Edit, domain_bands, in_distribution
 
 router = APIRouter()
 
-ATTRIBUTION = "MAST data: UKAEA FAIR-MAST (mastapp.site), CC BY-SA 4.0"
+# Machine-identity values (attribution, warm-up shot, isotope) come from the configured source.
+ATTRIBUTION = mast.CONFIG.attribution
 _TRACES = ("t_s", "Ip_MA", "B_T", "n_e20", "P_ohm_MW", "P_nbi_MW", "P_rad_MW", "W_MJ", "q95", "beta_N", "kappa",
            "a_m", "R_m", "Te0_keV", "R_mag_m", "Z_mag_m")
 
@@ -113,9 +113,14 @@ def shots():
 
 def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
     """The full replay response: measured traces, model traces on the same time base, limits, geometry.
-    /export serves the very same dict, so exported values equal replayed values by construction."""
+    /export serves the very same dict, so exported values equal replayed values by construction.
+
+    Equilibrium surfaces (LCFS, psi grid) are served only when the bundle carries them — a machine
+    without equilibrium reconstructions replays its traces with "equilibrium_absent" set instead of
+    failing the route.
+    """
     s = _shot(shot_id)
-    r = replay(s, H=H)
+    r = replay(s, H=H, config=mast.CONFIG)
     r["in_distribution"] = in_distribution(s, [Edit()])[0]   # the virtual path's own guard, on the measured inputs
     summary = _summary(s, r)
     _add_hybrid(s, r, summary)
@@ -124,16 +129,21 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
         summary["eq_surrogate"] = {"held_out": eq["held_out"], "median_rel_l2": round(float(np.median(eq["rel_l2"])), 4),
                                    "p95_rel_l2": round(float(np.percentile(eq["rel_l2"], 95)), 4),
                                    "computed_on": eq.get("computed_on")}
-    return {
+    payload = {
         "meta": s["meta"], "attribution": ATTRIBUTION, "limit_names": LIMIT_NAMES, "summary": summary,
         "measured": {k: _j(s[k]) for k in _TRACES if k in s},
         "model": {k: _j(v) for k, v in r.items()},
-        "lcfs": {"R": _j(s["lcfs_R"], 3), "Z": _j(s["lcfs_Z"], 3)},
+        "lcfs": {"R": _j(s["lcfs_R"], 3), "Z": _j(s["lcfs_Z"], 3)} if "lcfs_R" in s else None,
         "wall": {"R": _j(s["wall_R"], 3), "Z": _j(s["wall_Z"], 3)} if "wall_R" in s else None,
         "coils": {k[5:]: _j(s[k], 3) for k in ("coil_R", "coil_Z", "coil_W", "coil_H")} if "coil_R" in s else None,
-        "psi_grid": {"R": _j(s["psi_R"], 3), "Z": _j(s["psi_Z"], 3)},
+        "psi_grid": {"R": _j(s["psi_R"], 3), "Z": _j(s["psi_Z"], 3)} if "psi_R" in s else None,
         "domain_bands": _j(domain_bands(s["t_s"], r["in_distribution"])),   # the shading coordinates, from the flags
     }
+    if "lcfs_R" not in s or "psi_R" not in s:
+        payload["equilibrium_absent"] = (
+            "no equilibrium reconstruction in this bundle: the 3D plasma surface, psi view and "
+            "field lines are unavailable (trace-only replay)")
+    return payload
 
 
 @router.get("/replay/{shot_id}")
@@ -146,6 +156,8 @@ def replay_shot(shot_id: int, H: float = 1.0):
 def replay_psi(shot_id: int, i: int):
     """Normalised poloidal flux (0 axis, 1 separatrix) on the EFIT grid for one time slice, rows = Z."""
     s = _shot(shot_id)
+    if "psi_n" not in s:
+        raise HTTPException(404, f"shot {shot_id}'s bundle has no equilibrium reconstruction (psi)")
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
     out = {"i": i, "t_s": float(s["t_s"][i]), "psi_n": _j(s["psi_n"][i], 3)}
@@ -167,15 +179,18 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
     from fusionlab.usd_export import FORMATS, export_shot
     if f".{fmt}" not in FORMATS:
         raise HTTPException(422, f"fmt must be one of {sorted(x.lstrip('.') for x in FORMATS)}")
+    s = _shot(shot_id)
+    if "lcfs_R" not in s:   # the plasma boundary is the one geometry export_shot requires
+        raise HTTPException(422, f"shot {shot_id}'s bundle has no equilibrium boundary (lcfs); USD export needs it")
     out = Path(__file__).resolve().parent.parent / "out" / f"mast_{shot_id}.{fmt}"
     tmp = out.with_name(f".{out.stem}.tmp{os.getpid()}{out.suffix}")   # dotfile, pid-unique, extension kept (export_shot validates the suffix)
     try:
         try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
             from fusionlab.fieldlines import export_shot_with_field_lines
-            export_shot_with_field_lines(_shot(shot_id), tmp)
+            export_shot_with_field_lines(s, tmp)
         except Exception:
             logger.warning("USD field-line export failed; falling back to plain stage", exc_info=True)
-            export_shot(_shot(shot_id), tmp)
+            export_shot(s, tmp)
         os.replace(tmp, out)   # atomic same-directory publish: readers only ever see a complete stage
     except Exception:
         tmp.unlink(missing_ok=True)
@@ -201,6 +216,8 @@ def replay_fieldlines(shot_id: int, i: int):
     s = _shot(shot_id)
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
+    if "psi_n" not in s:
+        raise HTTPException(503, f"field-line tracing unavailable: shot {shot_id}'s bundle has no equilibrium (psi)")
     try:
         pts, q, summary, device, psi_n_start, computed_on = _lines(shot_id)
     except Exception as e:   # no Warp / no usable device: the rest of the replay still works
@@ -228,7 +245,7 @@ def _eq_psi(shot_id: int):
     s = _shot(shot_id)
     try:
         held_out = _eq_model()
-        if held_out is None or "eq_inputs" not in s:
+        if held_out is None or "eq_inputs" not in s or "psi_n" not in s:
             return None
         psi = run_task("run_eq_surrogate", {"eq_inputs": s["eq_inputs"]})   # one batch, where it ran last
     except Exception:   # the replay works without the surrogate
@@ -281,11 +298,12 @@ def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
 
 def _warm_up():
     compute_warm_up()   # the correction model (and torch) load here rather than on the first replay request
-    try:   # builds/loads the Warp kernels and traces the landing shot
-        _lines(30166)
-    except Exception:
-        logger.warning("warm-up field-line trace failed; the first replay request pays for it instead", exc_info=True)
-    _eq_psi(30166)
+    if (warm := mast.CONFIG.warmup_shot) is not None:
+        try:   # builds/loads the Warp kernels and traces the landing shot
+            _lines(int(warm))
+        except Exception:
+            logger.warning("warm-up field-line trace failed; the first replay request pays for it instead", exc_info=True)
+        _eq_psi(int(warm))
 
 
 def start_warm_up():
@@ -320,7 +338,7 @@ def _db_view() -> dict:
     """The usable shot table in operating-space coordinates, with IPB98(y,2) evaluated on every row at once."""
     c = mast.clean_db(mast.load_db())
     g = {"R": c["R_m"], "a": c["a_m"], "kappa": c["V_m3"] / volume(c["R_m"], c["a_m"], 1.0)}
-    C, alpha = tau_coeff_H(g, c["Ip_MA"], c["B_T"], c["n_e20"], 1.0, M_D)
+    C, alpha = tau_coeff_H(g, c["Ip_MA"], c["B_T"], c["n_e20"], 1.0, mast.CONFIG.isotope_md)
     beta_N = c["beta_t_pct"] * c["a_m"] * c["B_T"] / c["Ip_MA"]
     return {"shot_id": c["shot_id"], "campaign": c["campaign"], "P_nbi_MW": c["P_nbi_MW"], "Ip_MA": c["Ip_MA"],
             "f_greenwald": c["n_e20"] / (c["Ip_MA"] / (np.pi * c["a_m"] ** 2)), "q95": c["q95"], "beta_N": beta_N,

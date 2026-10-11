@@ -174,9 +174,10 @@
 
   // ---- multi-shot compare (A2) state. The reference (first id) keeps the single-shot panels (3D vessel,
   // equilibrium, what-if, logbook); every other shot adds one measured trace per time panel. Payloads cache
-  // per shot id, so the compare fan-out and a single pick share one fetch.
+  // per shot id, so the compare fan-out and a single pick share one fetch. Per-shot fetch state (queued /
+  // fetching / ready / error) lives in the shared machine (shotload.js) — the same one a single pick uses.
   const CMP_COLORS = ['#d95926', '#199e70', '#c98500', '#d55181', '#9a7fd6'];   // per-shot slots 2–6; the reference keeps the blue
-  const cmp = { on: false, ids: [], ref: null, data: new Map(), st: new Map(), err: new Map(), seq: 0, ctrls: new Map() };
+  const cmp = { on: false, ids: [], ref: null, data: new Map(), seq: 0 };
   const replayCache = new Map();
 
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
@@ -979,7 +980,7 @@
     return CMP_COLORS[Math.max(0, cmp.ids.filter(x => x !== cmp.ref).indexOf(id)) % CMP_COLORS.length];
   }
 
-  const cmpReadyIds = () => cmp.ids.filter(id => cmp.st.get(id) === 'ready' && cmpData(id));
+  const cmpReadyIds = () => cmp.ids.filter(id => SL.get(id) === 'ready' && cmpData(id));
 
   const cmpUrlParam = () => [cmp.ref, ...cmp.ids.filter(id => id !== cmp.ref)].join(',');
 
@@ -1007,50 +1008,39 @@
 
   async function startCompare(idsIn) {
     cmp.seq++;
-    cmp.ctrls.forEach(c => c.abort());
-    cmp.ctrls.clear();
+    SL.cancelAll();
+    cmp.ids.forEach(id => SL.drop(id));   // the machine forgets the previous batch's per-shot state
     cmp.ids = [...new Set((idsIn || []).map(Number).filter(Boolean))].slice(0, SRCH_MAX);
     cmp.ref = cmp.ids[0] ?? null;
     cmp.on = true;
-    cmp.st.clear(); cmp.err.clear();
+    watchId = null; paintLoadChip();      // the compare bar owns per-shot state now; the single chip stands down
     cmpChrome(); cmpUrl(); cmpSyncSel();
     if (cmp.ids.length < 2) { cmpPaint(); return; }   // Empty: a prompt with a shortcut back to the catalog
     // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
-    if (shot && shot.meta.shot_id === cmp.ref) { cmp.st.set(cmp.ref, 'ready'); drawStrips(); scrub(+$('rp-t').value); }
+    if (shot && shot.meta.shot_id === cmp.ref) { SL.markReady(cmp.ref); drawStrips(); scrub(+$('rp-t').value); }
     for (const id of cmp.ids) {
-      if (cmp.st.get(id) === 'ready') continue;
-      cmp.st.set(id, 'fetching');
-      cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
+      if (SL.get(id) === 'ready') continue;
+      cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null);
     }
     cmpPaint();
   }
 
-  // One payload per shot: on resolve, a non-reference shot redraws the overlays; the reference goes through
-  // renderShot like any single pick. An error (or a cancel) lands in the per-shot error list.
-  async function cmpFetch(id, my, onReady) {
-    const ctrl = new AbortController();
-    cmp.ctrls.set(id, ctrl);
-    // Fetch and render are separate try-scopes: a rendering exception must surface as an error in the
-    // console, never masquerade as a fetch failure on the shot.
+  // One payload per shot, fetched under the shared machine — supersede and honest errors are its to record.
+  // On resolve, a non-reference shot redraws the overlays; the reference goes through renderShot like any
+  // single pick. Fetch and render stay separate try-scopes: a rendering exception must surface as an error
+  // in the console, never masquerade as a fetch failure on the shot.
+  async function cmpFetch(id, onReady) {
     let payload;
     try {
-      payload = await getReplay(id, ctrl.signal);
+      payload = await SL.fetch(id, signal => getReplay(id, signal));
     } catch (e) {
-      if (my !== cmp.seq) return;
-      cmp.st.set(id, 'error');
-      cmp.err.set(id, e?.name === 'AbortError' ? 'fetch cancelled' : (e?.message || 'fetch failed'));
-      cmp.ctrls.delete(id);
-      cmpPaint();
-      return;
+      return;   // the machine recorded the error; the onChange listener repainted the bar with Retry/Drop
     }
-    if (my !== cmp.seq) return;
+    if (payload === null || !cmp.on) return;   // superseded, or compare exited while the fetch was in flight
     cmp.data.set(id, payload);
-    cmp.st.set(id, 'ready');
-    cmp.err.delete(id);
-    cmp.ctrls.delete(id);
     if (onReady) onReady(payload);
     else if (id !== cmp.ref) { drawCmpW(); drawCmpLim(); drawDw(); cmpThomson(); }
-    if (my === cmp.seq) cmpPaint();
+    cmpPaint();
   }
 
   async function cmpSetRef(id) {   // chips, dropdown picks and search rows all land here
@@ -1065,21 +1055,19 @@
       cmpPaint();
       return sliceState(+$('rp-t').value);
     }
-    if (cmp.st.get(id) === 'ready') { renderShot(cmpData(id)); return sliceState(+$('rp-t').value); }
-    cmp.st.set(id, 'fetching');    // the reference itself still has to arrive (the Failed state retries through here)
-    cmp.err.delete(id);
-    cmpPaint();
-    await cmpFetch(id, cmp.seq, p => { if (my === loadSeq) renderShot(p); });
+    if (SL.get(id) === 'ready') { renderShot(cmpData(id)); return sliceState(+$('rp-t').value); }
+    // the reference itself still has to arrive (the Failed state retries through here); the machine paints
+    // 'fetching' on entry
+    await cmpFetch(id, p => { if (my === loadSeq) renderShot(p); });
     return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
   }
 
   function cmpDrop(id) {   // from the Partial/Failed error list, or when the selection drops below two
     cmp.ids = cmp.ids.filter(x => x !== id);
-    cmp.st.delete(id); cmp.err.delete(id); cmp.data.delete(id);
-    const ctrl = cmp.ctrls.get(id);
-    if (ctrl) { ctrl.abort(); cmp.ctrls.delete(id); }
+    cmp.data.delete(id);
+    SL.drop(id);           // the machine aborts a still-in-flight fetch and forgets the shot's state
     if (cmp.ref === id) {
-      cmp.ref = (cmp.ids.find(x => cmp.st.get(x) === 'ready') ?? cmp.ids[0]) ?? null;
+      cmp.ref = (cmp.ids.find(x => SL.get(x) === 'ready') ?? cmp.ids[0]) ?? null;
       cmpChrome();
       const next = cmpData(cmp.ref);
       if (next && shot && shot.meta.shot_id !== cmp.ref) renderShot(next);
@@ -1091,10 +1079,10 @@
   function exitCompare() {
     if (!cmp.on) return;
     cmp.seq++;
-    cmp.ctrls.forEach(c => c.abort());
-    cmp.ctrls.clear();
+    SL.cancelAll();
+    cmp.ids.forEach(id => SL.drop(id));   // the machine forgets this batch
     cmp.on = false;
-    cmp.ids = []; cmp.ref = null; cmp.st.clear(); cmp.err.clear(); cmp.data.clear();
+    cmp.ids = []; cmp.ref = null; cmp.data.clear();
     cmpUrl(); cmpChrome();
     srchPaint();               // the checkboxes stay; the compare button can re-enter
     if (shot) { drawStrips(); drawSection(); scrub(+$('rp-t').value); }
@@ -1103,18 +1091,18 @@
   function cmpPaint() {   // the compare bar: per-shot chips, the state, and the actions the state allows
     if (!cmp.on) return;
     const n = cmp.ids.length;
-    const readyN = cmp.ids.filter(id => cmp.st.get(id) === 'ready').length;
-    const fetching = cmp.ids.some(id => (cmp.st.get(id) || 'queued') !== 'ready' && cmp.st.get(id) !== 'error');
-    const failed = cmp.ids.filter(id => cmp.st.get(id) === 'error');
+    const readyN = cmp.ids.filter(id => SL.get(id) === 'ready').length;
+    const fetching = cmp.ids.some(id => (SL.get(id) || 'queued') !== 'ready' && SL.get(id) !== 'error');
+    const failed = cmp.ids.filter(id => SL.get(id) === 'error');
     const STATE = { queued: 'queued', fetching: 'fetching from the archive…', ready: 'ready', error: 'failed' };
     const chips = n ? cmp.ids.map(id => {
-      const s = cmp.st.get(id) || 'queued';
+      const s = SL.get(id) || 'queued';
       const cls = s === 'ready' ? 'ok' : s === 'error' ? 'bad' : 'wait';
       const ref = id === cmp.ref;
       return `<button type="button" class="cmp-chip ${cls}${ref ? ' ref' : ''}" data-ref="${id}" ${ref ? '' : 'title="Make this the reference"'}>`
         + `<b>#${id}</b>${ref ? ' · reference' : ''} — ${STATE[s]}</button>`;
     }).join('') : '<span class="muted">no shots selected</span>';
-    const errs = failed.map(id => `<div class="cmp-err"><b>#${id}</b> — ${esc(cmp.err.get(id) || 'failed')}
+    const errs = failed.map(id => `<div class="cmp-err"><b>#${id}</b> — ${esc(SL.errorOf(id) || 'failed')}
       <button type="button" class="tool" data-retry="${id}">Retry</button>
       <button type="button" class="tool" data-drop="${id}">Drop</button></div>`).join('');
     $('rp-cmp-bar').innerHTML =
@@ -1132,13 +1120,12 @@
     if (chip) return void cmpSetRef(+chip.dataset.ref);
     const b = e.target.closest('[data-act],[data-retry],[data-drop]');
     if (!b) return;
-    if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
+    if (b.dataset.act === 'cancel') return SL.cancelAll();   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
     if (b.dataset.act === 'search') return window.FusionLab.showTab('compare');
     if (b.dataset.retry) {
       const id = +b.dataset.retry;
-      cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();
-      return void cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
+      return void cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null);   // the machine paints 'fetching' on entry
     }
     if (b.dataset.drop) return cmpDrop(+b.dataset.drop);
   });
@@ -1162,7 +1149,7 @@
     for (const id of cmp.ids) {
       if (id === cmp.ref) continue;
       const d = cmpData(id);
-      if (!d || cmp.st.get(id) !== 'ready') continue;
+      if (!d || SL.get(id) !== 'ready') continue;
       if (playTimer) continue;   // playback: the reference's profile follows the slider; the others catch up on pause
       const t = d.measured.t_s;
       let k = 0;
@@ -1225,7 +1212,7 @@
       if (id === cmp.ref) continue;
       const d = cmpData(id);
       if (!d) continue;
-      const Wi = cmp.st.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
+      const Wi = SL.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
       const c = cmpColor(id);
       traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i]) * 1e3) : [],
                        `ΔW #${id} − #${cmp.ref} (computed)`, c, { line: { color: c, width: 2 } }));

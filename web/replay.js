@@ -1374,10 +1374,3 @@
 
   if (!root.hidden) init().catch(() => { /* rendered in the replay cell; retried on the next tab entry */ });
 })();
-).hidden) b.click(); },
-    state: () => (shot ? sliceState(+$('rp-t').value) : null),
-    whatIf: on => whatIf(on),
-  } });
-
-  if (!root.hidden) init().catch(() => { /* rendered in the replay cell; retried on the next tab entry */ });
-})();

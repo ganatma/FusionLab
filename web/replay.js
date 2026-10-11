@@ -45,7 +45,7 @@
       <div class="cr-hint small" id="rp-cmp-bar" hidden></div>
 
       <div class="cr-cell" id="cell-eq" data-guide="eq">
-        <h2>Equilibrium ${TAG.meas} <span class="dim">EFIT, real vessel</span></h2>
+        <h2>Equilibrium ${TAG.meas} <span class="dim" id="rp-eq-sub">EFIT, real vessel</span></h2>
         <div class="keyline small"><span style="color:#3987e5">━ flux surfaces</span> <span style="color:#ff8a3d">━ last closed surface ✚ axis</span> <span style="color:#c3c2b7">━ wall</span> <span class="muted">▪ PF coils</span></div>
         <div class="grow" data-guide="xs"><div id="rp-xs" class="fill"></div></div>
         <div id="rp-eq" data-guide="eq-overlay" hidden>
@@ -495,6 +495,7 @@
     psiCache.clear(); lineCache.clear(); linesNow.clear();
     const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s, id = m.shot_id;
     $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length}${shot.psi_grid ? ' EFIT' : ''} slices`;
+    $('rp-eq-sub').textContent = shot.psi_grid ? 'EFIT, real vessel' : 'no reconstruction — trace-only replay';
     $('rp-log').innerHTML =
       (m.preshot ? `<p><span class="muted">Before:</span> ${esc(m.preshot)}</p>` : '') +
       (m.postshot ? `<p><span class="muted">After:</span> ${esc(m.postshot)}</p>` : '');

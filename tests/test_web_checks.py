@@ -23,6 +23,8 @@ def test_replay_guards_absent_equilibrium():
     assert "s.equilibrium_absent" in replay          # the hint surfaces in the insight panel
     assert "grid ? grid.R : []" in replay            # the section view tolerates a missing ψ grid
     assert "shot.psi_grid ?" in replay               # the header omits the EFIT tag without one
+    assert "shot.psi_grid ? 'EFIT, real vessel'" in replay   # the panel sub-label keeps its
+    assert "'no reconstruction — trace-only replay'" in replay   # provenance honest without one
 
 
 def test_stale_failures_are_seq_guarded_in_app_js():

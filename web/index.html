@@ -14,6 +14,7 @@
   <script src="/static/replay.js" defer></script>
   <script src="/static/figures.js" defer></script>
   <script src="/static/guide.js" defer></script>
+  <script src="/static/palette.js" defer></script>
 </head>
 <body>
   <header>
@@ -28,7 +29,7 @@
     </div>
     <span class="seg" id="mode" role="group" aria-label="Mode" title="Guided: a 15-minute study that teaches you to read this screen. Lab: the full app.">
       <button type="button" data-v="guided">Guided</button><button type="button" data-v="lab" class="on">Lab</button></span>
-    <button type="button" id="cmdk" class="tool" disabled title="Command palette (Ctrl/Cmd+K) — arriving with the palette change">⌘K</button>
+    <button type="button" id="cmdk" class="tool" disabled title="Command palette (Ctrl/Cmd+K)" aria-haspopup="dialog" aria-expanded="false">⌘K</button>
     <nav class="tabs" role="tablist" aria-label="Workspaces">
       <button type="button" role="tab" id="tabbtn-replay" data-tab="replay" aria-selected="true" aria-controls="tab-replay">Replay</button>
       <button type="button" role="tab" id="tabbtn-compare" data-tab="compare" aria-selected="false" aria-controls="tab-compare">Compare</button>

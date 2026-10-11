@@ -85,6 +85,24 @@ def test_capabilities_models_carry_real_hashes(client):
     assert caps["models"]["eq_surrogate.pt"]["bytes"] == eq_surrogate.MODEL_FILE.stat().st_size
 
 
+@needs_surrogate
+def test_handshake_weight_hashes_are_cached(monkeypatch, client):
+    """HARN-3: weights are immutable once trained — the second handshake re-reads no file."""
+    worker._SHA256_CACHE.clear()
+    reads = {"n": 0}
+    real = worker._sha256_file
+
+    def counting(path):
+        reads["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(worker, "_sha256_file", counting)
+    first = client.get("/v1/capabilities").json()["models"]
+    assert reads["n"] == 2                                # both shipped weights, hashed exactly once
+    assert client.get("/v1/capabilities").json()["models"] == first
+    assert reads["n"] == 2                                # zero file reads on the second handshake
+
+
 # ---------------------------------------------------------------- registry and validation
 def test_unknown_task_is_rejected_with_clear_error(client):
     r = client.post("/v1/jobs", json={"task": "rm -rf /", "inputs": {}})
@@ -191,6 +209,22 @@ def test_artifact_upload_rejects_mismatched_and_oversized_blobs(client):
     assert client.post("/v1/artifacts/nothex", content=b"x").status_code == 422
 
 
+def test_concurrent_uploads_leave_no_temp_litter(client):
+    """HARN-3: artifact temps are pid-unique dot-files published with os.replace — concurrent
+    uploads of the same and of different hashes leave exactly the hash-named weights, no litter."""
+    import concurrent.futures
+
+    blobs = [b"weight-bytes-a", b"weight-bytes-b"]
+    digests = [hashlib.sha256(b).hexdigest() for b in blobs]
+    with concurrent.futures.ThreadPoolExecutor(4) as pool:
+        futs = [pool.submit(client.post, f"/v1/artifacts/{digests[i % 2]}", content=blobs[i % 2])
+                for i in range(6)]
+        assert all(f.result().status_code == 201 for f in futs)
+    root = worker.artifact_dir()
+    assert sorted(p.name for p in root.iterdir()) == sorted(digests)   # zero .tmp* litter
+    assert (root / digests[0]).read_bytes() == blobs[0]
+
+
 def test_job_rejects_unsatisfied_artifact_hash(client):
     r = client.post("/v1/jobs", json={"task": "run_surrogate", "inputs": {"features": {}},
                                       "artifact_refs": [{"role": "surrogate.pt", "sha256": "f" * 64}]})
@@ -237,6 +271,59 @@ def test_cancellation_cancels_a_running_job(client):
     assert late.status_code == 409
     got = client.get(f"/v1/jobs/{job_id}/result")
     assert got.status_code == 409 and "cancelled" in got.json()["detail"]
+
+
+# ---------------------------------------------------------------- runner cancellation (HARN-3)
+def test_cancelling_the_runner_task_frees_the_depth_one_slot(client, monkeypatch):
+    """A cancelled runner — the task itself, not a cooperative cancel (worker shutdown, a reaped
+    stuck job) — used to leave state 'running' forever and 409 every later submit. It must park
+    terminal and free the depth-1 slot."""
+
+    def slow(_inputs, _progress):
+        time.sleep(2)
+        return {}
+
+    monkeypatch.setitem(worker.TASKS, "benchmark", dc_replace(worker.TASKS["benchmark"], run=slow))
+    job_id = client.post("/v1/jobs", json={"task": "benchmark", "inputs": {"profile": "quick"}}).json()["job_id"]
+    job = worker._JOBS.get(job_id)
+    for _ in range(40):                       # wait until the runner is inside the task body
+        if job.state == "running":
+            break
+        time.sleep(0.05)
+    assert job.state == "running"
+
+    job.runner.get_loop().call_soon_threadsafe(job.runner.cancel)   # cancel the runner task itself
+    for _ in range(40):
+        if job.state in worker.TERMINAL_STATES:
+            break
+        time.sleep(0.05)
+    assert job.state == "cancelled"
+    assert job.completed_at is not None   # HARN-3: terminal jobs carry the FIFO eviction stamp
+    assert _event_names(client, job_id)[-1] == "cancelled"
+
+    nxt = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}})
+    assert nxt.status_code == 201, nxt.text   # the slot freed: no 409
+    assert _wait_result(client, nxt.json()["job_id"]).status_code == 200
+
+
+def test_terminal_job_eviction_is_fifo_not_random(monkeypatch):
+    """Eviction sorted by random uuid4 hex, so a fresh unconsumed result could be evicted while an
+    old consumed one lingered — its later result fetch would 404. Evict oldest completion first."""
+    worker._JOBS._jobs.clear()
+    clock = iter(range(1, 1000))
+    monkeypatch.setattr(worker, "_now", lambda: float(next(clock)))
+    jobs = []
+    for _ in range(17):                          # depth-1 book: create, finish, then the next
+        j = worker._JOBS.create("benchmark")
+        j.park("completed")                      # the real stamping path, deterministic clock
+        jobs.append(j)
+    jobs[-1].result = b"fresh-unconsumed"        # the newest terminal job's result is not yet fetched
+    fresh = worker._JOBS.create("benchmark")     # 18th job: eviction makes room (16 kept + 1 incoming)
+    evicted = [j.job_id for j in jobs if j.job_id not in worker._JOBS._jobs]
+    assert evicted == [jobs[0].job_id, jobs[1].job_id]   # the two oldest completions, in order
+    assert jobs[-1].result == b"fresh-unconsumed"        # the fresh unconsumed result survived
+    assert fresh.state == "queued"
+    worker._JOBS._jobs.clear()
 
 
 # ---------------------------------------------------------------- runner safety net

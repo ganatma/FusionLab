@@ -59,6 +59,12 @@ def pick_shots(n: int) -> list[int]:
     return sorted(int(i) for i in np.random.default_rng(SEED).permutation(ids)[:n])
 
 
+def _savez_compressed(tmp: Path, **arrays: object) -> None:
+    """np.savez_compressed(Path) would append .npz and rename the temp out from under atomic_write."""
+    with tmp.open("wb") as fh:
+        np.savez_compressed(fh, **arrays)
+
+
 def fetch(shot_id: int) -> str:
     f = REFLY / f"{shot_id}.npz"
     if f.exists():
@@ -67,7 +73,9 @@ def fetch(shot_id: int) -> str:
         s = mast.fetch_shot(shot_id)
     except Exception as e:   # level 2 does not hold every shot of the table
         return f"FAILED {type(e).__name__}: {str(e)[:80]}"
-    np.savez_compressed(f, meta=json.dumps(s["meta"]), **{k: s[k] for k in KEEP})
+    # atomicio: a crashed write leaves at most a dot-temp — never a corrupt npz the next run
+    # treats as cached forever (HARN-3).
+    atomic_write(f, lambda tmp: _savez_compressed(tmp, meta=json.dumps(s["meta"]), **{k: s[k] for k in KEEP}))
     return f"{s['t_s'].size} slices"
 
 

@@ -27,6 +27,7 @@
         <span class="mono" id="rp-tlabel">–</span>
         <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
         <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
+        <span class="status" id="rp-load" hidden aria-live="polite"></span>
         <span class="status" id="rp-compute" title="Compute status">…</span>
       </div>
 
@@ -163,6 +164,8 @@
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
   let shot = null, db = null, lines3dOk = true, linesFail503 = 0, use3 = false, playTimer = null, speed = 1;
   let initP = null, loadSeq = 0;
+  const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
+  let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
   let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
   const lineCache = new Map();
   const psiCache = new Map();
@@ -231,6 +234,14 @@
     const seen = hintSeen;
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
+    $('rp-load').addEventListener('click', e => {
+      const b = e.target.closest('[data-load]');
+      if (!b || watchId === null) return;
+      if (b.dataset.load === 'retry') { $('rp-shot').value = watchId; return void loadShot(watchId); }
+      SL.drop(watchId);   // Drop: give up on this pick — the chip goes away, the panels keep what they had
+      watchId = null;
+      paintLoadChip();
+    });
 
     // Compute chip (design §7): where compute runs, from a polled /compute status. Never blocks
     // anything — a failed or slow poll keeps the last known state; the next one retries.
@@ -372,31 +383,64 @@
   async function loadShot(id) {
     if (cmp.on) return cmpSetRef(id);   // in compare, every pick — dropdown, search row — re-points the reference
     const seq = ++loadSeq;
+    watchId = id;                       // the status chip follows this pick through the machine's states
     let next;
     try {
-      next = await getReplay(id);
+      next = await SL.fetch(id, signal => getReplay(id, signal));
     } catch (e) {
-      if (seq === loadSeq) {
-        $('rp-shot').value = shot ? shot.meta.shot_id : '';   // the select stays in sync with the panels
-        $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
-      }
+      if (seq !== loadSeq) return;      // a newer pick is in flight; it owns the panels and the chip
+      $('rp-shot').value = shot ? shot.meta.shot_id : '';   // the select stays in sync with the panels
+      $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
       return;
     }
     if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
-    renderShot(next);
+    if (next) renderShot(next);    // null = superseded: a newer fetch owns the panels
   }
 
+  // Single-shot load chip (spec V6): the machine's states, rendered for the pick a dropdown or deep link
+  // asked for. Fetching shows in the toolbar's status cluster; ready drops the chip away — the rendered
+  // panels are the signal then. An error chip states the reason and offers Retry · Drop.
+  function paintLoadChip() {
+    const chip = $('rp-load');
+    if (!chip) return;
+    const s = watchId === null ? null : SL.get(watchId);
+    if (s === 'fetching') {
+      chip.hidden = false;
+      chip.className = 'status wait';
+      chip.setAttribute('aria-busy', 'true');
+      chip.innerHTML = `loading shot #${watchId}…`;
+    } else if (s === 'error') {
+      chip.hidden = false;
+      chip.className = 'status bad';
+      chip.removeAttribute('aria-busy');
+      chip.innerHTML = `couldn't load #${watchId} — ${esc(SL.errorOf(watchId) || 'fetch failed')}`
+        + ` <button type="button" class="tool" data-load="retry">Retry</button>`
+        + ` <button type="button" class="tool" data-load="drop">Drop</button>`;
+    } else {
+      if (s === 'ready') watchId = null;   // the panels rendered; the chip's job is done
+      chip.hidden = true;
+      chip.removeAttribute('aria-busy');
+      chip.innerHTML = '';
+    }
+  }
+  // The machine repaints its watchers on every transition: the single-load chip here, and the compare
+  // bar's chips (cmpPaint). Both painters are idempotent innerHTML rebuilds.
+  SL.onChange(() => { paintLoadChip(); cmpPaint(); });
+
   // Shared replay payload cache: the compare fan-out and a single pick hit the same promise per shot id.
-  // A failed fetch is not cached — a retry refetches.
+  // A failed fetch is not cached — a retry refetches. Each promise is stored with the signal it was created
+  // under: a fetch under a NEW signal must not adopt an in-flight promise that an older signal is about to
+  // abort (the machine supersedes per shot), so a signal mismatch refetches.
   function getReplay(id, signal) {
     const cached = replayCache.get(id);
-    if (cached) return cached;
-    const p = fetch('/replay/' + id, { signal }).then(async r => {
+    if (cached && (!signal || !cached.signal || cached.signal === signal)) return cached.p;
+    const entry = { p: null, signal: signal || null };
+    entry.p = fetch('/replay/' + id, { signal }).then(async r => {
       if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => null))?.detail || 'HTTP ' + r.status), { status: r.status });
       return r.json();
-    }).catch(e => { replayCache.delete(id); throw e; });
-    replayCache.set(id, p);
-    return p;
+    }).catch(e => { if (replayCache.get(id) === entry) replayCache.delete(id); throw e; });
+    replayCache.set(id, entry);
+    return entry.p;
   }
 
   function renderShot(next) {

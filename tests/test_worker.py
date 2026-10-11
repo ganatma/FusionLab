@@ -239,6 +239,38 @@ def test_cancellation_cancels_a_running_job(client):
     assert got.status_code == 409 and "cancelled" in got.json()["detail"]
 
 
+# ---------------------------------------------------------------- runner cancellation (HARN-3)
+def test_cancelling_the_runner_task_frees_the_depth_one_slot(client, monkeypatch):
+    """A cancelled runner — the task itself, not a cooperative cancel (worker shutdown, a reaped
+    stuck job) — used to leave state 'running' forever and 409 every later submit. It must park
+    terminal and free the depth-1 slot."""
+
+    def slow(_inputs, _progress):
+        time.sleep(2)
+        return {}
+
+    monkeypatch.setitem(worker.TASKS, "benchmark", dc_replace(worker.TASKS["benchmark"], run=slow))
+    job_id = client.post("/v1/jobs", json={"task": "benchmark", "inputs": {"profile": "quick"}}).json()["job_id"]
+    job = worker._JOBS.get(job_id)
+    for _ in range(40):                       # wait until the runner is inside the task body
+        if job.state == "running":
+            break
+        time.sleep(0.05)
+    assert job.state == "running"
+
+    job.runner.get_loop().call_soon_threadsafe(job.runner.cancel)   # cancel the runner task itself
+    for _ in range(40):
+        if job.state in worker.TERMINAL_STATES:
+            break
+        time.sleep(0.05)
+    assert job.state == "cancelled"
+    assert _event_names(client, job_id)[-1] == "cancelled"
+
+    nxt = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}})
+    assert nxt.status_code == 201, nxt.text   # the slot freed: no 409
+    assert _wait_result(client, nxt.json()["job_id"]).status_code == 200
+
+
 # ---------------------------------------------------------------- runner safety net
 def test_task_body_exception_becomes_error_state(client, monkeypatch):
     def boom(_inputs, _progress):

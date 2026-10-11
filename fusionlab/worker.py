@@ -316,6 +316,13 @@ async def _run_job(job: _Job, task: Task, inputs: BaseModel, resolved: dict[str,
     except _JobCancelled:
         job.state = "cancelled"
         _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
+    except asyncio.CancelledError:
+        # The runner task itself was cancelled (worker shutdown, a reaped stuck job) — a
+        # BaseException, so the handlers above never see it. Park terminal and re-raise:
+        # an unparked job wedges the depth-1 queue, 409ing every later submit (HARN-3).
+        job.state = "cancelled"
+        _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
+        raise
     except Exception as e:   # a task failure is a job outcome, not a worker crash
         job.state, job.error, job.error_type = "error", str(e), type(e).__name__
         _JOBS.append(job, {"event": "error", "error": str(e), "error_type": type(e).__name__})

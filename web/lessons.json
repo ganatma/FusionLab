@@ -185,7 +185,7 @@
 
     { "id": "5.5", "ch": 5, "title": "What the comparison shows",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["insight", "logbook"],
-      "body": "Two readings of the same shot, side by side. On the left, what the twin works out from the data: confinement relative to each law, the closest approach to a limit and when, and how the learned correction did on this shot. On the right, what the physicist in the control room wrote. When they agree, you can trust both a little more. When they differ, you have found something worth a closer look." },
+      "body": "Two readings of the same shot, side by side. On the left, what the twin works out from the data: confinement relative to each law, which limit the shot came closest to, and how the learned correction did on this shot. On the right, what the physicist in the control room wrote. When they agree, you can trust both a little more. When they differ, you have found something worth a closer look." },
 
     { "id": "6.1", "ch": 6, "title": "Same recipe, more power",
       "tab": "replay", "shot": 30192, "slice": 0, "view": "cutaway", "highlight": null, "focus": ["bar", "strip-p", "strip-w", "strip-lim"],

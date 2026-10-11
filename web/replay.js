@@ -1161,7 +1161,14 @@
     cmp.on = true;
     watchId = null; paintLoadChip();      // the compare bar owns per-shot state now; the single chip stands down
     cpChrome(); cmpUrl(); cmpSyncSel();
-    if (cmp.ids.length < 2) { cmpPaint(); return; }   // Empty: a prompt with a shortcut back to the catalog
+    if (cmp.ids.length < 2) {
+      cmpPaint();   // Empty: a prompt with a shortcut back to the catalog
+      // A one-shot compare (the Replay "Compare…" preload, a one-id deep link): the read panel shows
+      // the reference's own measured curves; the bar prompts for more shots to layer in.
+      if (shot && shot.meta.shot_id === cmp.ref) { SL.markReady(cmp.ref); drawCmpAll(); scrub(+$('rp-t').value); }
+      else if (cmp.ref != null) cmpFetch(cmp.ref, p => renderShot(p));
+      return;
+    }
     // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
     if (shot && shot.meta.shot_id === cmp.ref) { SL.markReady(cmp.ref); drawCmpAll(); scrub(+$('rp-t').value); }
     for (const id of cmp.ids) {

@@ -18,15 +18,19 @@ dependency): the default install never pays for it.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import threading
 import time
+from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as ProbeTimeout
 from typing import Any
 
 from fusionlab.compute import get_provider, provider_name
 from fusionlab.compute.local import LocalProvider
+from fusionlab.compute.provider import JobHandle
 
 logger = logging.getLogger(__name__)
 
@@ -90,29 +94,113 @@ def _record_run(task: str, provider: Any) -> None:
         _last_runs[task] = {"provider": provider.name, "host": getattr(provider, "host", None)}
 
 
+# ---------------------------------------------------------------- in-flight job handles
+# task -> (provider, handle) while a remote job's result() is being collected — the progress route's
+# /compute/progress watches these. Remote jobs are recorded here by run_task; local jobs are visible
+# through the shared provider below while submit() runs the body.
+_active: dict[str, tuple[Any, JobHandle]] = {}
+
+# One shared LocalProvider: run_task's local path and the progress route must see the same job records
+# (a fresh instance per call would orphan a mid-run job from its subscriber).
+_LOCAL = LocalProvider()
+
+PROGRESS_WAIT_S = 10.0    # the UI opens the stream when it fires the request; a remote submit can take seconds
+PROGRESS_GRACE_S = 3.0    # after a terminal event, how long to watch for the fallback re-run's job
+
+
+def active_job(task: str) -> tuple[Any, JobHandle] | None:
+    """(provider, handle) for the job of `task` that is running right now, or None. A remote job is
+    visible from submit until result returns; a local job, while submit runs the body."""
+    with _lock:
+        entry = _active.get(task)
+    if entry is not None:
+        return entry
+    handle = _LOCAL.active_job(task)
+    return (_LOCAL, handle) if handle else None
+
+
+def _record_job(task: str, provider: Any, handle: JobHandle) -> None:
+    with _lock:
+        _active[task] = (provider, handle)
+
+
+def _drop_job(task: str, handle: JobHandle) -> None:
+    with _lock:
+        entry = _active.get(task)
+        if entry is not None and entry[1] is handle:   # a newer job of the same task owns the slot now
+            del _active[task]
+
+
 # ---------------------------------------------------------------- the routers' entry point
 def run_task(task: str, inputs: dict) -> Any:
     """One named task through the selected provider, falling back to Local on a remote failure.
 
     A remote failure is recorded (the banner reads it) and the task re-runs in-process — the result the
     user asked for arrives either way, and provenance says honestly where it actually ran. The next call
-    tries the remote again: a transient failure never pins the session to Local.
+    tries the remote again: a transient failure never pins the session to Local. The in-flight job's
+    handle is visible to active_job() throughout, so GET /compute/progress can stream its progress.
     """
     provider = get_provider()
     if provider.name != "local":
         try:
-            out = provider.result(provider.submit(task, inputs))
+            handle = provider.submit(task, inputs)
         except _remote_errors() as e:
             record_fallback(str(e))
             logger.warning("remote compute failed; falling back to Local: %s", e)
         else:
-            clear_fallback()
-            _record_run(task, provider)
-            return out
-    local = LocalProvider()
+            _record_job(task, provider, handle)
+            try:
+                out = provider.result(handle)
+            except _remote_errors() as e:
+                record_fallback(str(e))
+                logger.warning("remote compute failed; falling back to Local: %s", e)
+            else:
+                clear_fallback()
+                _record_run(task, provider)
+                return out
+            finally:
+                _drop_job(task, handle)
+    local = _LOCAL
     out = local.result(local.submit(task, inputs))
     _record_run(task, local)
     return out
+
+
+async def progress_stream(task: str, *, wait_s: float | None = None,
+                          grace_s: float | None = None) -> AsyncIterator[str]:
+    """Server-sent events for the job of `task`: the provider's stream relayed frame-for-frame in the
+    worker's format (`event: <name>\\ndata: <json>`), so both providers render identically.
+
+    Waits up to `wait_s` for the job to start (the UI opens the stream when it fires the compute
+    request; a remote submit encodes, hashes and maybe uploads first). After a terminal event it
+    follows the local-fallback re-run if one appears within `grace_s`, then ends. A broken stream
+    (RemoteComputeError) ends quietly: GET /compute's fallback banner is the honest reporter.
+    """
+    wait_s = PROGRESS_WAIT_S if wait_s is None else wait_s
+    grace_s = PROGRESS_GRACE_S if grace_s is None else grace_s
+    deadline = time.monotonic() + wait_s
+    while (entry := active_job(task)) is None:
+        if time.monotonic() >= deadline:
+            return
+        await asyncio.sleep(0.25)
+    provider, handle = entry
+    while True:
+        try:
+            async for event in provider.stream(handle):
+                yield f"event: {event['event']}\ndata: {json.dumps(event, allow_nan=True)}\n\n"
+        except _remote_errors():
+            return
+        deadline = time.monotonic() + grace_s
+        successor = None
+        while time.monotonic() < deadline:
+            entry = active_job(task)
+            if entry is not None and entry[1] is not handle:
+                successor = entry
+                break
+            await asyncio.sleep(0.25)
+        if successor is None:
+            return
+        provider, handle = successor
 
 
 def capabilities() -> dict:
@@ -201,10 +289,12 @@ def snapshot(max_age_s: float = TTL_S) -> dict[str, Any]:
 
 
 def _reset_for_tests() -> None:
-    """Clear the cache, the fallback record and the run provenance (pytest runs modules fresh)."""
+    """Clear the cache, the fallback record, the run provenance and the in-flight handles (pytest runs
+    modules fresh)."""
     global _probing, _fallback_reason, _fallback_since
     with _lock:
         _cache.update({"at": 0.0, "payload": None})
         _probing = False
         _fallback_reason, _fallback_since = None, None
         _last_runs.clear()
+        _active.clear()

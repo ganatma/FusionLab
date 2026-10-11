@@ -4,6 +4,7 @@ worker as a status — never a 5xx — and provenance. No SSH; HTTP stays on htt
 import asyncio
 import sys
 import threading
+import time
 
 import httpx
 import pytest
@@ -318,3 +319,103 @@ def test_progress_route_follows_the_fallback_rerun(clean, monkeypatch):
         runner.join(timeout=10)
     assert "event: error" in body and "worker died mid-job" in body
     assert "event: completed" in body   # the fallback re-run's terminal, same vocabulary
+
+
+# ---------------------------------------------------------------- cancellation (HARN-2)
+def test_cancel_route_stops_the_remote_job_and_falls_back(clean, monkeypatch):
+    """The full HARN-2 acceptance through the app's HTTP surface: POST /compute/cancel cancels the
+    named task's in-flight remote job, result() raises the typed cancelled error, and run_task's
+    EXISTING fallback re-runs the work locally — the fallback reason and the task's provenance say
+    honestly where the answer came from (remote cancelled, answer local)."""
+    from fusionlab.compute.ssh import RemoteComputeError
+
+    class CancellingRemote:
+        """A remote whose result() blocks until cancel() arrives, then dies exactly the way a
+        cancelled job does — the signal run_task's fallback is built on."""
+        name = "ssh"
+        host = "cancelsrvr"
+
+        def __init__(self) -> None:
+            self.cancel_calls = 0
+            self._cancelled = threading.Event()
+
+        def submit(self, task: str, inputs: dict) -> JobHandle:
+            return JobHandle(job_id="j1", task=task, provider=self.name)
+
+        def result(self, job: JobHandle) -> dict:
+            self._cancelled.wait(timeout=10)
+            raise RemoteComputeError("job", "remote job was cancelled")
+
+        def cancel(self, job: JobHandle) -> None:
+            self.cancel_calls += 1
+            self._cancelled.set()
+
+    from fusionlab.compute import local as local_mod
+
+    def local_run(inputs):
+        return {"where": "local", "ok": True}
+
+    monkeypatch.setitem(local_mod.TASKS, "slow_task", local_run)
+
+    fake = CancellingRemote()
+    monkeypatch.setattr(compute, "_provider", fake)
+    out: dict = {}
+    runner = threading.Thread(target=lambda: out.update(result=status.run_task("slow_task", {})))
+    runner.start()
+    for _ in range(100):                     # wait until the remote job is registered in-flight
+        if status.active_job("slow_task") is not None:
+            break
+        time.sleep(0.05)
+    assert status.active_job("slow_task") is not None
+
+    r = client.post("/compute/cancel?task=slow_task")
+    assert r.status_code == 200
+    assert r.json() == {"job_id": "j1", "task": "slow_task", "provider": "ssh", "cancelling": True}
+
+    runner.join(timeout=10)
+    assert out["result"] == {"where": "local", "ok": True}   # the fallback re-run's answer
+    assert fake.cancel_calls == 1
+    state = status.fallback_state()
+    assert state["fallback"] and "cancelled" in state["reason"]
+    assert status.provenance("slow_task")["provider"] == "local"
+
+
+def test_cancel_route_on_a_local_job_is_honest_about_the_noop(clean, monkeypatch):
+    """Local jobs run synchronously in-process: the route answers 'cancelling': false with the
+    note, never pretends to stop anything, and the job finishes normally with local provenance."""
+    from fusionlab.compute import local as local_mod
+
+    started, release = threading.Event(), threading.Event()
+
+    def slow_local(inputs):
+        started.set()
+        release.wait(timeout=10)
+        return {"where": "local"}
+
+    monkeypatch.setitem(local_mod.TASKS, "slow_task", slow_local)
+    out: dict = {}
+    runner = threading.Thread(target=lambda: out.update(result=status.run_task("slow_task", {})))
+    runner.start()
+    for _ in range(100):                     # wait until the local job is registered in-flight
+        if status.active_job("slow_task") is not None:
+            break
+        time.sleep(0.05)
+    assert status.active_job("slow_task") is not None
+
+    r = client.post("/compute/cancel?task=slow_task")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["cancelling"] is False and body["provider"] == "local" and "note" in body
+
+    release.set()
+    runner.join(timeout=10)
+    assert out["result"] == {"where": "local"}   # untouched by the no-op cancel
+    assert status.provenance("slow_task")["provider"] == "local"
+
+
+def test_cancel_route_404s_when_nothing_is_in_flight(clean):
+    """With no job running the route is a plain 404 — the UI affordance is only ever shown for a
+    job the progress relay is streaming, so this path is the stale-tab / already-finished case."""
+    r = client.post("/compute/cancel?task=benchmark")
+    assert r.status_code == 404
+    assert "benchmark" in r.json()["detail"] and "no" in r.json()["detail"]

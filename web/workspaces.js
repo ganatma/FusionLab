@@ -1,5 +1,5 @@
 // FusionLab workspace router: the single writer of which workspace is visible, and the owner of the
-// URL grammar — #/replay/{shot}?t=SECONDS · #/compare/{ids}?ref=SHOT · #/explore. One route() reads
+// URL grammar — #/replay/{shot}?t=SECONDS[&edit=1] · #/compare/{ids}?ref=SHOT · #/explore. One route() reads
 // the hash; apply() is the only place that toggles sections, tab state or fires 'fusionlab:tab'.
 // Everything else (header clicks, guided-study steps, the agent) navigates through showTab()/
 // navigate() and lands here. Landing workspace: last visited, else the welcome-modal pick, else
@@ -44,9 +44,13 @@
       const F = window.FusionLab;
       const id = Number(param);
       if (!F || !F.replay || !isFinite(id) || id <= 0) return;
-      const t = new URLSearchParams(search).get('t');
+      const q = new URLSearchParams(search);
+      const t = q.get('t');
       F.replay.select(id).then((st) => {   // renders its own error in the replay cell on failure (never rejects)
         if (t !== null && st && isFinite(Number(t))) F.replay.scrubTo({ t: Number(t) });
+        // ?edit=1: edit intent — Explore's "Edit a real shot instead →" lands here. Until the drawer change
+        // owns ?edit=1 (spec L2), it opens today's anchored what-if on the replayed shot.
+        if (q.has('edit') && F.replay.whatIf) F.replay.whatIf(true);
       });
     },
     compare(param, search) {

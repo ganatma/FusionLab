@@ -38,14 +38,38 @@ On the machine with the browser (your laptop):
    # port = 8420               # local end of the tunnel
    ```
 
+   More than one GPU box? Define one `[compute.hosts.<name>]` profile per host instead — each takes
+   the same keys as `[compute.ssh]` — and switch with `FUSIONLAB_COMPUTE_HOST` (give each profile
+   its own `port`, the local tunnel end, so two FusionLab instances on this machine don't collide):
+
+   ```toml
+   [compute.hosts.gpu-lab]
+   host = "gpu-lab"
+   remote_dir = "~/FusionLab"
+   autostart = true
+   port = 8420
+
+   [compute.hosts.gpu-lab-2]
+   host = "gpu-lab-2"
+   remote_dir = "~/FusionLab"
+   autostart = true
+   port = 8421
+   ```
+
+   The single `[compute.ssh]` table keeps working unchanged — with no host selected it wins over
+   any profiles. A lone profile needs no selector; several profiles without a selection, or a
+   selector naming an unknown host, are startup errors — never a quiet pick.
+
 3. `make dev`, open the Replay tab, and watch the header chip. Within a few seconds it should
    read **GPU: gpu-lab (…)** — the worker's own handshake answering through the tunnel.
 
 Every value has an environment-variable form — `FUSIONLAB_COMPUTE_PROVIDER=ssh`,
-`FUSIONLAB_SSH_HOST=gpu-lab`, `FUSIONLAB_SSH_REMOTE_DIR=…`, `FUSIONLAB_SSH_AUTOSTART=…`,
-`FUSIONLAB_SSH_PORT=…` (full list in `.env.example`) — and the environment wins over the TOML
-file. Nothing loads `.env` automatically — not the app, not `make dev` — so these take effect
-when they are in the actual environment: export them, or set them in your service manager.
+`FUSIONLAB_COMPUTE_HOST=gpu-lab`, `FUSIONLAB_SSH_HOST=gpu-lab`, `FUSIONLAB_SSH_REMOTE_DIR=…`,
+`FUSIONLAB_SSH_AUTOSTART=…`, `FUSIONLAB_SSH_PORT=…` (full list in `.env.example`) — and the
+environment wins over the TOML file. (The `FUSIONLAB_SSH_*` overrides apply on top of whichever
+host profile is selected — leave them unset when you switch hosts.) Nothing loads `.env`
+automatically — not the app, not `make dev` — so these take effect when they are in the actual
+environment: export them, or set them in your service manager.
 
 ## What the UI tells you
 
@@ -93,6 +117,16 @@ checklist is the real-host path that remains.
   version; after that the worker's cache answers and weight traffic is zero.
 - **One job at a time** per worker — it is a single-user GPU box, not a cluster, and a queue of
   depth 1 is honest about that. Jobs can be cancelled.
+- **Progress is wired end-to-end**: the worker's event stream (queued → running → section progress →
+  terminal) is relayed by `GET /compute/progress?task=<name>` and rendered in the replay UI next to
+  the compute chip — the Bench button streams its sections live, and a field-line trace still running
+  after ~1.5 s subscribes automatically. Local runs emit the same event vocabulary, so the readout
+  reads identically either way. **Cancellation is wired end-to-end too** (HARN-2): the replay UI
+  shows a Cancel control while a remote job runs, `POST /compute/cancel?task=<name>` reaches the
+  worker's cooperative cancel (immediate while queued, between task sections while running), and the
+  cancelled work re-runs locally under the standard fallback — the banner and the provenance say
+  where the answer actually came from. Local jobs are synchronous, so the affordance is shown for
+  remote jobs only.
 - **The worker executes a fixed registry of named tasks** — field-line tracing, the two
   surrogates, the model-metrics readout, benchmarks. It is not a shell: schema-checked inputs, no
   command execution, payload-size caps. It binds loopback only, reachable through the tunnel.

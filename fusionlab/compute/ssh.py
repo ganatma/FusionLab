@@ -4,15 +4,17 @@ The backend connects with asyncssh — which honors the user's `~/.ssh/config`, 
 FusionLab never sees or stores a credential — opens a local port-forward to the worker, and talks
 plain HTTP over the tunnel:
 
-    FastAPI router (sync def, threadpool) ── SshProvider ── SSH (asyncssh) ── fusionlab worker
+    FastAPI router (async def) ── compute pool ── SshProvider ── SSH (asyncssh) ── fusionlab worker
                                                 │                on the user's host (binds 127.0.0.1)
                                                 └─ local forward 127.0.0.1:<port> → worker
 
 Wiring, with the SSH part as small as possible:
 
 - ``_SshSession`` owns the only async work (connect, forward, remote autostart) on a private event
-  loop in a thread. The routers are sync ``def`` (threadpool), so the blocking protocol methods
-  never touch the API's event loop; PR-1's calling convention is unchanged.
+  loop in a thread. The API's async routes await compute bodies on the compute pool
+  (``status.run_compute_async`` — HARN-4), so the blocking protocol methods and a remote job's
+  whole ``result()`` wait run on the pool's own threads: the shared request threadpool every sync
+  endpoint (``/health``) depends on stays free no matter how many jobs are in flight.
 - ``SshProvider`` implements the PR-1 protocol: ``submit`` queues the job and returns at once,
   ``result`` waits for the terminal state and decodes the FLF1 payload, ``stream`` relays the
   worker's SSE events to async consumers (PR 3's progress chip). Every failure — unreachable host,
@@ -31,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import importlib.metadata
 import json
 import logging
@@ -45,6 +46,7 @@ import httpx
 
 from fusionlab import frames
 from fusionlab.compute.provider import JobHandle
+from fusionlab.worker import sha256_file
 
 logger = logging.getLogger("fusionlab.compute")
 
@@ -227,14 +229,6 @@ def local_weight_paths() -> dict[str, Path]:
     return {"surrogate.pt": Path(surrogate.MODEL_FILE), "eq_surrogate.pt": Path(eq_surrogate.MODEL_FILE)}
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(2**20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _local_version() -> str:
     try:
         return importlib.metadata.version("fusionlab")
@@ -323,6 +317,22 @@ class SshProvider:
                             return
         except httpx.HTTPError as e:
             raise RemoteComputeError("job", f"event stream broke: {type(e).__name__}: {e}") from None
+
+    def cancel(self, job: JobHandle) -> None:
+        """Stop a queued or running job: POST the worker's cancel endpoint (worker.py's cooperative
+        cancel — immediate while queued, checked between task sections while running). The next
+        result() poll then sees state `cancelled` and raises the typed error run_task's fallback
+        consumes, so the work re-runs locally and the user still gets an answer. A 409 means the
+        job went terminal before the cancel landed — nothing left to stop, not a failure; a dead
+        tunnel raises the same typed error result() is about to raise anyway."""
+        try:
+            r = self._http.post(f"/v1/jobs/{job.job_id}/cancel")
+        except httpx.HTTPError as e:
+            raise RemoteComputeError("job", f"cancel failed: {type(e).__name__}: {e}") from None
+        if r.status_code == 409:
+            return
+        if r.status_code >= 400:
+            raise RemoteComputeError("job", f"cancel failed: HTTP {r.status_code}")
 
     def result(self, job: JobHandle) -> Any:
         """Wait for the terminal state, then decode the FLF1 payload once. A remote task failure

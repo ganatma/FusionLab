@@ -1,14 +1,19 @@
+import csv
+import io
 import json
 import logging
 import math
+import re
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from fusionlab import api_replay, mast
+from fusionlab import api_replay, mast, virtual
 from fusionlab.api import NoDotfiles, app
+from fusionlab.physics import BETA_N_LIMIT
 
 client = TestClient(app)
 WEB = Path(__file__).resolve().parents[1] / "web"
@@ -207,6 +212,59 @@ def test_replay_psi_slice_matches_the_efit_grid():
     assert client.get("/replay/30420/psi/9999").status_code == 404
 
 
+# ---- limit-distance panel (FEAT-3): measured limits over time, the archive's abort flag as context
+
+def _arr(xs: list) -> np.ndarray:
+    """A bundle's JSON-safe series (None for NaN) back to a float array."""
+    return np.array([np.nan if v is None else v for v in xs], dtype=float)
+
+
+def test_limit_distances_match_the_map_limit_formulas():
+    """FEAT-3: the panel's per-slice distances are /map's limit formulas evaluated on the shot's own
+    measured geometry — api.operating_map's f_gw = n/n_gw with n_gw = Ip/(pi a^2), troyon =
+    beta_N/BETA_N_LIMIT, kink = 2/q95 — and worst_limit is their nan-propagating max (/map's
+    stability_limit relation). physics.replay computes the same stack by construction; the test pins
+    it against drift. Bundle series are rounded to 4 dp, so compare at rounding tolerance."""
+    for sid in mast.cached_shots():
+        b = client.get(f"/replay/{sid}").json()
+        me, mo = b["measured"], b["model"]
+        n, ip, a = (_arr(me[k]) for k in ("n_e20", "Ip_MA", "a_m"))
+        want = {"f_greenwald": n / (ip / (np.pi * a**2)),
+                "troyon": _arr(me["beta_N"]) / BETA_N_LIMIT,
+                "kink": 2.0 / _arr(me["q95"])}
+        for name, w in want.items():
+            assert np.allclose(_arr(mo[name]), w, rtol=1e-3, atol=1e-3, equal_nan=True), (sid, name)
+        worst = np.max(np.stack(list(want.values())), axis=0)
+        assert np.allclose(_arr(mo["worst_limit"]), worst, rtol=1e-3, atol=1e-3, equal_nan=True), sid
+
+
+def test_archive_flags_align_with_the_catalog():
+    """FEAT-3: the bundle's archive block is the catalog's own cpf_useful/cpf_abort row — None where
+    the archive never graded the shot (NaN), so absent flags degrade silently downstream."""
+    c = api_replay._catalog("fair-mast")
+    for sid in mast.cached_shots():
+        i = int(np.nonzero(c["shot_id"] == sid)[0][0])
+        def row_flag(col, i=i):
+            v = float(c[col][i])
+            return None if not np.isfinite(v) else bool(v)
+        b = client.get(f"/replay/{sid}").json()
+        assert b["archive"] == {"useful": row_flag("useful"), "abort": row_flag("abort")}, sid
+
+
+def test_abort_marker_aligns_with_a_flagged_catalog_row(monkeypatch):
+    """Where the archive DOES flag a shot, the bundle carries abort=True and the UI marker aligns
+    with the catalog by construction. No cached shot ships flagged, so the alignment is proven on a
+    synthetic catalog row (the shipped cache exercises only the silent-degradation path)."""
+    c = dict(api_replay._catalog("fair-mast"))
+    i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
+    c["abort"] = c["abort"].copy()
+    c["abort"][i] = 1.0
+    monkeypatch.setattr(api_replay, "_catalog", lambda source="fair-mast": c)
+    b = client.get("/replay/30166").json()
+    assert b["archive"] == {"useful": True, "abort": True}
+    assert client.get("/replay/30420").json()["archive"]["abort"] is False   # unflagged rows stay False
+
+
 # ---- multi-shot compare (A2), criterion 4: any shot id is replayable. An uncached catalog shot rides
 # mast.load_shot()'s existing cache-then-S3 path; the archive is mocked here — no test may touch the network.
 
@@ -264,7 +322,9 @@ def test_concurrent_requests_share_one_fetch(monkeypatch, tmp_path):
     out = []
 
     def hit():
-        out.append(api_replay.replay_shot(uncached)["meta"]["shot_id"])
+        # the async route shells out to this body on the compute pool; the concurrency under test
+        # lives here, so three threads call the body directly (HARN-4)
+        out.append(api_replay._replay_bundle(uncached)["meta"]["shot_id"])
 
     threads = [threading.Thread(target=hit) for _ in range(3)]
     for t in threads:
@@ -280,6 +340,57 @@ def test_uncached_shot_not_in_catalog_is_404(monkeypatch, tmp_path):
     monkeypatch.setattr(mast, "SHOTS", tmp_path)
     monkeypatch.setattr(mast, "fetch_shot", lambda sid: (_ for _ in ()).throw(AssertionError("must not fetch")))
     assert client.get("/replay/99999999").status_code == 404
+
+
+# ---- bundles without equilibrium (DATA-1): /replay used to emit lcfs/psi_grid unconditionally,
+# so a machine without reconstructed equilibria broke the route outright. Now it degrades.
+
+
+def _no_equilibrium_payload(real: dict) -> dict:
+    """A real cached bundle stripped of every equilibrium/tracing array — a ψ-free machine's shot."""
+    eq_keys = ("lcfs_R", "lcfs_Z", "psi_R", "psi_Z", "psi_n", "R_mag_m", "Z_mag_m",
+               "F_Tm", "psi_axis_Wb", "psi_bnd_Wb", "psi_norm", "q_mid", "q_mid_R")
+    return {k: v for k, v in real.items() if k not in eq_keys}
+
+
+def test_replay_of_a_psi_free_bundle_answers_200_with_a_hint(monkeypatch, tmp_path):
+    """A bundle without equilibrium replays its traces: 200, lcfs/psi_grid null, and a
+    human-readable `equilibrium_absent` hint — previously a 500-class breakage."""
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    stripped = _no_equilibrium_payload(real)
+    assert "psi_n" not in stripped and "lcfs_R" not in stripped
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", lambda sid: _fake_payload(stripped, sid))
+    api_replay._shot_cached.cache_clear()   # the process cache is keyed by id alone: earlier
+    # tests in this module replayed a full bundle for the same id — do not serve it stale here.
+
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["lcfs"] is None and j["psi_grid"] is None
+    assert "psi" in j["equilibrium_absent"]
+    assert j["measured"]["t_s"] and j["measured"]["Ip_MA"]        # the traces still replay
+    assert j["model"] is not None and j["summary"]                # the 0D twin still answers
+    assert j["wall"] is not None                                  # vessel geometry is independent
+    assert _no_nan_floats(j)                                      # strict JSON: nulls, never NaN
+
+
+def test_equilibrium_dependent_routes_on_a_psi_free_bundle_name_the_gap(monkeypatch, tmp_path):
+    """The per-slice surfaces answer their own honest errors instead of KeyError: ψ 404,
+    field-lines 503 with the reason, USD export 422 (no LCFS to revolve)."""
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", lambda sid: _fake_payload(_no_equilibrium_payload(real), sid))
+
+    assert client.get(f"/replay/{uncached}").status_code == 200       # prime the cache
+    r_psi = client.get(f"/replay/{uncached}/psi/0")
+    assert r_psi.status_code == 404 and "psi" in r_psi.json()["detail"]
+    r_fl = client.get(f"/replay/{uncached}/fieldlines/0")
+    assert r_fl.status_code == 503 and "psi" in r_fl.json()["detail"]
+    r_usd = client.post(f"/replay/{uncached}/usd?fmt=usda")
+    assert r_usd.status_code == 422 and "equilibrium" in r_usd.json()["detail"]
 
 
 def test_failed_archive_fetch_is_502_and_leaves_no_cache(monkeypatch, tmp_path):
@@ -331,12 +442,12 @@ def test_usd_download_exports_to_temp_then_publishes_atomically(monkeypatch):
     out.unlink(missing_ok=True)   # the assertion is that the endpoint creates the served path
     seen = {}
 
-    def fake_with_lines(shot, path):
+    def fake_with_lines(shot, path, machine=None):
         seen["tmp"] = Path(path)
         seen["final_exists_mid_export"] = out.exists()
         Path(path).write_bytes(b"stage-bytes")
 
-    def plain_must_not_run(shot, path):
+    def plain_must_not_run(shot, path, machine=None):
         raise AssertionError("plain export ran although the field-line export succeeded")
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", fake_with_lines)
@@ -355,7 +466,7 @@ def test_usd_download_failure_keeps_the_old_stage_and_leaves_no_temp(monkeypatch
     out.parent.mkdir(exist_ok=True)
     out.write_bytes(b"previous-good-stage")
 
-    def dies_mid_write(shot, path):
+    def dies_mid_write(shot, path, machine=None):
         Path(path).write_bytes(b"half-written")
         raise RuntimeError("export exploded mid-write")
 
@@ -374,7 +485,8 @@ def test_usd_plain_stage_fallback_logs_a_warning(caplog, monkeypatch):
         raise RuntimeError("no warp device here")
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", broken)
-    monkeypatch.setattr("fusionlab.usd_export.export_shot", lambda shot, path: Path(path).write_bytes(b"plain-stage"))
+    monkeypatch.setattr("fusionlab.usd_export.export_shot",
+                        lambda shot, path, machine=None: Path(path).write_bytes(b"plain-stage"))
     with caplog.at_level(logging.WARNING, logger="fusionlab.api_replay"):
         r = client.post("/replay/30420/usd", params={"fmt": "usda"})
     assert r.status_code == 200 and r.content == b"plain-stage"
@@ -422,17 +534,23 @@ def test_equilibrium_surrogate_overlay_is_labelled_held_out_or_not():
 # ---- catalog search (A1): /db/search against direct numpy masks over the same table
 DB_SEARCH_FIELDS = {"shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
                     "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
-                    "t_ipmax_s", "useful", "abort"}
+                    "t_ipmax_s", "useful", "abort", "mode_derived"}
 
 
 def test_db_search_rows_match_direct_numpy_masks():
-    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table."""
+    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table.
+    Campaign labels and row totals are derived from the loaded table + the configured campaign
+    pattern (formerly the hard-coded "M9" and 15,969 pins) so a second machine's catalog reads the same."""
     db = mast.load_db()
+    camps = np.unique(db["campaign"])
+    c_first, c_last = int(camps[0]), int(camps[-1])
+    prefix = re.match(r"[A-Za-z]*", mast.CONFIG.campaign_pattern).group(0)   # "M\d+" -> "M"; r"\d+" -> ""
+    label = f"{prefix}{c_last}"
     cases = [
         ({"q": "30421"}, db["shot_id"] == 30421),
         ({"q": "30400-30500"}, (db["shot_id"] >= 30400) & (db["shot_id"] <= 30500)),
-        ({"campaign": "M9"}, db["campaign"] == 9),
-        ({"campaign": "5"}, db["campaign"] == 5),
+        ({"campaign": label}, db["campaign"] == c_last),                   # archive label form ("M9")
+        ({"campaign": str(c_first)}, db["campaign"] == c_first),           # bare-number form
         ({"ip_min": 0.8}, db["Ip_MA"] >= 0.8),
         ({"ip_max": 0.6}, db["Ip_MA"] <= 0.6),
         ({"bt_min": 0.5, "bt_max": 1.0}, (db["B_T"] >= 0.5) & (db["B_T"] <= 1.0)),
@@ -447,8 +565,12 @@ def test_db_search_rows_match_direct_numpy_masks():
         ({"useful": False}, db["useful"] != 1),                # shots the archive never marked useful
         ({"abort": True}, db["abort"] == 1),
         ({"abort": False}, db["abort"] != 1),
-        ({"ip_min": 0.8, "campaign": "M9", "useful": True},    # filters AND together
-         (db["Ip_MA"] >= 0.8) & (db["campaign"] == 9) & (db["useful"] == 1)),
+        ({"mode": "H"}, db["mode_derived"] == 1),
+        ({"mode": "L"}, db["mode_derived"] == 0),   # unknown rows (NaN) match neither H nor L
+        ({"ip_min": 0.8, "campaign": label, "useful": True},    # filters AND together
+         (db["Ip_MA"] >= 0.8) & (db["campaign"] == c_last) & (db["useful"] == 1)),
+        ({"mode": "H", "campaign": label},                      # mode composes with the existing filters
+         (db["mode_derived"] == 1) & (db["campaign"] == c_last)),
     ]
     for params, mask in cases:
         j = client.get("/db/search", params=params).json()
@@ -462,8 +584,8 @@ def test_db_search_rows_carry_every_metadata_field_as_strict_json():
     assert "NaN" not in r.text and "Infinity" not in r.text   # missing fields surface as null, never NaN
     j = r.json()
     assert set(j["rows"][0]) == DB_SEARCH_FIELDS
-    assert j["total"] == 15_969 and j["limit"] == 5 and j["offset"] == 0
-    assert {row["campaign"] for row in j["rows"]} <= {5, 6, 7, 8, 9}
+    assert j["total"] == int(mast.load_db()["shot_id"].size) and j["limit"] == 5 and j["offset"] == 0
+    assert {row["campaign"] for row in j["rows"]} <= set(int(c) for c in np.unique(mast.load_db()["campaign"]))
 
 
 def test_db_search_pagination_windows():
@@ -486,7 +608,8 @@ def test_db_search_rejects_malformed_params():
     for params in ({"offset": -1}, {"limit": 0}, {"limit": 1001},                        # paging bounds
                    {"ip_min": "abc"}, {"w_max": "lots"},                                 # malformed numbers
                    {"q": "30400-30500-99999"}, {"q": "nope"}, {"q": "30500-30400"},      # malformed / inverted q
-                   {"campaign": "MX"}, {"useful": "maybe"}):                             # malformed campaign / bool
+                   {"campaign": "MX"}, {"useful": "maybe"},                                # malformed campaign / bool
+                   {"mode": "X"}):                                                          # malformed mode
         assert client.get("/db/search", params=params).status_code == 422, params
 
 
@@ -496,7 +619,7 @@ def test_db_search_unfiltered_is_fast():
     t0 = time.perf_counter()
     j = client.get("/db/search").json()
     assert time.perf_counter() - t0 < 0.5
-    assert j["total"] == 15_969 and len(j["rows"]) == 200
+    assert j["total"] == int(mast.load_db()["shot_id"].size) and len(j["rows"]) == 200
 
 
 def _no_nan_floats(node) -> bool:
@@ -516,7 +639,7 @@ def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypat
     real = api_replay.replay
     import numpy as _np
 
-    def nan_model(shot, H=1.0):
+    def nan_model(shot, H=1.0, **_):   # the route forwards the source's MachineConfig as config=
         r = real(shot, H=H)
         return {k: _np.full_like(v, _np.nan) if isinstance(v, _np.ndarray) and v.dtype.kind == "f" else v
                 for k, v in r.items()}
@@ -528,6 +651,116 @@ def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypat
     assert j["summary"]["P_LH_median_MW"] is None
     assert j["summary"]["H98_median"] is None and j["summary"]["H89_median"] is None
     assert _no_nan_floats(j)
+
+
+# ---- take-away export (FEAT-1): the replay bundle's numbers, downloadable with their provenance.
+# The contract is equality: the export serves the very dict /replay serves, never a recomputation.
+
+
+def _cell(v):
+    """The CSV cell the csv module writes for a JSON bundle value: None empty, everything else str()."""
+    return "" if v is None else str(v)
+
+
+def test_export_json_equals_the_replay_bundle():
+    replay = client.get("/replay/30420").json()
+    j = client.get("/export/30420", params={"fmt": "json"}).json()
+    assert len(j["shots"]) == 1
+    b = j["shots"][0]
+    assert b["meta"] == replay["meta"] and b["attribution"] == replay["attribution"]
+    assert b["measured"] == replay["measured"] and b["model"] == replay["model"]
+    assert b["summary"] == replay["summary"]
+
+
+def test_export_csv_equals_the_replay_bundle_and_carries_provenance():
+    replay = client.get("/replay/30420").json()
+    rows = list(csv.DictReader(io.StringIO(client.get("/export/30420").text)))
+    series = {**replay["measured"], **{k: v for k, v in replay["model"].items() if k != "t_s"}}
+    by_q: dict[str, list[str]] = {}
+    for row in rows:
+        by_q.setdefault(row["quantity"], []).append(row["value"])
+    summary_names = {n for n, v in api_replay._flat_summary(replay["summary"]) if isinstance(v, (bool, int, float))}
+    assert set(by_q) == set(series) | summary_names
+    for name, vals in series.items():
+        assert by_q[name] == [_cell(v) for v in vals]   # exact strings: the bundle's own numbers, str()-ed
+    flat = dict(api_replay._flat_summary(replay["summary"]))
+    for row in rows:
+        if row["t_s"] == "":   # a summary row: empty t_s, the summary's own value
+            assert row["value"] == _cell(flat[row["quantity"]])
+    prov = {row["quantity"]: row["provenance"] for row in rows}
+    assert prov["Ip_MA"] == "measured" and prov["W_H_MJ"] == "model"
+    assert prov["H_learned"] == "learned" and prov["H98"] == "computed"
+    assert set(prov.values()) <= {"measured", "model", "learned", "computed"}
+
+
+def test_export_provenance_covers_every_series_with_all_four_labels():
+    b = client.get("/export/30420", params={"fmt": "json"}).json()["shots"][0]
+    prov = b["export"]["provenance"]
+    series = set(b["measured"]) | {k for k in b["model"] if k != "t_s"} \
+        | {n for n, _ in api_replay._flat_summary(b["summary"])}
+    assert set(prov) == series   # every exported series labelled — a new replay() key fails here until labelled
+    assert set(prov.values()) == {"measured", "model", "learned", "computed"}
+
+
+def test_export_csv_downloads_as_an_attachment():
+    r = client.get("/export/30420")
+    assert r.headers["content-type"].startswith("text/csv")
+    assert 'filename="fusionlab_shot_30420.csv"' in r.headers["content-disposition"]
+    assert set(csv.DictReader(io.StringIO(r.text)).fieldnames) == set(api_replay._EXPORT_COLUMNS)
+
+
+def test_compare_export_groups_rows_by_shot_and_validates():
+    j = client.get("/export", params={"shots": "30420,30166,30420", "fmt": "json"}).json()
+    assert [s["meta"]["shot_id"] for s in j["shots"]] == [30420, 30166]   # deduped, request order kept
+    rows = list(csv.DictReader(io.StringIO(client.get("/export", params={"shots": "30420,30166"}).text)))
+    assert {r["shot_id"] for r in rows} == {"30420", "30166"}
+    assert client.get("/export", params={"shots": "30420,nope"}).status_code == 404   # unresolvable id
+    assert client.get("/export", params={"shots": "1,2,3,4,5,6,7"}).status_code == 422   # cap: 7 distinct ids
+    assert client.get("/export", params={"shots": ",".join(["30166"] * 7)}).status_code == 200   # dupes dedupe first
+    assert client.get("/export/1").status_code == 404   # not in the catalog
+    assert client.get("/export/30420", params={"fmt": "parquet"}).status_code == 422
+
+
+# ---- domain shading on the measured replay (FEAT-2): the bundle carries the virtual path's own guard
+# and the band coordinates are exactly the flags' out-of-domain runs — one shared source, no copied numbers.
+
+
+def test_replay_domain_flags_are_the_virtual_guards_own_output():
+    """The replay's in_distribution is virtual.in_distribution on the measured inputs (the identity edit),
+    not a re-derivation with copied ranges: the same function the what-if path is guarded by."""
+    j = client.get("/replay/30420").json()
+    shot = mast.load_shot(30420)
+    ok = virtual.in_distribution(shot, [virtual.Edit()])[0]
+    assert j["model"]["in_distribution"] == ok.tolist()
+
+
+def test_replay_domain_bands_are_the_domain_flags_own_runs():
+    """Band presence/absence and both coordinates are a pure function of the served flags — nothing shaded
+    that the guard does not mark, nothing marked that the UI does not shade."""
+    j = client.get("/replay/30420").json()
+    t, flags = j["measured"]["t_s"], j["model"]["in_distribution"]
+    expected, start = [], None
+    for i, ok in enumerate(flags):
+        if not ok and start is None:
+            start = i
+        if start is not None and (ok or i == len(flags) - 1):
+            expected.append([t[start], t[i if not ok else i - 1]])
+            start = None
+    assert j["domain_bands"] == expected
+    assert bool(j["domain_bands"]) == (False in flags)   # an all-in-domain shot shades nothing
+
+
+def test_domain_bands_is_run_length_encoding_of_the_flags():
+    """Unit contract of the shared helper: consecutive False slices close on their last slice; a run at
+    either edge, a single slice, and an all-False trace all shade exactly their own slices."""
+    t = [0.0, 0.1, 0.2, 0.3, 0.4]
+    f = virtual.domain_bands
+    assert f(t, [True] * 5) == []
+    assert f(t, [False] * 5) == [[0.0, 0.4]]
+    assert f(t, [False]) == [[0.0, 0.0]]
+    assert f(t, [True, False, False, True, True]) == [[0.1, 0.2]]
+    assert f(t, [True, True, False, False, False]) == [[0.2, 0.4]]
+    assert f(t, [False, True, False, True, False]) == [[0.0, 0.0], [0.2, 0.2], [0.4, 0.4]]
 
 
 def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch):

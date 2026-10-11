@@ -26,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fusionlab import mast  # noqa: E402
+from fusionlab.atomicio import atomic_write  # noqa: E402
 
 OUT = mast.DATA / "eq" / "shots"
 IP_MIN_A = 1e5
@@ -47,6 +48,12 @@ def pick_shots(n: int, seed: int = 0) -> np.ndarray:
     rng = np.random.default_rng(seed)
     order = np.lexsort((rng.random(c["shot_id"].size), c["campaign"] < 8))
     return c["shot_id"][order][:n].astype(int)
+
+
+def _savez(tmp: Path, **arrays: object) -> None:
+    """np.savez(Path) would append .npz and rename the temp out from under atomic_write."""
+    with tmp.open("wb") as fh:
+        np.savez(fh, **arrays)
 
 
 def _time_first(eq, key: str, x: np.ndarray) -> np.ndarray:
@@ -71,9 +78,7 @@ def _topup(shot_id: int, f: Path) -> tuple[int, int, str]:
             d[k] = _time_first(eq, k, np.asarray(eq[k][:], dtype=np.float32))[idx]
     except Exception as ex:
         return shot_id, 0, f"topup {type(ex).__name__}: {str(ex)[:80]}"
-    tmp = f.with_suffix(".tmp.npz")
-    np.savez(tmp, **d)
-    tmp.rename(f)
+    atomic_write(f, lambda tmp: _savez(tmp, **d))
     return shot_id, -1, "topped up"
 
 
@@ -101,9 +106,7 @@ def fetch_one(shot_id: int, deadline: float) -> tuple[int, int, str]:
     out = {k: raw[k][keep] for k in PER_TIME + SENSORS}
     out.update(psi=psi[keep], major_radius=raw["major_radius"], z=raw["z"])
     OUT.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp.npz")
-    np.savez(tmp, **out)
-    tmp.rename(f)
+    atomic_write(f, lambda tmp: _savez(tmp, **out))
     return shot_id, int(keep.sum()), "ok"
 
 

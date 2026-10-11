@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from fusionlab.agent_config import agent_settings
@@ -47,6 +47,67 @@ def compute_status():
     )
 
     return status.snapshot()
+
+
+@app.get("/compute/progress")
+async def compute_progress(task: str) -> StreamingResponse:
+    """Per-job progress as server-sent events: the selected provider's stream for the named task's
+    in-flight job, relayed in the worker's event vocabulary (queued / running / progress / terminal),
+    so local and remote render identically. The stream ends after the terminal event — following a
+    local-fallback re-run if one appears; with no job it ends after a short wait, never an error."""
+    from fusionlab.compute import (
+        status,  # lazy: pulls LocalProvider (numpy), never asyncssh
+    )
+
+    return StreamingResponse(status.progress_stream(task), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/compute/cancel")
+def compute_cancel(task: str):
+    """Cancel the named task's in-flight job (HARN-2): the provider's cancel on the handle the
+    progress relay is streaming. POST — state-changing, so not triggerable by navigation or
+    prefetch. The cancelled remote job's result() raises the typed cancelled error and run_task's
+    existing local-fallback semantics re-run the work unchanged; the banner and provenance report
+    honestly where it ran. With no job in flight this is a 404, never a 5xx."""
+    from fusionlab.compute import (
+        status,  # lazy: pulls LocalProvider (numpy), never asyncssh
+    )
+
+    try:
+        return status.cancel_task(task)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except status.remote_errors() as e:      # dead tunnel: result() is about to raise the same thing
+        raise HTTPException(503, str(e)) from None
+
+
+@app.post("/compute/benchmark")
+async def compute_benchmark(profile: str = "quick", source: str | None = None, shot: str | None = None):
+    """The measured-timings benchmark through the selected provider (the worker's `benchmark` task,
+    with the local fallback) — the one named task that reports section progress. POST: it occupies
+    the compute slot for its whole run, so it must not be triggerable by navigation or prefetch
+    (same reasoning as the USD export). source/shot pick the bundle through the data seam — the
+    configured source's bench shot by default. The body is awaited on the compute pool (HARN-4): the
+    run — remote or local — never pins a shared request-threadpool token."""
+    from fusionlab.bench import PROFILES
+    from fusionlab.compute import status
+    from fusionlab.data import sources
+
+    if profile not in PROFILES:
+        raise HTTPException(422, f"profile must be one of {sorted(PROFILES)}")
+    if source is not None:
+        try:
+            sources.get_source(source)
+        except ValueError as e:   # unknown source names fail loudly, before a job is submitted
+            raise HTTPException(422, str(e)) from e
+    inputs: dict = {"profile": profile}
+    if source is not None:
+        inputs["source"] = source
+    if shot is not None:
+        inputs["shot"] = shot
+    out = await status.run_task_async("benchmark", inputs)
+    return {**out, "computed_on": status.provenance("benchmark").get("host")}
 
 
 @app.get("/devices")

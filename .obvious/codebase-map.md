@@ -8,6 +8,7 @@
 | `fusionlab/api_virtual.py` | Virtual-shot router: `/virtual/gate`, `POST /virtual/{id}` |
 | `fusionlab/physics.py` | 0D power-balance engine, scaling laws (IPB98, ITER89-P), limits, DEVICES table |
 | `fusionlab/mast.py` | FAIR-MAST loader: `load_shot`, `clean_db`, npz caching, SI → project units |
+| `fusionlab/data/` | Data-source seam (DATA-1/DATA-2): ShotBundle v1 + MachineConfig, reader cache, `sources.get_source()` — `fair-mast` archive and `user-file` imports behind one protocol; import route `POST/DELETE /data/bundles/{id}` |
 | `fusionlab/surrogate.py` | PhysicsNeMo τ_E correction to IPB98 (session/campaign holdout) |
 | `fusionlab/eq_surrogate.py` | PhysicsNeMo flux-map surrogate: 93 magnetics signals → ψ(R,Z) 65×65 |
 | `fusionlab/fieldlines.py` | NVIDIA Warp RK4 field-line tracer + q95 check vs EFIT |

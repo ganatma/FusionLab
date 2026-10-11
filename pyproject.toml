@@ -44,6 +44,10 @@ pythonpath = ["."]
 # ruff's default rule set (E4/E7/E9/F) plus bugbear, pyupgrade, flake8-simplify and isort.
 select = ["E4", "E7", "E9", "F", "B", "UP", "SIM", "I"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's File/Form marker calls in parameter defaults are the framework idiom, not a bug
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
+
 [tool.mypy]
 python_version = "3.12"
 # the heavy deps (warp, pxr, physicsnemo) ship no type stubs

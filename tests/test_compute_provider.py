@@ -68,7 +68,7 @@ def test_capabilities_reports_tasks_and_model_availability():
     assert caps["surrogate_available"] == surrogate.available()
     assert caps["eq_surrogate_available"] == eq_surrogate.MODEL_FILE.exists()
     assert set(caps["tasks"]) == {"trace_fieldlines", "run_surrogate", "run_surrogate_shot", "run_eq_surrogate",
-                                  "model_metrics"}
+                                  "model_metrics", "benchmark"}
 
 
 def test_unknown_task_is_rejected():
@@ -86,7 +86,9 @@ def test_result_is_consumed_once():
         provider.result(job)
 
 
-def test_stream_yields_one_completed_event_for_a_local_job():
+def test_stream_replays_the_worker_vocabulary_for_a_local_job():
+    """HARN-1: a local job's stream is the worker's event sequence (queued → running → terminal), so
+    subscribers render local and remote identically."""
     provider = LocalProvider()
     job = provider.submit("model_metrics", {"model": "surrogate"}) if surrogate.available() else None
     if job is None:
@@ -95,9 +97,72 @@ def test_stream_yields_one_completed_event_for_a_local_job():
     async def events():
         return [e async for e in provider.stream(job)]
 
-    assert asyncio.run(events()) == [{"event": "completed", "job_id": job.job_id, "task": "model_metrics"}]
+    assert asyncio.run(events()) == [{"event": "queued", "task": "model_metrics"},
+                                     {"event": "running", "task": "model_metrics"},
+                                     {"event": "completed", "job_id": job.job_id, "task": "model_metrics"}]
     with pytest.raises(KeyError):
         asyncio.run(_collect(provider.stream(JobHandle(job_id="nope", task="model_metrics", provider="local"))))
+
+
+def test_benchmark_task_emits_section_progress(monkeypatch):
+    """HARN-1: the local benchmark body wires bench.timings' section hook into the job's event list —
+    the same progress events the worker's SSE emits between sections."""
+    from fusionlab import bench
+
+    def fake_timings(profile: str = "full", progress=None):
+        for section in ("replay", "operating_map"):
+            if progress is not None:
+                progress({"section": section})
+        return {"rows": [], "profile": profile}
+
+    monkeypatch.setattr(bench, "timings", fake_timings)
+    provider = LocalProvider()
+    job = provider.submit("benchmark", {"profile": "quick"})
+    assert provider.result(job) == {"rows": [], "profile": "quick"}
+    assert asyncio.run(_collect(provider.stream(job))) == [
+        {"event": "queued", "task": "benchmark"},
+        {"event": "running", "task": "benchmark"},
+        {"event": "progress", "section": "replay"},
+        {"event": "progress", "section": "operating_map"},
+        {"event": "completed", "job_id": job.job_id, "task": "benchmark"},
+    ]
+    assert provider.active_job("benchmark") is None   # no longer running
+
+
+def test_stream_ends_quietly_when_a_held_record_is_pruned(monkeypatch):
+    """The detached-dict guard: a record pruned while a subscriber polls it — between pulls, no
+    terminal event yet — ends the stream after its replayed events instead of spinning forever on a
+    detached dict. (A job unknown at stream start still raises KeyError — the worker's own contract.)"""
+    from fusionlab.compute import local as local_mod
+
+    monkeypatch.setitem(local_mod.TASKS, "trivial", lambda inputs: 1)
+    provider = LocalProvider()
+    job = provider.submit("trivial", {})
+    provider._jobs[job.job_id]["events"] = provider._jobs[job.job_id]["events"][:1]   # a mid-run record
+
+    async def scenario():
+        agen = provider.stream(job)
+        first = await agen.__anext__()          # the replayed 'queued' event
+        del provider._jobs[job.job_id]          # pruned while this subscriber holds the record
+        rest = [first]
+        async for event in agen:                # the guard sees the detached record and ends quietly
+            rest.append(event)
+        return rest
+
+    assert asyncio.run(scenario()) == [{"event": "queued", "task": "trivial"}]
+
+
+def test_job_records_are_pruned_to_a_bound(monkeypatch):
+    """The shared provider instance (run_task's local path) must not accumulate old job records."""
+    from fusionlab.compute import local as local_mod
+
+    monkeypatch.setitem(local_mod.TASKS, "trivial", lambda inputs: 1)
+    provider = LocalProvider()
+    first = provider.submit("trivial", {})
+    for _ in range(local_mod.MAX_JOBS_REMEMBERED):
+        provider.submit("trivial", {})
+    assert first.job_id not in provider._jobs
+    assert len(provider._jobs) == local_mod.MAX_JOBS_REMEMBERED
 
 
 async def _collect(stream):

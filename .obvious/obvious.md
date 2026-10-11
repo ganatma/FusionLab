@@ -36,6 +36,10 @@ No external services (no Postgres/Redis/etc.). The only setup prerequisite is `u
 - `.env` (copied from `.env.example`): `FUSIONLAB_PORT=8000`, `FUSIONLAB_DEVICE=` (force `mps|cuda|cpu`; default auto).
 - Optional agent keys (`FUSIONLAB_AGENT_ENABLED`, `FUSIONLAB_AGENT_MODEL`, `ANTHROPIC_API_KEY`): all three are
   unnecessary for the offline demo; the in-app agent stays off unless the flag and a key are both set.
+- Optional data-source selection (`FUSIONLAB_DATA_SOURCE`, `FUSIONLAB_USER_BUNDLES`):
+  the default `fair-mast` needs neither. They point the app at imported shot bundles (a per-source
+  machine config is the `machine.json` inside the bundles directory) — see `docs/DATA_CONTRACT.md`,
+  the bring-your-own-data path.
 - No API keys are needed. The demo runs fully offline after `make setup`.
 
 ## Codebase map

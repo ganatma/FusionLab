@@ -32,7 +32,9 @@ from pathlib import Path
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, Vt
 
-ATTRIBUTION = "MAST data: UKAEA FAIR-MAST (mastapp.site), CC BY-SA 4.0"
+from fusionlab.data.machine import MAST_CONFIG, MachineConfig
+
+ATTRIBUTION = MAST_CONFIG.attribution   # provenance string on every exported stage
 GENERATOR = "FusionLab OpenUSD export (Omniverse-compatible)"
 OUT = Path(__file__).resolve().parent.parent / "out"
 FORMATS = (".usda", ".usdc", ".usd")
@@ -49,7 +51,7 @@ VESSEL_COLOR, VESSEL_OPACITY = (0.62, 0.64, 0.67), 0.15
 COIL_COLOR = (0.72, 0.45, 0.20)   # copper
 
 # Core electron temperature -> colour. Fixed absolute scale so two shots can be compared by eye.
-TE_RAMP_MAX_KEV = 1.5
+TE_RAMP_MAX_KEV = 1.5   # default ceiling; export_shot uses the configured machine's te_display_range
 _RAMP_X = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
 _RAMP_RGB = np.array([[0.35, 0.02, 0.02],    # dark red
                       [0.80, 0.16, 0.04],
@@ -166,9 +168,9 @@ def _hold_last_finite(x):
     return x[idx]
 
 
-def te_color(Te0_keV):
+def te_color(Te0_keV, te_max: float = TE_RAMP_MAX_KEV):
     """Core T_e (keV) -> RGB (nt, 3): dark red -> orange -> yellow-white. All-NaN falls back to mid-ramp."""
-    x = np.nan_to_num(_hold_last_finite(Te0_keV) / TE_RAMP_MAX_KEV, nan=0.5).clip(0, 1)
+    x = np.nan_to_num(_hold_last_finite(Te0_keV) / te_max, nan=0.5).clip(0, 1)
     return np.stack([np.interp(x, _RAMP_X, _RAMP_RGB[:, c]) for c in range(3)], -1)
 
 
@@ -182,7 +184,8 @@ def _extent(p):
     return np.stack([p.min(-2), p.max(-2)], -2)
 
 
-def _static_mesh(stage, path, pts, quads, color, opacity=None, double_sided=False, materials=True):
+def _static_mesh(stage, path, pts, quads, color, opacity=None, double_sided=False, materials=True,
+                 root_name: str = MAST_CONFIG.usd_prim_root):
     mesh = UsdGeom.Mesh.Define(stage, path)
     pts = np.round(pts, ROUND_M)
     mesh.CreatePointsAttr(_vec3f(pts))
@@ -194,18 +197,18 @@ def _static_mesh(stage, path, pts, quads, color, opacity=None, double_sided=Fals
     if double_sided:
         mesh.CreateDoubleSidedAttr(True)
     if materials:
-        _material(stage, mesh, color, 1.0 if opacity is None else opacity)
+        _material(stage, mesh, color, 1.0 if opacity is None else opacity, root_name=root_name)
     return mesh
 
 
-def _material(stage, mesh, color, opacity=1.0):
+def _material(stage, mesh, color, opacity=1.0, root_name: str = MAST_CONFIG.usd_prim_root):
     """Bind a UsdPreviewSurface with the same colour as displayColor. Returns the shader (to animate it).
 
     usdview falls back to displayColor on its own; Blender and USD Composer shade from bound materials,
     and without one every mesh imports as the same grey.
     """
-    UsdGeom.Scope.Define(stage, "/MAST/Looks")
-    base = f"/MAST/Looks/{mesh.GetPrim().GetName()}"
+    UsdGeom.Scope.Define(stage, f"{root_name}/Looks")
+    base = f"{root_name}/Looks/{mesh.GetPrim().GetName()}"
     mat = UsdShade.Material.Define(stage, base)
     shader = UsdShade.Shader.Define(stage, f"{base}/Surface")
     shader.CreateIdAttr("UsdPreviewSurface")
@@ -226,11 +229,13 @@ def _topology(mesh, quads):
 
 # ---------------------------------------------------------------- export
 def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int = N_TOR,
-                cutaway_deg: float = CUTAWAY_DEG, fps: float = PLAYBACK_FPS, materials: bool = True) -> Path:
-    """Write one shot (a mast.load_shot dict) as a USD stage. Format follows the extension: .usda/.usdc/.usd.
+                cutaway_deg: float = CUTAWAY_DEG, fps: float = PLAYBACK_FPS, materials: bool = True,
+                machine: MachineConfig = MAST_CONFIG) -> Path:
+    """Write one shot (a load_shot bundle dict) as a USD stage. Format follows the extension: .usda/.usdc/.usd.
 
-    OpenUSD export (Omniverse-compatible). Time code k is EFIT slice k; the real time is fusionlab:t_s.
-    The stage is built in memory and exported, so calling this repeatedly for the same path is safe.
+    OpenUSD export (Omniverse-compatible). Time code k is equilibrium slice k; the real time is
+    fusionlab:t_s. The stage is built in memory and exported, so calling this repeatedly for the
+    same path is safe. Prim naming, attribution and the Te colour ceiling come from the machine config.
     """
     path = Path(path)
     if path.suffix.lower() not in FORMATS:
@@ -240,6 +245,8 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
     if nt == 0:
         raise ValueError("shot has no time slices")
     meta = shot.get("meta", {}) or {}
+    root_name = machine.usd_prim_root
+    machine_name = root_name.lstrip("/")   # display name in the provenance comment
 
     stage = Usd.Stage.CreateInMemory()
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
@@ -249,30 +256,31 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
     stage.SetStartTimeCode(0)
     stage.SetEndTimeCode(nt - 1)
 
-    root = UsdGeom.Xform.Define(stage, "/MAST").GetPrim()
+    root = UsdGeom.Xform.Define(stage, root_name).GetPrim()
     stage.SetDefaultPrim(root)
     Usd.ModelAPI(root).SetKind("component")
     prov = {"shot_id": meta.get("shot_id"), "campaign": meta.get("campaign"), "heating": meta.get("heating"),
             "timestamp": meta.get("timestamp"), "preshot": meta.get("preshot"), "postshot": meta.get("postshot"),
-            "attribution": ATTRIBUTION, "generator": GENERATOR,
-            "time_note": f"time code = EFIT slice index ({nt} slices, t = {t[0]:.4f}-{t[-1]:.4f} s); "
-                         "real time in seconds is /MAST/Plasma.fusionlab:t_s",
-            "scope_note": "Educational twin. Plasma surface is the axisymmetric EFIT boundary revolved about Z."}
+            "attribution": machine.attribution, "generator": GENERATOR,
+            "time_note": f"time code = {machine.reconstruction_name} slice index ({nt} slices, t = {t[0]:.4f}-{t[-1]:.4f} s); "
+                         f"real time in seconds is {root_name}/Plasma.fusionlab:t_s",
+            "scope_note": f"Educational twin. Plasma surface is the axisymmetric {machine.reconstruction_name} boundary revolved about Z."}
     for key, v in prov.items():
         if v is not None:
             root.SetCustomDataByKey(key, v if isinstance(v, (int, float)) else str(v))
-    stage.GetRootLayer().comment = (f"MAST shot {meta.get('shot_id', '?')} ({meta.get('campaign', '?')}, "
-                                    f"{meta.get('heating', '?')}). {ATTRIBUTION}. {GENERATOR}.")
+    stage.GetRootLayer().comment = (f"{machine_name} shot {meta.get('shot_id', '?')} ({meta.get('campaign', '?')}, "
+                                    f"{meta.get('heating', '?')}). {machine.attribution}. {GENERATOR}.")
 
     if "wall_R" in shot:
         wr, wz = _open_loop(shot["wall_R"], shot["wall_Z"])     # corners kept as they are, no resampling
         phi, closed = _angles(n_tor, cutaway_deg)
         # double-sided: with the wedge open you look at the inside of the wall
-        _static_mesh(stage, "/MAST/Vessel", _revolve(wr, wz, phi), _quads(wr.size, phi.size, closed),
-                     VESSEL_COLOR, VESSEL_OPACITY, double_sided=True, materials=materials)
+        _static_mesh(stage, f"{root_name}/Vessel", _revolve(wr, wz, phi), _quads(wr.size, phi.size, closed),
+                     VESSEL_COLOR, VESSEL_OPACITY, double_sided=True, materials=materials, root_name=root_name)
     if "coil_R" in shot and np.size(shot["coil_R"]):
         coil_pts, coil_quads = _coil_mesh(shot, cutaway_deg)
-        _static_mesh(stage, "/MAST/Coils", coil_pts, coil_quads, COIL_COLOR, materials=materials)
+        _static_mesh(stage, f"{root_name}/Coils", coil_pts, coil_quads, COIL_COLOR, materials=materials,
+                     root_name=root_name)
 
     # Plasma: resample per slice (a loop over ~70 slices; point counts differ), revolve all slices at once.
     z_mid = shot.get("Z_mag_m", np.full(nt, np.nan))
@@ -280,9 +288,9 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
     phi = np.arange(n_tor) * (2 * np.pi / n_tor)
     pts = np.round(_revolve(outl[:, 0], outl[:, 1], phi), ROUND_M).astype(np.float32)   # (nt, n_tor*n_pol, 3)
     ext = _extent(pts)
-    rgb = te_color(shot.get("Te0_keV", np.full(nt, np.nan)))
+    rgb = te_color(shot.get("Te0_keV", np.full(nt, np.nan)), machine.te_usd_ramp_max_kev)
 
-    plasma = UsdGeom.Mesh.Define(stage, "/MAST/Plasma")
+    plasma = UsdGeom.Mesh.Define(stage, f"{root_name}/Plasma")
     _topology(plasma, _quads(n_pol, n_tor, True))
     p_attr, e_attr = plasma.CreatePointsAttr(), plasma.CreateExtentAttr()
     c_attr = plasma.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
@@ -293,7 +301,7 @@ def export_shot(shot: dict, path: str | Path, *, n_pol: int = N_POL, n_tor: int 
     c_attr.Set(_vec3f(rgb[k0:k0 + 1]))
     glow = []
     if materials:   # the plasma glows: same colour on diffuse and emissive, animated with the mesh
-        shader = _material(stage, plasma, rgb[k0])
+        shader = _material(stage, plasma, rgb[k0], root_name=root_name)
         glow = [shader.GetInput("diffuseColor"), shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f)]
         glow[1].Set(Gf.Vec3f(*map(float, rgb[k0])))
     for i in range(nt):

@@ -153,7 +153,8 @@ def turn(history: list[dict[str, str]], message: str, settings: AgentSettings,
                    "summary": result.summary, "data": result.data, "error": result.error}
             if result.proposal is not None:   # confirm-then-apply: hold it, never act on it here
                 token = on_proposal(result.proposal)
-                yield {"type": "action_proposed", "action_id": token["action_id"], "tool": name, "args": args,
+                yield {"type": "action_proposed", "action_id": token["action_id"], "tool": name,
+                       "args": result.proposal["args"],   # the canonical args the confirm applies, not the model's raw call
                        "math": str(result.proposal.get("math") or ""), "expires_s": token["expires_s"]}
             tool_results.append({"type": "tool_result", "tool_use_id": str(call["id"]),
                                  "content": tool_context(result), "is_error": result.error is not None})

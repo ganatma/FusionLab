@@ -30,7 +30,7 @@ import torch
 
 from fusionlab import mast
 from fusionlab.atomicio import atomic_write
-from fusionlab.physics import M_D, tau_coeff_H, volume
+from fusionlab.physics import tau_coeff_H, volume
 
 MODELS = Path(__file__).resolve().parent.parent / "models"
 MODEL_FILE, METRICS_FILE = MODELS / "surrogate.pt", MODELS / "surrogate_metrics.json"
@@ -47,7 +47,7 @@ SEED = 0
 def tau_ipb98(x: dict):
     """IPB98(y,2) tau_E [s] for deuterium, with kappa_a = V / (2 pi^2 R a^2). Vectorized over rows."""
     g = {"R": x["R_m"], "a": x["a_m"], "kappa": x["kappa_a"]}
-    C, alpha = tau_coeff_H(g, x["Ip_MA"], x["B_T"], x["n_e20"], 1.0, M_D)
+    C, alpha = tau_coeff_H(g, x["Ip_MA"], x["B_T"], x["n_e20"], 1.0, mast.CONFIG.isotope_md)
     return C * x["P_loss_MW"] ** -alpha
 
 

@@ -34,6 +34,7 @@ import os
 import platform
 import re
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from fusionlab import frames
+from fusionlab.atomicio import atomic_write
 from fusionlab.compute.local import TASKS as _LOCAL_TASKS
 
 WORKER_PROTOCOL_VERSION = 1      # bumped when the wire contract (framing, events) changes
@@ -102,6 +104,8 @@ class BenchmarkInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profile: Literal["quick", "full"] = "quick"
+    source: str | None = None   # data seam: which source's bundle to replay (None: the configured one)
+    shot: str | None = None     # which shot/bundle id (None: the source's configured bench shot)
 
 
 class ArtifactRef(BaseModel):
@@ -140,7 +144,12 @@ def _run_benchmark(inputs: BaseModel, progress: Callable[[dict], None]) -> dict:
 
     if not isinstance(inputs, BenchmarkInputs):   # registry dispatch guarantees this; keep it honest
         raise TypeError(f"benchmark inputs must be BenchmarkInputs, got {type(inputs).__name__}")
-    return bench.timings(profile=inputs.profile, progress=progress)
+    kwargs: dict = {"profile": inputs.profile}
+    if inputs.source is not None:
+        kwargs["source"] = inputs.source
+    if inputs.shot is not None:
+        kwargs["shot"] = inputs.shot
+    return bench.timings(progress=progress, **kwargs)
 
 
 TASKS: dict[str, Task] = {
@@ -168,12 +177,30 @@ def cached_artifacts() -> dict[str, int]:
     return {p.name: p.stat().st_size for p in root.iterdir() if _SHA256_RE.fullmatch(p.name)}
 
 
-def sha256_file(path: Path) -> str:
+def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(2**20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+_SHA256_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def sha256_file(path: Path) -> str:
+    """sha256 of a weight file, cached by (path, mtime_ns, size).
+
+    Every handshake and every submit re-hashed the shipped ~4.6 MB weights; weights are immutable
+    once trained, so the (path, mtime, size) key is exact — a retrained file changes both and
+    re-hashes. The SshProvider hashes its side of the same contract through this same function.
+    """
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    hit = _SHA256_CACHE.get(key)
+    if hit is None:
+        hit = _SHA256_CACHE[key] = _sha256_file(path)
+    return hit
 
 
 def shipped_models() -> dict[str, dict[str, Any]]:
@@ -237,6 +264,11 @@ def _weights_for_job(resolved: dict[str, Path]):
 
 
 # ---------------------------------------------------------------- job book (in-memory, depth-1)
+def _now() -> float:
+    """Monotonic clock, module-level so tests can drive eviction order deterministically."""
+    return time.monotonic()
+
+
 @dataclass
 class _Job:
     job_id: str
@@ -248,10 +280,17 @@ class _Job:
     error_type: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     runner: asyncio.Task | None = None
+    completed_at: float | None = None   # monotonic stamp the FIFO eviction sorts by
+
+    def park(self, state: str) -> None:
+        """Move to a terminal state with the completion stamp the FIFO eviction sorts by."""
+        self.state = state
+        self.completed_at = _now()
 
 
 class _JobBook:
-    """One job at a time; terminal jobs kept until MAX_JOBS_REMEMBERED lets them be evicted."""
+    """One job at a time; terminal jobs kept until MAX_JOBS_REMEMBERED lets them be evicted,
+    oldest completion first."""
 
     def __init__(self) -> None:
         self._jobs: dict[str, _Job] = {}
@@ -270,7 +309,7 @@ class _JobBook:
 
     def _evict_locked(self) -> None:
         terminal = sorted((j for j in self._jobs.values() if j.state in TERMINAL_STATES),
-                          key=lambda j: j.job_id)
+                          key=lambda j: j.completed_at if j.completed_at is not None else 0.0)
         for job in terminal[:max(len(terminal) - MAX_JOBS_REMEMBERED + 1, 0)]:
             del self._jobs[job.job_id]
 
@@ -311,13 +350,22 @@ async def _run_job(job: _Job, task: Task, inputs: BaseModel, resolved: dict[str,
         blob = await asyncio.to_thread(execute)
         if job.cancel.is_set():   # the task finished after a cancel arrived: discard the result
             raise _JobCancelled
-        job.result, job.state = blob, "completed"
+        job.result = blob
+        job.park("completed")
         _JOBS.append(job, {"event": "completed", "job_id": job.job_id, "task": job.task})
     except _JobCancelled:
-        job.state = "cancelled"
+        job.park("cancelled")
         _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
+    except asyncio.CancelledError:
+        # The runner task itself was cancelled (worker shutdown, a reaped stuck job) — a
+        # BaseException, so the handlers above never see it. Park terminal and re-raise:
+        # an unparked job wedges the depth-1 queue, 409ing every later submit (HARN-3).
+        job.park("cancelled")
+        _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
+        raise
     except Exception as e:   # a task failure is a job outcome, not a worker crash
-        job.state, job.error, job.error_type = "error", str(e), type(e).__name__
+        job.park("error")
+        job.error, job.error_type = str(e), type(e).__name__
         _JOBS.append(job, {"event": "error", "error": str(e), "error_type": type(e).__name__})
 
 
@@ -459,9 +507,9 @@ async def upload_artifact(sha256: str, request: Request) -> dict:
         raise HTTPException(422, "sha256 mismatch: the uploaded bytes do not match the requested hash")
     root = artifact_dir()
     root.mkdir(parents=True, exist_ok=True)
-    tmp = root / f".{sha256}.tmp"
-    tmp.write_bytes(body)
-    os.replace(tmp, root / sha256)   # atomic: a reader never sees a half-written weight
+    # atomicio: a pid-unique dot-temp + os.replace — a reader never sees a half-written weight,
+    # and concurrent uploads of different hashes never collide (HARN-3).
+    atomic_write(root / sha256, lambda tmp: tmp.write_bytes(body))
     return {"sha256": sha256, "bytes": len(body)}
 
 

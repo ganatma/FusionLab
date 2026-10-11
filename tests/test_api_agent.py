@@ -229,7 +229,7 @@ def test_a_proposed_whatif_changes_nothing_until_confirmed(monkeypatch):
                                (["Proposed."], [text_block("Proposed.")])])
     events = chat("raise the beams to 3 MW")
     proposed = next(e for e in events if e["type"] == "action_proposed")
-    assert proposed["tool"] == "run_whatif" and proposed["args"] == {"shot_id": 30166, "p_nbi_MW": mw}
+    assert proposed["tool"] == "run_whatif" and proposed["args"] == {"shot_id": "30166", "p_nbi_MW": mw}
     assert "× P_nbi_max" in proposed["math"] and proposed["expires_s"] == 600
 
     # a tampered client names the same action but supplies its own parameters: they are ignored —
@@ -239,7 +239,7 @@ def test_a_proposed_whatif_changes_nothing_until_confirmed(monkeypatch):
     assert tampered.status_code == 200
     applied = tampered.json()
     assert applied["type"] == "action_applied" and applied["tool"] == "run_whatif"
-    assert applied["args"] == {"shot_id": 30166, "p_nbi_MW": mw}
+    assert applied["args"] == {"shot_id": "30166", "p_nbi_MW": mw}
     assert float(applied["apply"]["sliders"]["P_nbi"]) == pytest.approx(0.6)
 
     assert client.post(f"/agent/actions/{proposed['action_id']}/confirm").status_code == 410  # one-shot

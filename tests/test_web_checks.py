@@ -16,6 +16,17 @@ def _served(name: str) -> str:
     return client.get(f"/static/{name}").text
 
 
+def test_replay_guards_absent_equilibrium():
+    """DATA-1: a bundle without equilibrium replays its traces — replay.js reads the
+    `equilibrium_absent` hint instead of dereferencing lcfs/psi_grid unconditionally."""
+    replay = _served("replay.js")
+    assert "s.equilibrium_absent" in replay          # the hint surfaces in the insight panel
+    assert "grid ? grid.R : []" in replay            # the section view tolerates a missing ψ grid
+    assert "shot.psi_grid ?" in replay               # the header omits the EFIT tag without one
+    assert "shot.psi_grid ? 'EFIT, real vessel'" in replay   # the panel sub-label keeps its
+    assert "'no reconstruction — trace-only replay'" in replay   # provenance honest without one
+
+
 def test_stale_failures_are_seq_guarded_in_app_js():
     """JS-01: the seq guard extends into the catch blocks — a superseded failure may not
     overwrite the fresh status bar or heatmap."""
@@ -70,7 +81,7 @@ def test_failed_shot_switch_reverts_the_select():
     replay = _served("replay.js")
     load = replay.split("async function loadShot")[1].split("async function insight")[0]
     assert "if (!r.ok) throw" in load
-    assert "$('rp-shot').value = shot ? shot.meta.shot_id : ''" in load
+    assert "$('rp-shot').value = shot ? String(shot.meta.shot_id) : ''" in load
 
 
 def test_fire_and_forget_panels_render_their_errors():
@@ -116,3 +127,93 @@ def test_agent_panel_drives_only_public_hooks(monkeypatch):
     assert "window.FusionLab.replay" in agent_js                      # public hooks only
     assert "dispatchEvent(new Event('input', { bubbles: true }))" in agent_js
     assert "EventSource" not in agent_js                              # the chat is a POST; EventSource is GET-only
+
+
+def test_export_downloads_are_wired_into_the_served_js():
+    """FEAT-1: both take-away export affordances exist in the served replay.js — the toolbar's per-shot
+    download and the compare bar's multi-shot download — and the CSV helper keeps the fetch-error
+    discipline (the .ok check, the busy state) instead of failing silently."""
+    replay = _served("replay.js")
+    assert 'id="rp-csv"' in replay                                    # the toolbar's export button
+    assert "`/export/${shot.meta.shot_id}`" in replay                 # single-shot download URL
+    assert "`/export?shots=" in replay                               # compare download URL
+    assert 'data-act="export"' in replay                              # the compare bar's export button
+    dl = replay.split("async function dlExport", 1)[1].split("CSV export failed", 1)[0]
+    assert "if (!r.ok) throw" in dl
+    assert "aria-busy" in dl
+
+
+def test_job_progress_is_wired_into_the_served_js():
+    """HARN-1: the replay UI opens the SSE progress relay for a named task, renders the shared event
+    vocabulary, and closes the stream on terminal and native-end events — EventSource's auto-reconnect
+    must not spin against a route that ends after the terminal event. The benchmark control and the
+    slow field-line threshold wire the same watcher. (HARN-2 consciously changed the terminal set:
+    'cancelled' keeps the stream open so the UI can follow the local-fallback re-run.)"""
+    replay = _served("replay.js")
+    watch = replay.split("function watchProgress")[1].split("const psiCache")[0]
+    assert "new EventSource(`/compute/progress?task=${encodeURIComponent(task)}`)" in watch
+    assert "es.addEventListener('progress'" in watch
+    assert "['completed', 'error'].forEach(name => es.addEventListener(name, end))" in watch
+    assert "es.addEventListener('cancelled'" in watch
+    native = watch.split("es.addEventListener('error'")[1]
+    assert "if (e.data) return;" in native.split("es.close()")[0]   # stream end closes; a job error event doesn't
+    assert 'id="rp-bench"' in replay
+    bench = replay.split("$('rp-bench').addEventListener")[1]
+    assert "watchProgress('benchmark')" in bench
+    assert "setTimeout(() => watchProgress('trace_fieldlines'), 1500)" in replay
+
+
+def test_cancel_affordance_is_wired_into_the_served_js():
+    """HARN-2: the progress readout carries a cancel control, shown only while the relayed events
+    name the ssh provider (local jobs are synchronous — nothing to interrupt), POSTing the app's
+    cancel route with the fetch-error discipline (no silent failures)."""
+    replay = _served("replay.js")
+    assert 'id="rp-progress-cancel"' in replay
+    watch = replay.split("function watchProgress")[1].split("const psiCache")[0]
+    assert "cancelBtn.hidden = progressProvider !== 'ssh'" in watch
+    click = replay.split("$('rp-progress-cancel').addEventListener")[1]
+    assert "fetch(`/compute/cancel?task=${encodeURIComponent(progressTask)}`" in click
+    assert "{ method: 'POST' }" in click
+    assert "if (!r.ok)" in click
+
+
+def test_mode_filter_is_wired_into_the_served_js():
+    """FEAT-4: the catalog search panel carries the derived-mode select — labelled derived, sent as the
+    /db/search mode param, restored only from valid deep-link values, and rendered per row as H, L or –
+    (unknown rows are shown as such, never silently as L)."""
+    replay = _served("replay.js")
+    assert 'id="rp-srch-mode"' in replay                          # the filter control
+    assert ">derived<" in replay                                  # labelled derived, never measured
+    assert "derived confinement regime, not measured" in replay   # the table header says it too
+    assert "p.set('mode', mode)" in replay                        # sent as the /db/search mode param
+    assert "['H', 'L'].includes(val('mode'))" in replay           # deep links restore only valid values
+    assert "r.mode_derived == null ? '<td class=\"muted\">–</td>'" in replay   # unknown rows render as –
+    assert 'colspan="12"' in replay                               # the empty row spans the grown table
+
+
+def test_replay_domain_shading_is_the_served_bands_with_a_legend_label():
+    """FEAT-2: the W strip shades the server's own domain bands (never recomputed client-side) and
+    labels them in its legend, present only when the flags mark something out of domain. The what-if
+    bands share the same machinery — one shading style, one vocabulary."""
+    replay = _served("replay.js")
+    strips = replay.split("function drawStrips")[1].split("function insight")[0]
+    assert "shot.domain_bands" in strips               # the coordinates are the replay bundle's
+    assert "oodShapes(ood, 'meas-ood')" in strips      # the shared band builder, the what-if's style
+    assert "'outside the training range'" in strips    # labelled in the plot legend when present
+    whatif = replay.split("function drawWhatIf")[1].split("function revolve")[0]
+    assert "oodShapes(oodRuns(" in whatif              # the what-if path maps its own flags with the same machinery
+
+
+def test_abort_overlay_is_conditional_on_the_catalog_flag():
+    """FEAT-3: the abort badge and the limit-strip annotation exist only as conditions on the
+    bundle's archive.abort — absent or false flags leave the panel untouched (silent degradation) —
+    and the panel wording keeps the house rule: computed distances, never forecasts."""
+    replay = _served("replay.js")
+    assert 'id="rp-abort" hidden' in replay                     # the badge ships hidden, shown per shot
+    assert "$('rp-abort').hidden = !shot.archive?.abort" in replay   # toggled only from the bundle flag
+    strip_fn = replay.split("function drawStrips")[1].split("function insight(s)")[0]
+    assert "shot.archive?.abort" in strip_fn                    # the annotation is conditional, not static
+    assert "⚠ archive abort flag" in strip_fn
+    assert "a distance, never a forecast" in replay             # the house wording, on the panel itself
+    ins_fn = replay.split("function insight(s)")[1].split("const ohmic")[0]
+    assert "flags this shot <b>aborted</b>" in ins_fn and "catalog bookkeeping" in ins_fn

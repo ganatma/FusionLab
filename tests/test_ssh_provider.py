@@ -145,6 +145,29 @@ def test_submit_uploads_weights_the_worker_lacks(tmp_path, monkeypatch):
     assert uploads == [hashlib.sha256(fake.read_bytes()).hexdigest()]
 
 
+def test_submit_weight_hashes_are_cached_between_submits(monkeypatch):
+    """HARN-3: weights are immutable once trained — the second submit re-reads no file (the busy
+    worker's 409 bounds the submit to the handshake; no job ever runs)."""
+    worker._SHA256_CACHE.clear()
+    reads = {"n": 0}
+    real = worker._sha256_file
+
+    def counting(path):
+        reads["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(worker, "_sha256_file", counting)
+    p = make_provider(json_handler({"GET /v1/capabilities": handshake_response(),
+                                    "POST /v1/jobs": httpx.Response(409, json={"detail": "worker busy"})}))
+    with pytest.raises(RemoteComputeError, match="worker busy"):
+        p.submit("run_surrogate_shot", {"shot": {}, "P_loss_MW": 1.0})
+    first = reads["n"]
+    assert first >= 1                             # at least the one weight this task reads
+    with pytest.raises(RemoteComputeError, match="worker busy"):
+        p.submit("run_surrogate_shot", {"shot": {}, "P_loss_MW": 1.0})
+    assert reads["n"] == first                    # zero file reads on the second submit
+
+
 def test_submit_of_a_weight_task_with_missing_local_weights_is_a_clean_error(tmp_path, monkeypatch):
     missing = tmp_path / "surrogate.pt"        # never created
     monkeypatch.setattr(ssh_mod, "local_weight_paths", lambda: {"surrogate.pt": missing})
@@ -391,6 +414,35 @@ def test_loopback_stream_on_an_unknown_job(worker_url):
     p.close()
 
 
+def test_loopback_progress_route_relays_remote_job_events(worker_url):
+    """HARN-1 end-to-end: run_task on a REAL remote worker while GET /compute/progress streams the
+    provider's SSE relay — the benchmark's queued/running/section/completed events arrive through
+    the app route (the path the replay UI consumes)."""
+    from fastapi.testclient import TestClient
+
+    from fusionlab import compute
+    from fusionlab.api import app
+    from fusionlab.compute import status
+
+    p = SshProvider(session=FakeSession(worker_url))
+    compute._provider = p
+    api = TestClient(app)
+    runner = threading.Thread(target=lambda: status.run_task("benchmark", {"profile": "quick"}))
+    runner.start()
+    try:
+        with api.stream("GET", "/compute/progress?task=benchmark") as r:
+            assert r.status_code == 200
+            body = b"".join(r.iter_raw()).decode()
+    finally:
+        runner.join(timeout=120)
+        compute._provider = None
+        status._reset_for_tests()
+        p.close()
+    assert "event: queued" in body and "event: running" in body
+    assert "event: progress" in body    # the benchmark's sections, relayed live from the worker
+    assert "event: completed" in body
+
+
 @needs_surrogate
 def test_loopback_upload_then_remote_failure_surfaces_cleanly(worker_url, tmp_path, monkeypatch):
     """The drift path end-to-end: local weights the worker lacks are uploaded for real, the job runs
@@ -427,3 +479,32 @@ def test_loopback_composite_task_matches_the_local_answer(worker_url):
     local = local_p.result(local_p.submit("run_surrogate_shot", inputs))
     assert remote.shape == local.shape == shot["t_s"].shape
     assert np.array_equal(remote, local)
+
+
+def test_loopback_cancel_reaches_the_worker_and_frees_the_slot(worker_url, monkeypatch):
+    """HARN-2 end-to-end: submit a job on the real worker, cancel it through the provider's new
+    cancel(), and result() raises the typed cancelled error run_task's fallback consumes (the
+    provider-level mirror of the worker's own cancel test). The depth-1 slot then frees — the
+    next submit is not a 409 — because the worker parks the cancelled runner terminal (HARN-3):
+    that park is what made this test's second half possible."""
+    from dataclasses import replace as dc_replace
+
+    def slow(_inputs, progress):
+        for i in range(200):                     # ~10 s ceiling; the cancel lands far earlier
+            progress({"section": f"section-{i}"})
+            time.sleep(0.05)
+        return {}
+
+    monkeypatch.setitem(worker.TASKS, "benchmark", dc_replace(worker.TASKS["benchmark"], run=slow))
+    p = SshProvider(session=FakeSession(worker_url))
+    job = p.submit("benchmark", {"profile": "quick"})
+    p.cancel(job)                                # queued or running: the worker unwinds either way
+    with pytest.raises(RemoteComputeError) as ei:
+        p.result(job)
+    assert ei.value.phase == "job" and "cancelled" in ei.value.message
+
+    nxt = p.submit("benchmark", {"profile": "quick"})   # the slot freed: no 409
+    p.cancel(nxt)
+    with pytest.raises(RemoteComputeError, match="cancelled"):
+        p.result(nxt)
+    p.close()

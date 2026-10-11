@@ -131,6 +131,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .tag { display:inline-block; font:600 9.5px/1.5 var(--mono); letter-spacing:.1em; text-transform:uppercase; padding:0 5px; border:1px solid; vertical-align:1px; }
 .tag.meas { color:#6ea8ee; border-color:#2a4f80; } .tag.model { color:#e39a5c; border-color:#7a4a22; }
 .tag.learn { color:#3fbf93; border-color:#1d5c47; } .tag.comp { color:#b9b8ae; border-color:#4a4f58; }
+.tag.abort { color:var(--bad); border-color:var(--bad); background:rgba(248,81,73,.12); }
 .prov { display:flex; gap:6px; align-items:center; font:11px/1 var(--mono); color:var(--dim); }
 
 /* toolbar buttons + segmented control + 3D overlay chips */

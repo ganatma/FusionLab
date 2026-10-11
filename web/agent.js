@@ -486,7 +486,7 @@
         const j = await r.json().catch(() => null);
         if (!r.ok) { status.textContent = (j && j.detail) || `accept failed (${r.status})`; status.className = 'small agent-line-no'; btn.disabled = false; return; }
         host.innerHTML = '';
-        status.textContent = `Accepted — saved to data/protocols/${j.protocol_id || pid}.json. An accepted protocol fills the sandbox form step by step, each step still confirmed.`;
+        status.textContent = `Accepted — saved to data/protocols/${j.protocol_id || pid}.json. An accepted protocol fills the Explore form step by step, each step still confirmed.`;
         status.className = 'small agent-line-ok';
       } catch (e) {
         status.textContent = 'the accept request failed: ' + (e && e.message || e);

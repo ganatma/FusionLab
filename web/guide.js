@@ -72,7 +72,7 @@
   ['mouseover', 'focusin'].forEach((ev) => document.addEventListener(ev, (e) => { const t = e.target.closest && e.target.closest('.term'); if (t) showTip(t); }));
   ['mouseout', 'focusout'].forEach((ev) => document.addEventListener(ev, (e) => { if (e.target.closest && e.target.closest('.term')) tip.hidden = true; }));
 
-  // Lab-mode help, from the same glossary: tooltips on panel labels, one line under each sandbox slider, "?" back to a lesson.
+  // Lab-mode help, from the same glossary: tooltips on panel labels, one line under each Explore slider, "?" back to a lesson.
   function labHelp() {
     Object.values(G).forEach((g) => (g.on || []).forEach((name) => { const el = target(name); if (el && !el.title) el.title = `${g.name}: ${g.def}`; }));
     const KNOB = { Ip: 'ip', B: 'bt', n: 'density', P_aux: 'heating', H: 'h-factor', Zeff: 'zeff' };

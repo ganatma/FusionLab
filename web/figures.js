@@ -68,7 +68,7 @@
   }
 
   // ---------------------------------------------------------------- n · T · tau_E
-  const PRESET = {   // ITER: this app's sandbox baseline (physics.simulate). MAST: shot #30166 at t = 0.27 s (n̄e, Te0, W/P_loss).
+  const PRESET = {   // ITER: this app's Explore baseline (physics.simulate). MAST: shot #30166 at t = 0.27 s (n̄e, Te0, W/P_loss).
     iter: { n: 1.015, T: 7.6, tau: 3.81, label: 'ITER: this app’s model, volume-average T' },
     mast: { n: 0.386, T: 1.22, tau: 0.049, label: 'MAST #30166 at 0.27 s: measured, core electron T' },
   };

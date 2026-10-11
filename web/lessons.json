@@ -222,6 +222,6 @@
 
     { "id": "8.1", "ch": 8, "title": "Into the lab",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": true, "highlight": null, "view": "cutaway", "focus": [], "last": true,
-      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>What-if</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
+      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>Edit this shot</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
   ]
 }

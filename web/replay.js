@@ -25,7 +25,7 @@
           <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
         <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
         <span class="mono" id="rp-tlabel">–</span>
-        <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
+        <button type="button" id="rp-whatif" class="tool" aria-haspopup="dialog" aria-expanded="false" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">Edit this shot</button>
         <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
         <span class="status" id="rp-load" hidden aria-live="polite"></span>
         <span class="status" id="rp-compute" title="Compute status">…</span>
@@ -61,18 +61,6 @@
       </div>
 
       <div class="cr-cell scroll" id="cell-st" data-guide="state">
-        <div id="rp-wi" hidden>
-          <h2>What-if on this shot ${TAG.model} ${TAG.learn} <span class="dim">the real programme, edited and re-flown · educational, not a prediction</span></h2>
-          <div class="wi-grid">
-            <div><div id="rp-wi-sliders"></div>
-              <p class="small muted" id="rp-wi-evidence"></p>
-              <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
-            <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
-                <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
-              <div class="wi-out small" id="rp-wi-out"></div>
-              <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
-          </div>
-        </div>
         <h2>Shot state ${TAG.meas} <span id="rp-head" class="dim"></span></h2>
         <div class="params" data-guide="params">
           <div><span>t</span><b id="rp-r-t">–</b><i>s</i></div>
@@ -82,10 +70,10 @@
           <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
-        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
-        <div class="gauge-row wi-keep" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
+        <h2 style="margin-top:8px">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
+        <div class="gauge-row" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
         <div class="cols">
           <div data-guide="insight"><h2>What the comparison shows ${TAG.comp}</h2><div id="rp-insight" class="small"></div></div>
           <div data-guide="logbook"><h2>Session leader's logbook ${TAG.meas}</h2><div id="rp-log" class="small"></div></div>
@@ -102,7 +90,28 @@
           <p>The vessel and PF coils are the FAIR-MAST limiter contour and coil filaments revolved about the axis; the glowing shell is EFIT's last closed flux surface at this time slice, coloured by core T<sub>e</sub>. <span id="rp-3d-note"></span></p>
           <p class="muted">Each line is integrated through the EFIT flux map of this time slice (RK4 in toroidal angle, one GPU thread per line, every slice of the shot in one kernel launch). Counting toroidal turns per poloidal turn gives q without using EFIT's own q, so the agreement is a check of the whole chain: archive → units → interpolation → integrator. Axisymmetric reconstruction only: no islands, no 3D fields. Drag to rotate. The same lines are in the OpenUSD download.</p></details>
       </div>
-    </div>`;
+    </div>
+
+    <dialog id="rp-wi" class="wi-drawer" role="dialog" aria-modal="true" aria-labelledby="rp-wi-title">
+      <div class="wi-head">
+        <div class="wi-head-title">
+          <h2 id="rp-wi-title">Edit this shot ${TAG.model} ${TAG.learn}</h2>
+          <p class="small muted">The real programme, edited and re-flown · educational, not a prediction</p>
+        </div>
+        <button type="button" class="tool" id="rp-wi-x" aria-label="Close the editor">✕</button>
+      </div>
+      <div class="wi-scroll">
+        <div class="wi-grid">
+          <div><div id="rp-wi-sliders"></div>
+            <p class="small muted" id="rp-wi-evidence"></p>
+            <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
+          <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
+              <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
+            <div class="wi-out small" id="rp-wi-out"></div>
+            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+        </div>
+      </div>
+    </dialog>`;
 
   // Catalog search filter set (A1): the ranges the API exposes, one row each — [label, unit, url prefix].
   const SRCH_RANGES = [['I<sub>p</sub>', 'MA', 'ip'], ['B', 'T', 'bt'], ['P<sub>nbi</sub>', 'MW', 'pnbi'],
@@ -166,7 +175,7 @@
   let initP = null, loadSeq = 0;
   const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
   let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
-  let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
+  let wi = { on: false, gate: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
   const lineCache = new Map();
   const psiCache = new Map();
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
@@ -292,6 +301,8 @@
     seg('rp-view', v => { if (use3) window.Vessel3D.setView(v); document.dispatchEvent(new CustomEvent('fusionlab:view', { detail: { view: v } })); });
     $('rp-eq-on').addEventListener('change', () => drawPsi(+$('rp-t').value));
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
+    $('rp-wi-x').addEventListener('click', () => whatIf(false));
+    $('rp-wi').addEventListener('close', finishWhatIf);
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
@@ -591,9 +602,14 @@
 
   async function whatIf(on) {
     const want = !!on && !!shot;
-    if (want && !wi.gate) {
+    if (!want) {   // close: Esc, the ✕ button and programmatic calls (guide.js entering guided) all land here
+      if ($('rp-wi').open) $('rp-wi').close();   // the 'close' listener runs finishWhatIf
+      else finishWhatIf();
+      return;
+    }
+    if (!wi.gate) {
       // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
-      // leave the panel half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
+      // leave the drawer half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
       // refetch on every later click and keep what-if broken until reload.
       let gate = null;
       try {
@@ -602,9 +618,11 @@
         if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
       } catch (e) { /* network failure: the error render just below carries it */ }
       if (!gate) {
-        $('rp-wi').hidden = false;   // open the panel just enough to carry the one-line error
+        $('rp-wi-out').innerHTML = '<p class="muted">The anchored editor needs the FusionLab server (/virtual/gate). <button type="button" class="tool" id="rp-wi-retry">Retry</button></p>';
+        $('rp-wi-retry').addEventListener('click', () => whatIf(true));
         $('rp-whatif').classList.remove('on');
-        $('rp-wi-out').innerHTML = '<p class="muted">What-if needs the FusionLab server (/virtual/gate). Click What-if again to retry.</p>';
+        $('rp-whatif').setAttribute('aria-expanded', 'false');
+        showEditDrawer();   // open the drawer just enough to carry the one-line error and its Retry
         return;
       }
       wi.gate = gate;
@@ -620,12 +638,34 @@
       $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
       $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
-    wi.on = want;
-    $('rp-whatif').classList.toggle('on', wi.on);
-    $('rp-wi').hidden = !wi.on;
-    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
-    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
+    wi.on = true;
+    $('rp-whatif').classList.add('on');
+    $('rp-whatif').setAttribute('aria-expanded', 'true');
+    showEditDrawer();
     askWhatIf();
+  }
+
+  // The anchored editor is a modal drawer over the Replay room (spec L2): the state cell, gauges and
+  // logbook underneath stay live — every edit re-flies the model and repaints them. showModal puts it
+  // on the top layer: Esc closes natively (cancel → close) and the rest of the page is inert meanwhile.
+  // Sliders start from the measured programme (data-zero); edits persist across close/reopen because the
+  // drawer's DOM and the memoized gate survive; "Reset edits" restores the measured programme.
+  function showEditDrawer() {
+    if ($('rp-wi').open) return;
+    wi.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;   // focus returns here on close
+    $('rp-wi').showModal();
+  }
+
+  function finishWhatIf() {   // runs from the dialog 'close' event and from whatIf(false) while closed
+    if (wi.on) {
+      wi.on = false;
+      $('rp-whatif').classList.remove('on');
+      $('rp-whatif').setAttribute('aria-expanded', 'false');
+      wi.res = null;
+      if (shot) { drawWhatIf(); scrub(+$('rp-t').value); }   // the strips read the measured programme again
+    }
+    const op = wi.opener; wi.opener = null;
+    if (op && op.isConnected) op.focus();
   }
   function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
 

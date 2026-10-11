@@ -28,6 +28,7 @@ from fusionlab.physics import (
     tau_coeff_H,
     volume,
 )
+from fusionlab.virtual import Edit, domain_bands, in_distribution
 
 router = APIRouter()
 
@@ -115,6 +116,7 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
     /export serves the very same dict, so exported values equal replayed values by construction."""
     s = _shot(shot_id)
     r = replay(s, H=H)
+    r["in_distribution"] = in_distribution(s, [Edit()])[0]   # the virtual path's own guard, on the measured inputs
     summary = _summary(s, r)
     _add_hybrid(s, r, summary)
     eq = _eq_psi(shot_id)
@@ -130,6 +132,7 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
         "wall": {"R": _j(s["wall_R"], 3), "Z": _j(s["wall_Z"], 3)} if "wall_R" in s else None,
         "coils": {k[5:]: _j(s[k], 3) for k in ("coil_R", "coil_Z", "coil_W", "coil_H")} if "coil_R" in s else None,
         "psi_grid": {"R": _j(s["psi_R"], 3), "Z": _j(s["psi_Z"], 3)},
+        "domain_bands": _j(domain_bands(s["t_s"], r["in_distribution"])),   # the shading coordinates, from the flags
     }
 
 
@@ -444,7 +447,7 @@ _UNIT = {   # the repo's fixed units (CLAUDE.md); "" is dimensionless
     "W_L_MJ": "MJ", "W_H_MJ": "MJ", "W_hybrid_MJ": "MJ", "tau_meas_s": "s", "tau_98_s": "s",
     "tau_89_s": "s", "T_avg_model_keV": "keV", "Te0_model_keV": "keV", "P_ohm_model_MW": "MW",
     "f_greenwald": "", "troyon": "", "kink": "", "worst_limit": "", "steady": "", "hmode_model": "",
-    "binding": "", "H98": "", "H89": "", "H_learned": "",
+    "binding": "", "H98": "", "H89": "", "H_learned": "", "in_distribution": "",
     "n_steady": "", "H98_median": "", "H89_median": "", "peak_limit_fraction": "", "peak_limit_t_s": "s",
     "P_LH_median_MW": "MW", "P_loss_median_MW": "MW", "rmse_ln_tau_ipb98": "", "rmse_ln_tau_hybrid": "",
     "tau_correction_held_out": "", "eq_surrogate_held_out": "", "eq_surrogate_median_rel_l2": "",

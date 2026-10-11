@@ -276,3 +276,20 @@ def in_distribution(shot: dict, edits: list[Edit]) -> np.ndarray:
             v = np.asarray(shot[key], float)[None, :] * np.array([getattr(e, attr) for e in edits], float)[:, None]
             ok = ok & (v >= rng[key][0]) & (v <= rng[key][1])
     return ok
+
+
+def domain_bands(t_s, in_domain) -> list[list[float]]:
+    """[t0, t1] spans of the consecutive out-of-domain slices: the coordinates the UI shades.
+
+    Each run of False closes on its last slice — the convention the what-if panel draws — and an
+    all-in-domain trace answers [] (nothing to shade), so band presence/absence is the flags' own."""
+    t, ok = np.asarray(t_s, float), np.asarray(in_domain, bool)
+    bands: list[list[float]] = []
+    start = None
+    for i, o in enumerate(ok):
+        if not o and start is None:
+            start = i
+        if start is not None and (o or i == ok.size - 1):
+            bands.append([float(t[start]), float(t[i if not o else i - 1])])
+            start = None
+    return bands

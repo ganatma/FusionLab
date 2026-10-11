@@ -35,7 +35,9 @@ class MachineConfig:
     attribution: str               # provenance string carried on replay/USD payloads
     campaign_pattern: str          # regex the archive's campaign labels follow ("M9")
     usd_prim_root: str             # stage root prim for USD exports ("/MAST/...")
-    te_display_range: tuple[float, float]  # UI/USD Te colour range [keV]
+    reconstruction_name: str       # what the archive calls its equilibrium reconstructions ("EFIT")
+    te_display_range: tuple[float, float]  # 3D plasma (vessel3d) Te colour range [keV]
+    te_usd_ramp_max_kev: float    # USD export Te->colour ramp ceiling [keV] (was usd_export.TE_RAMP_MAX_KEV)
     warmup_shot: str | None        # shot loaded at server start to warm the caches
     clean_limits: CleanLimits      # catalog-filter thresholds
     unit_sanity: tuple[tuple[str, float, float], ...] = ()  # (field, lo, hi) mid-shot unit guards
@@ -48,7 +50,9 @@ MAST_CONFIG = MachineConfig(
     attribution="MAST data: UKAEA FAIR-MAST (mastapp.site), CC BY-SA 4.0",
     campaign_pattern=r"M\d+",
     usd_prim_root="/MAST",
+    reconstruction_name="EFIT",
     te_display_range=(0.2, 1.4),
+    te_usd_ramp_max_kev=1.5,
     warmup_shot="30166",
     clean_limits=CleanLimits(tau_E_max_s=0.5, kappa_min=1.2, a_min_m=0.3),
     unit_sanity=(

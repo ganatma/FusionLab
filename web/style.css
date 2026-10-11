@@ -34,7 +34,7 @@ h1 .dim { font-weight:400; letter-spacing:.06em; }
 section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 #cmdk { flex:none; padding:4px 8px; }
 
-/* layout (sandbox + database tabs) */
+/* layout (Explore + Compare workspaces) */
 .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); align-items:start; }
 .grid.tight { gap:8px; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); }
 .panel { background:var(--panel); border:1px solid var(--line); padding:14px 16px; }
@@ -93,9 +93,9 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 
 /* strip charts: shared time axis, label left, live value right */
 .strips { flex:1 1 0; min-height:0; display:grid; grid-template-rows:1.6fr 1fr 1fr 1.25fr; }
-.strips.cmp-on { grid-template-rows:1.6fr 1fr 1fr 1.25fr 1.1fr; }   /* + the ΔW difference strip (A2) */
 .strip { position:relative; min-height:0; border-top:1px solid var(--line); }
 .strip:first-child { border-top:0; }
+#cp-strips .strip { height:210px; }   /* the Compare workspace's read strips: fixed height, the panel scrolls */
 .strip-label, .strip-val { position:absolute; top:2px; z-index:2; font:600 11px/1.3 var(--mono); pointer-events:none; }
 .strip-label { left:44px; color:var(--muted); }
 .strip-val { right:4px; width:58px; text-align:right; color:var(--fg); font-variant-numeric:tabular-nums; }

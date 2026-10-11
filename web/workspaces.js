@@ -4,9 +4,9 @@
 // Everything else (header clicks, guided-study steps, the agent) navigates through showTab()/
 // navigate() and lands here. Landing workspace: last visited, else the welcome-modal pick, else
 // Replay. Legacy entry points keep working: '#sandbox' (the old explore deep link — guide.js keys
-// its lab-mode decision off that literal, so it is not canonicalized) and '?shot=/?compare=' query
-// deep links (replay.js mounts them from its own init; the router only makes the Replay room
-// visible when they are present).
+// its lab-mode decision off that literal, so it is not canonicalized) and the '?shot=/?compare='
+// query deep links, which replay.js canonicalizes into the hash grammar on init (?shot= → Replay,
+// ?compare= → Compare, where the comparison reads now).
 (() => {
   'use strict';
 
@@ -33,7 +33,8 @@
 
   function landingWorkspace() {
     const q = new URLSearchParams(location.search);
-    if (q.get('shot') || q.get('compare')) return 'replay';   // legacy deep links replay on the Replay room
+    if (q.get('shot')) return 'replay';       // legacy deep links: a shot replays on the Replay room,
+    if (q.get('compare')) return 'compare';   // a compared set reads on the Compare workspace
     return normalize(store.get(LAST_KEY)) || normalize(store.get(PICK_KEY)) || 'replay';
   }
 
@@ -59,7 +60,7 @@
       const ref = Number(new URLSearchParams(search).get('ref')) || null;
       let ids = param.split(',').map(Number).filter((n) => n > 0);
       if (ref && ids.includes(ref)) ids = [ref].concat(ids.filter((n) => n !== ref));   // the first id is the reference
-      if (ids.length >= 2) F.replay.compare(ids);
+      if (ids.length >= 1) F.replay.compare(ids);   // a one-id link preloads the reference; the bar prompts for more
     },
     explore() {},   // static section; app.js owns its controls
   };

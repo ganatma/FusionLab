@@ -27,6 +27,7 @@
         <span class="mono" id="rp-tlabel">–</span>
         <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
         <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
+        <button type="button" id="rp-csv" class="tool" title="Take-away export: every measured, model, learned and computed number this replay shows, one CSV row per slice and quantity, each labelled with its provenance. Opens in Excel, pandas or a notebook.">↓ CSV export</button>
         <span class="status" id="rp-compute" title="Compute status">…</span>
       </div>
 
@@ -178,6 +179,25 @@
 
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
   const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
+
+  // Take-away CSV download (FEAT-1): fetch the export route, then hand the blob to the browser the way
+  // the USD stage does. The server names the file via Content-Disposition; `name` is only the fallback.
+  async function dlExport(url, name, btn) {
+    btn?.setAttribute('aria-busy', 'true');
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`export failed: ${r.status}`);
+      const blob = await r.blob();
+      const file = (r.headers.get('content-disposition') || '').match(/filename="?(.+?)"?(;|$)/)?.[1] ?? name;
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file });
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.error('CSV export failed:', e);
+    } finally {
+      btn?.removeAttribute('aria-busy');
+    }
+  }
   const scale = (a, k) => a.map(v => v === null ? null : v * k);
 
   function gauge(id, v) {
@@ -226,6 +246,11 @@
       } finally {
         $('rp-usd').removeAttribute('aria-busy');
       }
+    });
+    // Take-away export (FEAT-1): the replay bundle's own numbers as a CSV, every row labelled with its
+    // provenance so derived quantities stay honest outside the app.
+    $('rp-csv').addEventListener('click', () => {
+      if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'));
     });
     const hintSeen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
     const seen = hintSeen;
@@ -1080,6 +1105,7 @@
       `<span class="cmp-title">Compare ${readyN}/${n}</span><span class="cmp-chips">${chips}</span>`
       + `<span class="cmp-actions">${fetching ? '<button type="button" class="tool" data-act="cancel">Cancel</button>' : ''}`
       + `${failed.length ? '<button type="button" class="tool" data-act="retry">Retry failed</button>' : ''}`
+      + `${readyN && !fetching ? '<button type="button" class="tool" data-act="export" title="Take-away export of every ready shot: one CSV, one row per shot, slice and quantity, each labelled with its provenance.">↓ CSV export</button>' : ''}`
       + '<button type="button" class="tool" data-act="exit">Exit compare</button></span>'
       + (n < 2 ? '<span class="cmp-note">Pick 2–6 shots — tick them in <button type="button" class="tool" data-act="search">the catalog</button> and they join this compare.</span>'
                : `<div class="cmp-errs">${errs}</div>`)
@@ -1094,6 +1120,10 @@
     if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
     if (b.dataset.act === 'search') return window.FusionLab.showTab('db');
+    if (b.dataset.act === 'export') {   // every ready shot, reference first (cmp.ids order)
+      const ids = cmpReadyIds();
+      return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b);
+    }
     if (b.dataset.retry) {
       const id = +b.dataset.retry;
       cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();

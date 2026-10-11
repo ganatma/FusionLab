@@ -1,9 +1,10 @@
-"""Replay routes: real MAST shots (FAIR-MAST cache) served beside the physics model."""
+"""Replay routes: shots from the data seam — the FAIR-MAST archive and imported bundles — served beside the physics model."""
 
 from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import os
 import re
@@ -12,7 +13,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from zarr.errors import GroupNotFoundError
 
@@ -25,6 +26,8 @@ from fusionlab.compute.status import (
     run_task,
     run_task_async,
 )
+from fusionlab.data import sources
+from fusionlab.data.bundle import SPEC, BundleValidationError
 from fusionlab.physics import (
     BETA_N_LIMIT,
     LIMIT_NAMES,
@@ -49,6 +52,8 @@ def _j(a, nd=4):
     a = np.asarray(a)
     if a.dtype == bool or a.dtype.kind in "iu":
         return a.tolist()
+    if a.dtype.kind == "U":   # string ids / campaigns (imported catalogs)
+        return a.tolist()
     a = np.round(a.astype(float), nd)
     return np.where(np.isfinite(a), a, None).tolist()
 
@@ -59,17 +64,34 @@ def _shot_cached(shot_id: int) -> dict:
 
 
 # One archive fetch per shot id, however many requests want it: compare fans out over ids in parallel.
-_inflight: dict[int, dict] = {}
+_inflight: dict[str, dict] = {}
 _inflight_lock = threading.Lock()
 _FETCH_WAIT_S = 600   # a fetch takes seconds to minutes; a waiter gives up and asks the client to retry
 
 
-def _shot(shot_id: int) -> dict:
-    """A cached shot from the process cache; an uncached catalog shot through load_shot()'s fetch-and-cache path."""
-    if shot_id in mast.cached_shots():
-        return _shot_cached(shot_id)
-    if not bool(np.any(_catalog()["shot_id"] == shot_id)):
-        raise HTTPException(404, f"shot {shot_id} is not in the MAST catalog (data/mast_db.npz)")
+def _shot(shot_id: str) -> tuple[dict, sources.DataSource]:
+    """A shot bundle and the source that served it. An imported-bundle id (anything that is not a
+    plain shot number) resolves through the user-file source; shot numbers go to the archive —
+    cached shots from the process cache, uncached catalog shots through load_shot()'s
+    fetch-and-cache path. Returns the source too, so routes follow its machine config (attribution,
+    USD naming, isotope) instead of assuming MAST."""
+    shot_id = str(shot_id)
+    if not shot_id.isdigit():
+        if not sources.valid_bundle_id(shot_id):
+            raise HTTPException(404, f"shot id {shot_id!r} is neither a shot number nor a well-formed bundle id")
+        src = sources.get_source("user-file")
+        try:
+            return src.load_shot(shot_id), src
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e)) from e
+        except BundleValidationError as e:
+            raise HTTPException(400, f"the bundle does not satisfy the ShotBundle v1 contract: {e}") from e
+    if shot_id in {str(i) for i in mast.cached_shots()}:
+        return _shot_cached(int(shot_id)), sources.get_source("fair-mast")
+    cat_src = sources.get_source()   # membership is asked of the configured source's own catalog
+    if not bool(np.any(_catalog(cat_src.name)["shot_id"] == int(shot_id))):
+        tail = " (data/mast_db.npz)" if cat_src.name == "fair-mast" else ""
+        raise HTTPException(404, f"shot {shot_id} is not in the {cat_src.name} catalog{tail}")
     with _inflight_lock:
         job = _inflight.get(shot_id)
         if job is None:
@@ -86,7 +108,7 @@ def _shot(shot_id: int) -> dict:
             raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST: {job['err']}")
     else:
         try:
-            mast.load_shot(shot_id)   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
+            mast.load_shot(int(shot_id))   # fetches from S3 + REST, writes the local cache atomically (fusionlab.mast)
         except GroupNotFoundError as err:
             job["err"] = "unpublished"   # waiters answer with the same 404, not a 502
             raise HTTPException(
@@ -99,24 +121,38 @@ def _shot(shot_id: int) -> dict:
             with _inflight_lock:
                 _inflight.pop(shot_id, None)
             job["done"].set()
-    if shot_id in mast.cached_shots():
-        return _shot_cached(shot_id)
+    if shot_id in {str(i) for i in mast.cached_shots()}:
+        return _shot_cached(int(shot_id)), sources.get_source("fair-mast")
     raise HTTPException(502, f"shot {shot_id} could not be fetched from FAIR-MAST")
+
+
+def _shot_row(s: dict, source: str) -> dict:
+    """One /shots entry: the bundle's logbook meta plus the picker's scalars, tagged with its source."""
+    return {**s["meta"], "source": source, "n_slices": int(s["t_s"].size), "t_start_s": float(s["t_s"][0]),
+            "t_end_s": float(s["t_s"][-1]), "Ip_max_MA": round(float(np.nanmax(s["Ip_MA"])), 3),
+            "P_nbi_max_MW": round(float(np.nanmax(s["P_nbi_MW"])), 2)}
 
 
 @router.get("/shots")
 def shots():
-    """Cached shots with their logbook text. Uncached catalog shots are fetched on demand by /replay/{id}."""
+    """Cached shots with their logbook text: the archive's cache plus any imported bundles.
+    Uncached catalog shots are fetched on demand by /replay/{id}."""
     out = []
     for sid in mast.cached_shots():
-        s = _shot(sid)
-        out.append({**s["meta"], "n_slices": int(s["t_s"].size), "t_start_s": float(s["t_s"][0]),
-                    "t_end_s": float(s["t_s"][-1]), "Ip_max_MA": round(float(np.nanmax(s["Ip_MA"])), 3),
-                    "P_nbi_max_MW": round(float(np.nanmax(s["P_nbi_MW"])), 2)})
+        s, _ = _shot(str(sid))
+        out.append(_shot_row(s, "fair-mast"))
+    src = sources.get_source("user-file")
+    for sid in src.cached_shots():
+        out.append(_shot_row(src.load_shot(sid), "user-file"))
     return {"shots": out, "attribution": ATTRIBUTION}
 
 
-def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
+def _attribution(s: dict, src: sources.DataSource) -> str:
+    """The bundle's own attribution when it carries one; the source machine's otherwise."""
+    return str(s["meta"].get("attribution") or src.config.attribution)
+
+
+def _replay_bundle(shot_id: str, H: float = 1.0) -> dict:
     """The full replay response: measured traces, model traces on the same time base, limits, geometry.
     /export serves the very same dict, so exported values equal replayed values by construction.
 
@@ -124,8 +160,9 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
     without equilibrium reconstructions replays its traces with "equilibrium_absent" set instead of
     failing the route.
     """
-    s = _shot(shot_id)
-    r = replay(s, H=H, config=mast.CONFIG)
+    shot_id = str(shot_id)   # archive callers still pass the shot number as an int
+    s, src = _shot(shot_id)
+    r = replay(s, H=H, config=src.config)
     r["in_distribution"] = in_distribution(s, [Edit()])[0]   # the virtual path's own guard, on the measured inputs
     summary = _summary(s, r)
     _add_hybrid(s, r, summary)
@@ -135,9 +172,9 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
                                    "p95_rel_l2": round(float(np.percentile(eq["rel_l2"], 95)), 4),
                                    "computed_on": eq.get("computed_on")}
     payload = {
-        "meta": s["meta"], "attribution": ATTRIBUTION, "limit_names": LIMIT_NAMES, "summary": summary,
+        "meta": s["meta"], "attribution": _attribution(s, src), "limit_names": LIMIT_NAMES, "summary": summary,
         # The archive's own bookkeeping (FEAT-3): the abort flag the limit panel overlays as context.
-        "archive": _archive_flags(shot_id),
+        "archive": _archive_flags(shot_id, src.name),
         "measured": {k: _j(s[k]) for k in _TRACES if k in s},
         "model": {k: _j(v) for k, v in r.items()},
         "lcfs": {"R": _j(s["lcfs_R"], 3), "Z": _j(s["lcfs_Z"], 3)} if "lcfs_R" in s else None,
@@ -154,14 +191,14 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
 
 
 @router.get("/replay/{shot_id}")
-async def replay_shot(shot_id: int, H: float = 1.0):
+async def replay_shot(shot_id: str, H: float = 1.0):
     """Measured traces, model traces on the same time base, limits, and the geometry to draw the shot."""
     return await run_compute_async(partial(_replay_bundle, shot_id, H))
 
 
-def _replay_psi_slice(shot_id: int, i: int) -> dict:
+def _replay_psi_slice(shot_id: str, i: int) -> dict:
     """One psi slice's response body — the blocking part the async route below runs on the compute pool."""
-    s = _shot(shot_id)
+    s, _ = _shot(shot_id)
     if "psi_n" not in s:
         raise HTTPException(404, f"shot {shot_id}'s bundle has no equilibrium reconstruction (psi)")
     if not 0 <= i < s["t_s"].size:
@@ -177,13 +214,13 @@ def _replay_psi_slice(shot_id: int, i: int) -> dict:
 
 
 @router.get("/replay/{shot_id}/psi/{i}")
-async def replay_psi(shot_id: int, i: int):
+async def replay_psi(shot_id: str, i: int):
     """Normalised poloidal flux (0 axis, 1 separatrix) on the EFIT grid for one time slice, rows = Z."""
     return await run_compute_async(partial(_replay_psi_slice, shot_id, i))
 
 
 @router.post("/replay/{shot_id}/usd")
-def replay_usd(shot_id: int, fmt: str = "usdc"):
+def replay_usd(shot_id: str, fmt: str = "usdc"):
     """OpenUSD export (Omniverse-compatible): vessel, PF coils and the plasma boundary time-sampled over the shot.
 
     POST, not GET: the export recomputes the stage and writes out/ on every hit — a state-changing
@@ -191,18 +228,19 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
     from fusionlab.usd_export import FORMATS, export_shot
     if f".{fmt}" not in FORMATS:
         raise HTTPException(422, f"fmt must be one of {sorted(x.lstrip('.') for x in FORMATS)}")
-    s = _shot(shot_id)
+    s, src = _shot(shot_id)
     if "lcfs_R" not in s:   # the plasma boundary is the one geometry export_shot requires
         raise HTTPException(422, f"shot {shot_id}'s bundle has no equilibrium boundary (lcfs); USD export needs it")
-    out = Path(__file__).resolve().parent.parent / "out" / f"mast_{shot_id}.{fmt}"
+    stem = src.config.usd_prim_root.lstrip("/").lower() or "bundle"   # mast_30420.usdc, user_1.usdc, ...
+    out = Path(__file__).resolve().parent.parent / "out" / f"{stem}_{shot_id}.{fmt}"
     tmp = out.with_name(f".{out.stem}.tmp{os.getpid()}{out.suffix}")   # dotfile, pid-unique, extension kept (export_shot validates the suffix)
     try:
         try:   # with Warp-traced field lines when Warp can run here; the plain stage otherwise
             from fusionlab.fieldlines import export_shot_with_field_lines
-            export_shot_with_field_lines(s, tmp)
+            export_shot_with_field_lines(s, tmp, machine=src.config)
         except Exception:
             logger.warning("USD field-line export failed; falling back to plain stage", exc_info=True)
-            export_shot(s, tmp)
+            export_shot(s, tmp, machine=src.config)
         os.replace(tmp, out)   # atomic same-directory publish: readers only ever see a complete stage
     except Exception:
         tmp.unlink(missing_ok=True)
@@ -211,9 +249,9 @@ def replay_usd(shot_id: int, fmt: str = "usdc"):
 
 
 @lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
-def _lines(shot_id: int):
+def _lines(shot_id: str):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""
-    s = _shot(shot_id)
+    s, _ = _shot(shot_id)
     out = run_task("trace_fieldlines", {"shot": s})
     where = provenance("trace_fieldlines").get("host")   # captured now: the cache keeps it honest
     pts, qc = out["pts"], out["q_check"]                    # (time, line, point, xyz)
@@ -222,10 +260,10 @@ def _lines(shot_id: int):
     return pts, q, qc["summary"], out["device"], out["psi_n_start"], where
 
 
-def _replay_fieldlines_slice(shot_id: int, i: int) -> dict:
+def _replay_fieldlines_slice(shot_id: str, i: int) -> dict:
     """One field-lines response body — the blocking part (a Warp trace through run_task) the async
     route below runs on the compute pool."""
-    s = _shot(shot_id)
+    s, _ = _shot(shot_id)
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
     if "psi_n" not in s:
@@ -242,7 +280,7 @@ def _replay_fieldlines_slice(shot_id: int, i: int) -> dict:
 
 
 @router.get("/replay/{shot_id}/fieldlines/{i}")
-async def replay_fieldlines(shot_id: int, i: int):
+async def replay_fieldlines(shot_id: str, i: int):
     """Field lines of the EFIT reconstruction at one time slice (axisymmetric; no islands or 3D fields)."""
     return await run_compute_async(partial(_replay_fieldlines_slice, shot_id, i))
 
@@ -257,10 +295,11 @@ def _eq_model():
 
 
 @lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
-def _eq_psi(shot_id: int):
+def _eq_psi(shot_id: str):
     """PhysicsNeMo reconstruction of psi from the magnetic sensors, every slice of the shot in one batch.
-    Normalised with EFIT's axis and boundary flux so the two maps share contour levels; error is on psi itself."""
-    s = _shot(shot_id)
+    Normalised with the equilibrium reconstruction's axis and boundary flux so the two maps share contour
+    levels; error is on psi itself."""
+    s = _shot(shot_id)[0]
     try:
         held_out = _eq_model()
         if held_out is None or "eq_inputs" not in s or "psi_n" not in s:
@@ -274,7 +313,8 @@ def _eq_psi(shot_id: int):
     def flat(a):
         return a.reshape(len(a), -1)
     rel = np.linalg.norm(flat(psi - psi_efit), axis=1) / np.linalg.norm(flat(psi_efit), axis=1)
-    return {"psi_n": (psi - ax) / (bd - ax), "rel_l2": rel, "held_out": shot_id in held_out,
+    return {"psi_n": (psi - ax) / (bd - ax), "rel_l2": rel,
+            "held_out": (int(shot_id) in held_out) if shot_id.isdigit() else False,
             "computed_on": provenance("run_eq_surrogate").get("host")}
 
 
@@ -306,7 +346,10 @@ def _add_hybrid(s: dict, r: dict, summary: dict) -> None:
     summary["learned_computed_on"] = provenance("run_surrogate_shot").get("host")
     r["H_learned"], r["W_hybrid_MJ"] = Hc, r["W_H_MJ"] * Hc
     m = run_task("model_metrics", {"model": "surrogate"})
-    summary["tau_correction_held_out"] = s["meta"]["shot_id"] // m.get("block_size", 100) in m.get("held_out_blocks", [])
+    sid = s["meta"]["shot_id"]
+    # Session-block held-out split is a MAST training artifact; imported ids are not block numbers.
+    summary["tau_correction_held_out"] = (
+        sid // m.get("block_size", 100) in m.get("held_out_blocks", []) if isinstance(sid, int) else False)
     ok = r["steady"] & np.isfinite(r["H98"]) & (r["H98"] > 0)
     if ok.any():
         def rms(a):
@@ -318,10 +361,10 @@ def _warm_up():
     compute_warm_up()   # the correction model (and torch) load here rather than on the first replay request
     if (warm := mast.CONFIG.warmup_shot) is not None:
         try:   # builds/loads the Warp kernels and traces the landing shot
-            _lines(int(warm))
+            _lines(warm)
         except Exception:
             logger.warning("warm-up field-line trace failed; the first replay request pays for it instead", exc_info=True)
-        _eq_psi(int(warm))
+        _eq_psi(warm)
 
 
 def start_warm_up():
@@ -351,12 +394,13 @@ async def surrogate_metrics():
         raise HTTPException(404, "no trained model: run `make train`") from None
 
 
-@lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
-def _db_view() -> dict:
+@lru_cache(maxsize=2)   # per source: a different FUSIONLAB_DATA_SOURCE takes a fresh entry (or a restart)
+def _db_view(source: str) -> dict:
     """The usable shot table in operating-space coordinates, with IPB98(y,2) evaluated on every row at once."""
-    c = mast.clean_db(mast.load_db())
+    src = sources.get_source(source)
+    c = src.clean_db(src.load_db())
     g = {"R": c["R_m"], "a": c["a_m"], "kappa": c["V_m3"] / volume(c["R_m"], c["a_m"], 1.0)}
-    C, alpha = tau_coeff_H(g, c["Ip_MA"], c["B_T"], c["n_e20"], 1.0, mast.CONFIG.isotope_md)
+    C, alpha = tau_coeff_H(g, c["Ip_MA"], c["B_T"], c["n_e20"], 1.0, src.config.isotope_md)
     beta_N = c["beta_t_pct"] * c["a_m"] * c["B_T"] / c["Ip_MA"]
     return {"shot_id": c["shot_id"], "campaign": c["campaign"], "P_nbi_MW": c["P_nbi_MW"], "Ip_MA": c["Ip_MA"],
             "f_greenwald": c["n_e20"] / (c["Ip_MA"] / (np.pi * c["a_m"] ** 2)), "q95": c["q95"], "beta_N": beta_N,
@@ -366,10 +410,13 @@ def _db_view() -> dict:
 
 @router.get("/db")
 def db():
-    """~6k real MAST shots at peak current, for the operating-space scatter."""
-    v = _db_view()
-    return {"n": int(v["shot_id"].size), "attribution": ATTRIBUTION, "beta_N_limit": BETA_N_LIMIT, "q95_limit": 2.0,
-            "H98_median": round(float(np.nanmedian(v["H98"])), 3), "columns": {k: _j(a) for k, a in v.items()}}
+    """The configured source's usable shots at peak current, for the operating-space scatter."""
+    src = sources.get_source()
+    v = _db_view(src.name)
+    n = int(v["shot_id"].size)
+    return {"n": n, "attribution": src.config.attribution, "beta_N_limit": BETA_N_LIMIT, "q95_limit": 2.0,
+            "H98_median": round(float(np.nanmedian(v["H98"])), 3) if n else None,
+            "columns": {k: _j(a) for k, a in v.items()}}
 
 
 # ---- catalog search over the full shot table (the db view above is the cleaned analysis subset)
@@ -379,18 +426,22 @@ _ROW_FIELDS = ("shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_oh
                "t_ipmax_s", "useful", "abort", "mode_derived")
 
 
-@lru_cache(maxsize=1)
-def _catalog() -> dict:
-    """The full FAIR-MAST shot table (data/mast_db.npz), read once per process and shared by every search."""
-    return mast.load_db()
+@lru_cache(maxsize=2)
+def _catalog(source: str) -> dict:
+    """The configured source's full shot table (data/mast_db.npz for the archive), read once per
+    process per source and shared by every search."""
+    return sources.get_source(source).load_db()
 
 
-def _archive_flags(shot_id: int) -> dict[str, bool | None]:
+def _archive_flags(shot_id: str, source: str) -> dict[str, bool | None]:
     """The archive's own bookkeeping for one shot — the catalog's cpf_useful/cpf_abort columns.
-    None where the row is missing or a flag is NaN (the archive never graded it): the UI degrades
-    silently, never invents a flag. These are archive bookkeeping, not physics."""
-    c = _catalog()
-    hits = np.nonzero(c["shot_id"] == shot_id)[0]
+    None where the row is missing or a flag is NaN (the archive never graded it), and for
+    imported bundles (they carry no archive bookkeeping): the UI degrades silently, never
+    invents a flag. These are archive bookkeeping, not physics."""
+    if not shot_id.isdigit():
+        return {"useful": None, "abort": None}
+    c = _catalog(source)
+    hits = np.nonzero(c["shot_id"] == int(shot_id))[0]
     if not hits.size:
         return {"useful": None, "abort": None}
     def flag(col: str) -> bool | None:
@@ -406,6 +457,8 @@ def _q_mask(c: dict, q: str | None) -> np.ndarray | None:
     if not (m := re.fullmatch(r"(\d{1,6})(?:-(\d{1,6}))?", q.strip())):
         raise HTTPException(422, "q must be a shot number or a range like 30400-30500")
     lo, hi = int(m.group(1)), m.group(2)
+    if c["shot_id"].dtype.kind not in "iu":   # imported catalogs carry free-form string ids
+        raise HTTPException(422, "q filters shot numbers; the imported catalog's ids are not numbers — filter by campaign or ranges instead")
     if hi is not None:
         if int(hi) < lo:
             raise HTTPException(422, "q range must go from the lower shot number to the higher")
@@ -467,7 +520,7 @@ def db_search(q: str | None = None, campaign: str | None = None,
               useful: bool | None = None, abort: bool | None = None,
               mode: str | None = None,   # derived regime flag ('H'/'L'), never an archive field
               limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0)) -> dict:
-    """Vectorized filter over the full FAIR-MAST catalog (15,969 rows), beside /db's cleaned analysis view.
+    """Vectorized filter over the configured source's full shot table, beside /db's cleaned analysis view.
 
     Filters combine (AND); the UI mirrors them into the URL so any result set is shareable. total counts
     the whole match set, independent of the limit/offset window. Units are the repo's: MA, T, MW,
@@ -475,7 +528,8 @@ def db_search(q: str | None = None, campaign: str | None = None,
     (docs/PHYSICS.md): 'H' or 'L'; rows the scalars cannot flag stay unknown and match neither.
     Derived, never measured.
     """
-    c = _catalog()
+    src = sources.get_source()
+    c = _catalog(src.name)
     mask = np.ones(c["shot_id"].size, dtype=bool)
     for m in (_q_mask(c, q), _campaign_mask(c, campaign),
               _range_mask(c, "Ip_MA", ip_min, ip_max), _range_mask(c, "B_T", bt_min, bt_max),
@@ -492,7 +546,8 @@ def db_search(q: str | None = None, campaign: str | None = None,
     idx = idx[np.argsort(c["shot_id"][idx], kind="stable")][offset:offset + limit]   # ascending ids: stable pages
     cols = {k: _j(c[k][idx]) for k in _ROW_FIELDS}
     rows = [dict(zip(_ROW_FIELDS, row, strict=True)) for row in zip(*cols.values(), strict=True)]
-    return {"total": total, "limit": limit, "offset": offset, "rows": rows, "attribution": ATTRIBUTION}
+    return {"total": total, "limit": limit, "offset": offset, "rows": rows,
+            "attribution": src.config.attribution}
 
 
 # ---- take-away export (FEAT-1): the replay bundle's numbers, downloadable with their provenance.
@@ -585,16 +640,18 @@ def _export_rows(bundles: list[dict]) -> list[dict]:
     return rows
 
 
-def _export_ids(shots: str) -> list[int]:
-    """Comma-separated shot numbers for the compare export: deduped, request order kept, capped —
-    each id is a full replay, the cap keeps an accidental URL cheap."""
-    ids: list[int] = []
+def _export_ids(shots: str) -> list[str]:
+    """Comma-separated shot ids for the compare export — archive shot numbers or imported-bundle
+    ids: deduped, request order kept, capped (each id is a full replay, the cap keeps an accidental
+    URL cheap)."""
+    ids: list[str] = []
     for part in shots.split(","):
         part = part.strip()
-        if not part.isdigit():
-            raise HTTPException(422, "shots must be comma-separated shot numbers, e.g. shots=30166,30420")
-        if (i := int(part)) not in ids:
-            ids.append(i)
+        if not sources.valid_bundle_id(part):   # covers plain shot numbers and bundle ids
+            raise HTTPException(422, "shots must be comma-separated shot numbers or imported-bundle ids, "
+                                     "e.g. shots=30166,30420 or shots=user_bundle_1")
+        if part not in ids:
+            ids.append(part)
     if len(ids) > _EXPORT_MAX_SHOTS:
         raise HTTPException(422, f"export covers at most {_EXPORT_MAX_SHOTS} shots — the compare view's limit")
     return ids
@@ -616,13 +673,13 @@ def _export(bundles: list[dict], fmt: str, H: float):
     raise HTTPException(422, 'fmt must be "csv" or "json"')
 
 
-def _replay_bundles(shot_ids: list[int], H: float) -> list[dict]:
+def _replay_bundles(shot_ids: list[str], H: float) -> list[dict]:
     """Full replay bundles in request order — one blocking call for the compute pool."""
     return [_replay_bundle(i, H) for i in shot_ids]
 
 
 @router.get("/export/{shot_id}")
-async def export_shot(shot_id: int, H: float = 1.0, fmt: str = "csv"):
+async def export_shot(shot_id: str, H: float = 1.0, fmt: str = "csv"):
     """Take-away export of one shot's derived quantities: every measured trace, model trace and
     summary number the replay serves, as a tidy CSV (one row per shot/slice/quantity, each row
     labelled with its provenance and unit) or as JSON (the full replay bundle + the provenance map).
@@ -637,3 +694,57 @@ async def export_compare(shots: str, H: float = 1.0, fmt: str = "csv"):
     a `shot_id` column so any spreadsheet or notebook can group them. Order follows the request."""
     bundles = await run_compute_async(partial(_replay_bundles, _export_ids(shots), H))
     return _export(bundles, fmt, H)
+
+
+# ---- bring-your-own-data (DATA-2): imported shot bundles replay, compare and export beside the archive.
+
+@router.post("/data/bundles/{shot_id}")
+def upload_bundle(shot_id: str, file: UploadFile | None = File(None),
+                  meta_json: str | None = Form(None)) -> dict:
+    """Import a shot so it replays, compares and exports beside the archive's cache.
+
+    Two shapes on one route: a multipart POST with a `file` field imports an npz bundle (the
+    ShotBundle v1 contract, docs/DATA_CONTRACT.md) — validated in full before anything is written,
+    so a malformed upload fails with the first bad field named and leaves no partial file. The id
+    must be letters/digits/dots/dashes/underscores, not a bare shot number (those are the
+    archive's). A bare POST (no file) on a shot number imports that archive shot through the
+    loader's cache-then-S3 path — the UI's self-import when a catalog shot is not cached yet.
+    The optional meta_json form field overrides/extends the bundle's own meta."""
+    if file is None or not file.filename:
+        if file is None and shot_id.isdigit():
+            s, src = _shot(shot_id)   # the same fetch-and-cache path a replay takes
+            return {**_shot_row(s, src.name), "equilibrium": "psi_R" in s and "lcfs_R" in s,
+                    "fields": sorted(k for k in SPEC if k in s), "attribution": _attribution(s, src)}
+        raise HTTPException(422, "send the bundle as multipart form data (field name: file); a bare "
+                                 "POST imports an archive shot number")
+    src = sources.get_source("user-file")
+    raw = file.file.read()
+    meta = None
+    if meta_json is not None:
+        try:
+            meta = json.loads(meta_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(422, f"meta_json is not valid JSON: {e}") from e
+        if not isinstance(meta, dict):
+            raise HTTPException(422, "meta_json must be a JSON object")
+    try:
+        s = src.import_bundle(shot_id, raw, meta)
+    except BundleValidationError as e:   # contract violations: the first bad field, named
+        raise HTTPException(400, f"the bundle does not satisfy the ShotBundle v1 contract: {e}") from e
+    except ValueError as e:             # bad id shape or over the size cap
+        raise HTTPException(422, str(e)) from e
+    return {**_shot_row(s, src.name), "equilibrium": "psi_R" in s and "lcfs_R" in s,
+            "fields": sorted(k for k in SPEC if k in s), "attribution": _attribution(s, src)}
+
+
+@router.delete("/data/bundles/{shot_id}")
+def delete_bundle(shot_id: str) -> dict:
+    """Remove an imported bundle. The archive's cache is managed by the loader, not this route."""
+    src = sources.get_source("user-file")
+    if shot_id.isdigit() or not sources.valid_bundle_id(shot_id):
+        raise HTTPException(404, f"no imported bundle named {shot_id!r}")
+    f = src.bundles_dir / f"{shot_id}.npz"
+    if not f.is_file():
+        raise HTTPException(404, f"no imported bundle named {shot_id!r}")
+    f.unlink()
+    return {"deleted": shot_id}

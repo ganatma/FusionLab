@@ -67,7 +67,11 @@ def _benchmark(inputs: dict, progress: Callable[[dict], None] | None = None) -> 
     what progress subscribers see between sections (the same events the worker's SSE emits)."""
     from fusionlab import bench  # lazy: pulls torch via surrogate
 
-    return bench.timings(profile=inputs.get("profile", "quick"), progress=progress)
+    kwargs: dict[str, Any] = {"profile": inputs.get("profile", "quick")}
+    for k in ("source", "shot"):    # the data seam: which bundle to benchmark (None: configured)
+        if inputs.get(k) is not None:
+            kwargs[k] = inputs[k]
+    return bench.timings(progress=progress, **kwargs)
 
 
 # Task bodies take the inputs dict. Bodies that report section progress (declared here) additionally

@@ -48,10 +48,19 @@ class DataSource(Protocol):
 
     name: str
     config: MachineConfig
+    bundles_dir: Path   # where this source's bundle files live (an archive: its cache directory)
 
     def load_shot(self, shot_id: str) -> dict: ...
     def load_db(self) -> dict: ...
     def cached_shots(self) -> list[str]: ...
+    def clean_db(self, db: dict) -> dict:
+        """Rows usable for confinement analysis — thresholds from this source's machine config."""
+        ...
+
+    def import_bundle(self, shot_id: str, raw: bytes, meta: dict | None = None) -> dict:
+        """Validate raw npz bytes against the ShotBundle v1 contract and publish atomically
+        (no partial file on a rejected bundle). Read-only archive sources refuse."""
+        ...
 
 
 class FairMastSource:
@@ -59,6 +68,13 @@ class FairMastSource:
 
     name = "fair-mast"
     config: MachineConfig = mast.CONFIG
+
+    bundles_dir = reader.SHOTS   # the archive's own cache; imports never land here
+
+    def import_bundle(self, shot_id: str, raw: bytes, meta: dict | None = None) -> dict:
+        """The archive is read-only: bundles enter the app through a user-file source."""
+        raise TypeError(f"source {self.name!r} is a read-only archive — "
+                        "import bundles through a user-file source (the upload route)")
 
     def load_shot(self, shot_id: str) -> dict:
         return mast.load_shot(int(shot_id))
@@ -68,6 +84,9 @@ class FairMastSource:
 
     def load_db(self) -> dict:
         return mast.load_db()
+
+    def clean_db(self, db: dict) -> dict:
+        return mast.clean_db(db)
 
 
 # ---------------------------------------------------------------- imported bundles (user-file)
@@ -186,6 +205,9 @@ class UserFileSource:
         if not valid_bundle_id(shot_id):
             raise ValueError(f"bundle id {shot_id!r} is not importable: use letters, digits, dots, "
                              "dashes or underscores, starting with a letter or digit")
+        if shot_id.isdigit():   # bare shot numbers are the archive's - imports never shadow them
+            raise ValueError(f"bundle id {shot_id!r} is a bare shot number, which the archive owns - "
+                             "name the import something else (e.g. {shot_id}_local)")
         if len(raw) > MAX_BUNDLE_BYTES:
             raise ValueError(f"bundle exceeds the {MAX_BUNDLE_BYTES} byte import cap")
         target = self.bundles_dir / f"{shot_id}.npz"
@@ -231,6 +253,11 @@ class UserFileSource:
             }.items():
                 cols[k].append(v)
         return {k: np.asarray(v) for k, v in cols.items()}
+
+    def clean_db(self, db: dict) -> dict:
+        """The imported catalog is hand-curated; the source's clean_limits (default: no filtering)
+        is all that applies - never MAST's machine-calibrated thresholds."""
+        return reader.clean_db(db, limits=self.config.clean_limits)
 
 
 _SOURCES: dict[str, type] = {"fair-mast": FairMastSource, "user-file": UserFileSource}

@@ -391,6 +391,35 @@ def test_loopback_stream_on_an_unknown_job(worker_url):
     p.close()
 
 
+def test_loopback_progress_route_relays_remote_job_events(worker_url):
+    """HARN-1 end-to-end: run_task on a REAL remote worker while GET /compute/progress streams the
+    provider's SSE relay — the benchmark's queued/running/section/completed events arrive through
+    the app route (the path the replay UI consumes)."""
+    from fastapi.testclient import TestClient
+
+    from fusionlab import compute
+    from fusionlab.api import app
+    from fusionlab.compute import status
+
+    p = SshProvider(session=FakeSession(worker_url))
+    compute._provider = p
+    api = TestClient(app)
+    runner = threading.Thread(target=lambda: status.run_task("benchmark", {"profile": "quick"}))
+    runner.start()
+    try:
+        with api.stream("GET", "/compute/progress?task=benchmark") as r:
+            assert r.status_code == 200
+            body = b"".join(r.iter_raw()).decode()
+    finally:
+        runner.join(timeout=120)
+        compute._provider = None
+        status._reset_for_tests()
+        p.close()
+    assert "event: queued" in body and "event: running" in body
+    assert "event: progress" in body    # the benchmark's sections, relayed live from the worker
+    assert "event: completed" in body
+
+
 @needs_surrogate
 def test_loopback_upload_then_remote_failure_surfaces_cleanly(worker_url, tmp_path, monkeypatch):
     """The drift path end-to-end: local weights the worker lacks are uploaded for real, the job runs

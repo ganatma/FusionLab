@@ -128,3 +128,21 @@ def test_export_downloads_are_wired_into_the_served_js():
     dl = replay.split("async function dlExport", 1)[1].split("CSV export failed", 1)[0]
     assert "if (!r.ok) throw" in dl
     assert "aria-busy" in dl
+
+
+def test_job_progress_is_wired_into_the_served_js():
+    """HARN-1: the replay UI opens the SSE progress relay for a named task, renders the shared event
+    vocabulary, and closes the stream on terminal and native-end events — EventSource's auto-reconnect
+    must not spin against a route that ends after the terminal event. The benchmark control and the
+    slow field-line threshold wire the same watcher."""
+    replay = _served("replay.js")
+    watch = replay.split("function watchProgress")[1].split("const psiCache")[0]
+    assert "new EventSource(`/compute/progress?task=${encodeURIComponent(task)}`)" in watch
+    assert "es.addEventListener('progress'" in watch
+    assert "['completed', 'error', 'cancelled'].forEach(name => es.addEventListener(name, end))" in watch
+    native = watch.split("es.addEventListener('error'")[1]
+    assert "if (e.data) return;" in native.split("es.close()")[0]   # stream end closes; a job error event doesn't
+    assert 'id="rp-bench"' in replay
+    bench = replay.split("$('rp-bench').addEventListener")[1]
+    assert "watchProgress('benchmark')" in bench
+    assert "setTimeout(() => watchProgress('trace_fieldlines'), 1500)" in replay

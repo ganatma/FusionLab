@@ -322,7 +322,9 @@ def test_concurrent_requests_share_one_fetch(monkeypatch, tmp_path):
     out = []
 
     def hit():
-        out.append(api_replay.replay_shot(uncached)["meta"]["shot_id"])
+        # the async route shells out to this body on the compute pool; the concurrency under test
+        # lives here, so three threads call the body directly (HARN-4)
+        out.append(api_replay._replay_bundle(uncached)["meta"]["shot_id"])
 
     threads = [threading.Thread(target=hit) for _ in range(3)]
     for t in threads:

@@ -83,17 +83,18 @@ def compute_cancel(task: str):
 
 
 @app.post("/compute/benchmark")
-def compute_benchmark(profile: str = "quick"):
+async def compute_benchmark(profile: str = "quick"):
     """The measured-timings benchmark through the selected provider (the worker's `benchmark` task,
     with the local fallback) — the one named task that reports section progress. POST: it occupies
     the compute slot for its whole run, so it must not be triggerable by navigation or prefetch
-    (same reasoning as the USD export)."""
+    (same reasoning as the USD export). The body is awaited on the compute pool (HARN-4): the run
+    — remote or local — never pins a shared request-threadpool token."""
     from fusionlab.bench import PROFILES
     from fusionlab.compute import status
 
     if profile not in PROFILES:
         raise HTTPException(422, f"profile must be one of {sorted(PROFILES)}")
-    out = status.run_task("benchmark", {"profile": profile})
+    out = await status.run_task_async("benchmark", {"profile": profile})
     return {**out, "computed_on": status.provenance("benchmark").get("host")}
 
 

@@ -23,9 +23,10 @@ import json
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as ProbeTimeout
+from functools import partial
 from typing import Any
 
 from fusionlab.compute import get_provider, provider_name
@@ -185,6 +186,34 @@ def run_task(task: str, inputs: dict) -> Any:
     out = local.result(local.submit(task, inputs))
     _record_run(task, local)
     return out
+
+
+# ---------------------------------------------------------------- non-blocking dispatch (HARN-4)
+# Async routes await their compute bodies on this pool instead of the shared request threadpool:
+# a remote job's result() wait (up to DEFAULT_RESULT_TIMEOUT_S) used to pin one of the ~40 worker
+# tokens every sync endpoint shares, and a few long traces starved /health. One plain pool serves
+# whichever loop awaits it (uvicorn's, TestClient portals') — threads and queues need no event loop.
+COMPUTE_SLOTS = 8   # concurrent compute bodies; extra requests queue here, never on shared endpoints
+_task_pool = ThreadPoolExecutor(max_workers=COMPUTE_SLOTS, thread_name_prefix="fusionlab-compute-task")
+
+
+async def run_compute_async(fn: Callable[[], Any]) -> Any:
+    """One blocking compute body, awaited off the shared request threadpool (HARN-4).
+
+    A sync router has no choice but to hold its worker token for the whole response — the token a
+    remote result() poll keeps for its whole life is one /health and /db/search never get back.
+    Bodies awaited here run on the compute pool, so however many jobs wait, shared endpoints keep
+    answering. A cancelled request cannot stop a running thread: the body runs to completion and
+    its caches and provenance land as if the client had waited — the same semantics a sync
+    router's abandoned thread had.
+    """
+    return await asyncio.get_running_loop().run_in_executor(_task_pool, fn)
+
+
+async def run_task_async(task: str, inputs: dict) -> Any:
+    """run_task for async routes — the same provider selection, local fallback and provenance,
+    awaited off the shared request threadpool."""
+    return await run_compute_async(partial(run_task, task, inputs))
 
 
 async def progress_stream(task: str, *, wait_s: float | None = None,

@@ -33,11 +33,11 @@ from typing import Any
 import numpy as np
 from fastapi import HTTPException
 
-from fusionlab import mast, virtual
+from fusionlab import virtual
 from fusionlab.api import devices, simulate_point
 from fusionlab.api_replay import _replay_bundle, _shot, db_search, shots
-from fusionlab.data import sources
 from fusionlab.api_virtual import EditIn, VirtualIn, _virtual_shot_body, virtual_gate
+from fusionlab.data import sources
 from fusionlab.physics import DEVICES
 
 SEARCH_LIMIT = 200   # the tool's own cap; /db/search itself allows 1000 — the model works page-size

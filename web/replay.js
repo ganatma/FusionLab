@@ -494,7 +494,7 @@
     shot = next;
     psiCache.clear(); lineCache.clear(); linesNow.clear();
     const m = shot.meta, me = shot.measured, mo = shot.model, t = me.t_s, id = m.shot_id;
-    $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length} EFIT slices`;
+    $('rp-head').textContent = `${m.campaign || ''} · ${(m.timestamp || '').slice(0, 10)} · ${m.heating || ''} · ${t.length}${shot.psi_grid ? ' EFIT' : ''} slices`;
     $('rp-log').innerHTML =
       (m.preshot ? `<p><span class="muted">Before:</span> ${esc(m.preshot)}</p>` : '') +
       (m.postshot ? `<p><span class="muted">After:</span> ${esc(m.postshot)}</p>` : '');
@@ -565,11 +565,13 @@
       out.push(`Learned correction on this shot (${q.tau_correction_held_out ? 'its session was held out of training' : 'its session was in the training set, so this is not a test'}): scatter in ln τ<sub>E</sub> goes from ${fmt(q.rmse_ln_tau_ipb98)} with IPB98 to <b>${fmt(q.rmse_ln_tau_hybrid)}</b> with the correction${q.learned_computed_on ? ` (computed on ${esc(q.learned_computed_on)})` : ''}. ${q.rmse_ln_tau_hybrid > q.rmse_ln_tau_ipb98 ? 'Worse here: it was trained on one point per shot at peak current, and this shot sits outside that.' : ''}`);
     if ((s.meta.heating || '').toLowerCase() !== 'ohmic')
       out.push('Stored energy is EFIT total energy, which includes beam fast ions, so H98 reads high in beam-heated phases.');
+    if (s.equilibrium_absent)
+      out.push(`<b>${esc(s.equilibrium_absent)}</b>`);
     return out.map(p => `<p>${p}</p>`).join('');
   }
 
   function drawSection() {
-    const w = shot.wall, c = shot.coils, R = shot.psi_grid.R, Z = shot.psi_grid.Z;
+    const w = shot.wall, c = shot.coils, grid = shot.psi_grid, R = grid ? grid.R : [], Z = grid ? grid.Z : [];
     const traces = [
       { type: 'contour', x: R, y: Z, z: [[null]], name: 'ψ_N', showscale: false, hoverinfo: 'skip',
         contours: { start: 0.1, end: 1.0, size: 0.1, coloring: 'lines' }, line: { width: 1 },
@@ -616,8 +618,8 @@
     drawCursor(t);
 
     const n = $('rp-xs').data.length;   // LCFS and axis are always the last two traces
-    Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
-    Plotly.restyle('rp-xs', { x: [[me.R_mag_m[i]]], y: [[me.Z_mag_m[i]]] }, [n - 1]);
+    if (shot.lcfs) Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
+    if (me.R_mag_m) Plotly.restyle('rp-xs', { x: [[me.R_mag_m[i]]], y: [[me.Z_mag_m[i]]] }, [n - 1]);
     if (db) markDb(i);
     if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
     clearTimeout(psiTimer);

@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from fusionlab.data.machine import MAST_CONFIG, MachineConfig
+
 MU0 = 4e-7 * np.pi
 KEV_J = 1.602176634e-16
 E_DT_J = 17.59e6 * 1.602176634e-19  # 17.59 MeV per D-T reaction
@@ -259,15 +261,20 @@ def simulate(c: Controls | dict | None = None, **overrides) -> dict:
 LIMIT_NAMES = ("greenwald", "troyon", "kink")
 
 
-def replay(shot: dict, H=1.0, Zeff=2.0, M=M_D) -> dict:
+def replay(shot: dict, H=1.0, Zeff=2.0, M: float | None = None, config: MachineConfig = MAST_CONFIG) -> dict:
     """Confinement laws and operating limits evaluated on a measured shot, every time slice in one call.
 
-    Inputs are measurements (fusionlab.mast.load_shot): Ip, B, line-average n, heating power, shape.
-    The model answers "what stored energy would the scaling law give this plasma for the power it is
-    losing", the comparison behind H98 = tau_measured / tau_IPB98. It is a comparison with the
-    experiment, not a prediction of it. No alpha heating: MAST ran deuterium. `H` may be an array
+    Inputs are measurements (a shot bundle from the configured source, fusionlab.mast.load_shot):
+    Ip, B, line-average n, heating power, shape. The model answers "what stored energy would the
+    scaling law give this plasma for the power it is losing", the comparison behind H98 =
+    tau_measured / tau_IPB98. It is a comparison with the experiment, not a prediction of it.
+
+    The isotope mass M defaults to the source machine's configured value (MachineConfig.isotope_md,
+    2.0 = deuterium for MAST). MachineConfig.alpha_particles documents the no-alpha-heating case:
+    the source ran deuterium, so the model comparison carries no alpha term. `H` may be an array
     (one multiplier per slice), which is how a learned correction to IPB98 is applied.
     """
+    M = config.isotope_md if M is None else M
     R, a, V = shot["R_m"], shot["a_m"], shot["V_m3"]
     # IPB98(y,2) is defined with kappa_a = V / (2 pi^2 R a^2), not the separatrix elongation
     g = {"R": R, "a": a, "kappa": V / volume(R, a, 1.0)}

@@ -32,9 +32,10 @@ from pathlib import Path
 
 import numpy as np
 
+from fusionlab import mast
 from fusionlab.compute.status import capabilities as _compute_capabilities
 from fusionlab.compute.status import run_task
-from fusionlab.physics import BETA_N_LIMIT, M_D, tau_coeff_H, tau_coeff_L, volume
+from fusionlab.physics import BETA_N_LIMIT, tau_coeff_H, tau_coeff_L, volume
 
 MODELS = Path(__file__).resolve().parent.parent / "models"
 DT_S = 1e-3                 # integration step; EFIT slices are 5 ms apart and tau_E on MAST is 10-50 ms
@@ -176,9 +177,9 @@ def baseline(shot: dict, closure: str = "learned", dt: float = DT_S) -> dict:
 
     g = {"R": p["R_m"], "a": p["a_m"], "kappa": p["kappa_a"]}
     if closure == "iter89":
-        K, alpha = tau_coeff_L(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, M_D)
+        K, alpha = tau_coeff_L(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, mast.CONFIG.isotope_md)
     else:
-        K, alpha = tau_coeff_H(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, M_D)
+        K, alpha = tau_coeff_H(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, mast.CONFIG.isotope_md)
         if closure == "learned":
             K = K * _learned_correction(shot, p, P_loss_meas)   # frozen on the measured inputs; P_loss enters as an input only
     W_blind = integrate(P_in, K, alpha, p["W_MJ"][0], dt)[0]

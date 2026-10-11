@@ -518,7 +518,7 @@ def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypat
     real = api_replay.replay
     import numpy as _np
 
-    def nan_model(shot, H=1.0):
+    def nan_model(shot, H=1.0, **_):   # the route forwards the source's MachineConfig as config=
         r = real(shot, H=H)
         return {k: _np.full_like(v, _np.nan) if isinstance(v, _np.ndarray) and v.dtype.kind == "f" else v
                 for k, v in r.items()}

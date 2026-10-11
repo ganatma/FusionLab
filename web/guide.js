@@ -72,7 +72,7 @@
   ['mouseover', 'focusin'].forEach((ev) => document.addEventListener(ev, (e) => { const t = e.target.closest && e.target.closest('.term'); if (t) showTip(t); }));
   ['mouseout', 'focusout'].forEach((ev) => document.addEventListener(ev, (e) => { if (e.target.closest && e.target.closest('.term')) tip.hidden = true; }));
 
-  // Lab-mode help, from the same glossary: tooltips on panel labels, one line under each sandbox slider, "?" back to a lesson.
+  // Lab-mode help, from the same glossary: tooltips on panel labels, one line under each Explore slider, "?" back to a lesson.
   function labHelp() {
     Object.values(G).forEach((g) => (g.on || []).forEach((name) => { const el = target(name); if (el && !el.title) el.title = `${g.name}: ${g.def}`; }));
     const KNOB = { Ip: 'ip', B: 'bt', n: 'density', P_aux: 'heating', H: 'h-factor', Zeff: 'zeff' };
@@ -107,7 +107,7 @@
     const keep = new Set();                          // the lit elements and every ancestor up to the tab
     inTab.forEach((el) => { for (let n = el; n && n !== section.parentNode; n = n.parentNode) keep.add(n); });
     const dock = parseFloat(getComputedStyle(document.body).getPropertyValue('--dock')) || 0, r = inTab[0].getBoundingClientRect();
-    if (r.top < 0 || r.top > innerHeight - dock - 80) inTab[0].scrollIntoView({ block: 'start', behavior: 'smooth' });   // its top is off screen (pages that scroll)
+    if (r.top < 0 || r.top > innerHeight - dock - 80) inTab[0].scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });   // its top is off screen (pages that scroll)
     keep.forEach((node) => {
       if (inTab.includes(node)) return;              // a lit element keeps all of its children
       [...node.children].forEach((c) => {

@@ -583,9 +583,11 @@
     if (q.H98_median !== null)
       out.push(`Over ${q.n_steady} near-steady slices the measured confinement time is <b>${fmt(q.H98_median)}×</b> the IPB98(y,2) H-mode law and <b>${fmt(q.H89_median)}×</b> the ITER89-P L-mode law.`);
     const name = LIMIT_LABEL[q.peak_limit] || q.peak_limit;
+    // Limit proximity is drawn twice already — gauges for the instant, the limits strip for the run —
+    // so the prose names the limit and points at them instead of restating the same numbers a third time.
     out.push(q.peak_limit_fraction >= 1
-      ? `<b>${name}</b> limit exceeded: ${fmt(q.peak_limit_fraction)}× at t = ${fmt(q.peak_limit_t_s, 3)} s.`
-      : `Closest approach to a limit: <b>${name}</b> at ${fmt(q.peak_limit_fraction)}× (t = ${fmt(q.peak_limit_t_s, 3)} s).`);
+      ? `The <b>${name}</b> limit is crossed during this shot — its gauge reads red at the crossing, and the limits strip shows when.`
+      : `Closest approach to a limit: <b>${name}</b>. Watch its gauge as you scrub, and read the approach off the limits strip.`);
     // Only claimed for ohmic shots: with beams the energy holds fast ions and the late phase may well be H-mode.
     const ohmic = (s.meta.heating || '').toLowerCase() === 'ohmic';
     if (ohmic && q.P_loss_median_MW !== null && q.P_loss_median_MW > 2 * q.P_LH_median_MW && Math.abs(q.H89_median - 1) < 0.25)
@@ -1286,7 +1288,7 @@
     if (!b) return;
     if (b.dataset.act === 'cancel') return SL.cancelAll();   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
-    if (b.dataset.act === 'search') return $('rp-srch-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (b.dataset.act === 'search') return $('rp-srch-panel').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     if (b.dataset.act === 'share') return void shareCompare(b);
     if (b.dataset.act === 'retry')   // "Retry failed": every failed chip refetches under the shared machine
       return void cmp.ids.filter(x => SL.get(x) === 'error').forEach(id => cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null));

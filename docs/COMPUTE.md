@@ -97,8 +97,12 @@ checklist is the real-host path that remains.
   terminal) is relayed by `GET /compute/progress?task=<name>` and rendered in the replay UI next to
   the compute chip — the Bench button streams its sections live, and a field-line trace still running
   after ~1.5 s subscribes automatically. Local runs emit the same event vocabulary, so the readout
-  reads identically either way. (Cancellation from the app is not wired yet; `cancel` exists only at
-  the worker for now.)
+  reads identically either way. **Cancellation is wired end-to-end too** (HARN-2): the replay UI
+  shows a Cancel control while a remote job runs, `POST /compute/cancel?task=<name>` reaches the
+  worker's cooperative cancel (immediate while queued, between task sections while running), and the
+  cancelled work re-runs locally under the standard fallback — the banner and the provenance say
+  where the answer actually came from. Local jobs are synchronous, so the affordance is shown for
+  remote jobs only.
 - **The worker executes a fixed registry of named tasks** — field-line tracing, the two
   surrogates, the model-metrics readout, benchmarks. It is not a shell: schema-checked inputs, no
   command execution, payload-size caps. It binds loopback only, reachable through the tunnel.

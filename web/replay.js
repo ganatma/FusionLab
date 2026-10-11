@@ -32,7 +32,8 @@
         <button type="button" id="rp-csv" class="tool" title="Take-away export: every measured, model, learned and computed number this replay shows, one CSV row per slice and quantity, each labelled with its provenance. Opens in Excel, pandas or a notebook.">↓ CSV export</button>
         <button type="button" id="rp-bench" class="tool" title="Measured timings for this install's compute path (replay, caching, IPB98, the learned correction, the 0D map), run through the compute provider with live section progress. The README's full table is make bench.">⏱ Bench</button>
         <span class="status" id="rp-compute" title="Compute status">…</span>
-        <span class="status" id="rp-progress" hidden></span>
+        <span class="status" id="rp-progress" hidden><span id="rp-progress-text"></span>
+          <button type="button" id="rp-progress-cancel" class="tool" hidden title="Stop this remote job: the worker cancels it cooperatively — immediately while queued, between task sections while running — and the work re-runs locally so you still get an answer. The banner and provenance say honestly where it ran.">Cancel</button></span>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -182,27 +183,44 @@
   // (queued / running / progress / completed / error / cancelled), so this reads the same either way.
   // The server ends the stream after the terminal event; closing on the stream's own end suppresses
   // EventSource's auto-reconnect (no job running → no pointless reconnect loop).
-  let progressEs = null, progressHide = null;
+  let progressEs = null, progressHide = null, progressProvider = null, progressTask = null;
+  function progressSay(t) { $('rp-progress-text').textContent = `${progressTask}: ${t}`; }
   function watchProgress(task) {
     if (progressEs) progressEs.close();
     clearTimeout(progressHide);
-    const el = $('rp-progress');
+    const el = $('rp-progress'), cancelBtn = $('rp-progress-cancel');
     el.hidden = false;
-    el.textContent = `${task}: starting…`;
+    progressTask = task;
+    progressProvider = null;
+    cancelBtn.hidden = true;
+    progressSay('starting…');
     const es = new EventSource(`/compute/progress?task=${encodeURIComponent(task)}`);
     progressEs = es;
-    const say = t => { el.textContent = `${task}: ${t}`; };
-    es.addEventListener('queued', () => say('queued…'));
-    es.addEventListener('running', () => say('running…'));
-    es.addEventListener('progress', e => say(`${(JSON.parse(e.data).section || 'section')}…`));
+    const say = progressSay;
+    const data = e => e.data ? JSON.parse(e.data) : {};
+    // Every relayed event names the provider actually running the job (HARN-2): the cancel
+    // affordance exists only for remote jobs — local ones are synchronous, nothing to interrupt —
+    // and a fallback re-run re-labels its own events, so the affordance follows the truth.
+    const seen = d => { if (d.provider) progressProvider = d.provider; cancelBtn.hidden = progressProvider !== 'ssh'; };
+    es.addEventListener('queued', e => { seen(data(e)); say('queued…'); });
+    es.addEventListener('running', e => { seen(data(e)); say('running…'); });
+    es.addEventListener('progress', e => { seen(data(e)); say(`${(data(e).section || 'section')}…`); });
     const end = e => {   // terminal events carry data; the native 'error' (stream end) does not
-      const d = e.data ? JSON.parse(e.data) : {};
+      const d = data(e);
       say(e.type === 'completed' ? 'done' : `${e.type}${d.error ? ' — ' + d.error : ''}`);
       es.close();
       if (progressEs === es) progressEs = null;
       progressHide = setTimeout(() => { el.hidden = true; }, 6000);
     };
-    ['completed', 'error', 'cancelled'].forEach(name => es.addEventListener(name, end));
+    ['completed', 'error'].forEach(name => es.addEventListener(name, end));
+    // A cancelled remote job is followed by the local-fallback re-run (HARN-2): the server holds
+    // the stream open and hands over to the re-run's events within its grace window, so keep
+    // watching — the re-run's sections stay visible and the readout ends at its 'completed'.
+    es.addEventListener('cancelled', e => {
+      seen(data(e));
+      cancelBtn.hidden = true;   // the successor, if any, runs locally
+      say('cancelled — re-running on local CPU…');
+    });
     es.addEventListener('error', e => {
       if (e.data) return;   // a job's own error event: handled by the terminal handler above
       es.close();
@@ -309,7 +327,28 @@
           throw new Error((d && d.detail) || r.status);
         }
       } catch (e) {
-        $('rp-progress').textContent = `benchmark failed: ${e.message || e}`;
+        $('rp-progress-text').textContent = `benchmark failed: ${e.message || e}`;
+      } finally {
+        b.removeAttribute('aria-busy');
+      }
+    });
+    // Cancel affordance (HARN-2): stop the in-flight remote job. The route cancels it via the
+    // provider; the typed cancelled error reaches run_task's result(), whose existing local
+    // fallback re-runs the work — the banner and provenance then say honestly where it ran.
+    // The button is shown only while the streamed events name the ssh provider (local jobs are
+    // synchronous — nothing to interrupt), so this never fires against a local job in practice.
+    $('rp-progress-cancel').addEventListener('click', async () => {
+      const b = $('rp-progress-cancel');
+      b.setAttribute('aria-busy', 'true');
+      try {
+        const r = await fetch(`/compute/cancel?task=${encodeURIComponent(progressTask)}`, { method: 'POST' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => null);
+          throw new Error((d && d.detail) || r.status);
+        }
+        progressSay('cancelling…');
+      } catch (e) {
+        progressSay(`cancel failed: ${e.message || e}`);
       } finally {
         b.removeAttribute('aria-busy');
       }

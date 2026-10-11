@@ -19,16 +19,35 @@
   root.innerHTML = `
     <div class="cr">
       <div class="cr-bar" data-guide="bar">
-        <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
-        <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
-        <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
-          <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
-        <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
-        <span class="mono" id="rp-tlabel">–</span>
-        <button type="button" id="rp-whatif" class="tool" aria-haspopup="dialog" aria-expanded="false" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">Edit this shot</button>
-        <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
-        <span class="status" id="rp-load" hidden aria-live="polite"></span>
-        <span class="status" id="rp-compute" title="Compute status">…</span>
+        <div class="cr-cluster cr-cluster-transport" role="group" aria-label="Transport">
+          <span class="cluster-label" aria-hidden="true">Transport</span>
+          <span class="cluster-body">
+            <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
+            <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
+            <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
+              <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
+            <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
+            <span class="mono" id="rp-tlabel">–</span>
+          </span>
+        </div>
+        <div class="cr-cluster" role="group" aria-label="Shot actions">
+          <span class="cluster-label" aria-hidden="true">Shot actions</span>
+          <span class="cluster-body">
+            <button type="button" id="rp-whatif" class="tool" aria-haspopup="dialog" aria-expanded="false" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">Edit this shot</button>
+            <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD</button>
+            <button type="button" id="rp-share" class="tool" title="Copy a link that reopens this view: the workspace, the shot, the slice">Share</button>
+            <button type="button" id="rp-lines" class="tool on" aria-pressed="true" title="Trace magnetic field lines through the reconstructed flux map (NVIDIA Warp). The reconstruction is axisymmetric and lossy — read the lines as indicative.">Field lines</button>
+            <button type="button" id="rp-cmp-go" class="tool" title="Pick shots to compare side by side in the catalog">Compare…</button>
+          </span>
+        </div>
+        <div class="cr-cluster cr-cluster-status" role="group" aria-label="Status">
+          <span class="cluster-label" aria-hidden="true">Status</span>
+          <span class="cluster-body">
+            <span class="status" id="rp-load" hidden aria-live="polite"></span>
+            <span class="status" id="rp-flash" role="status" aria-live="polite" hidden></span>
+            <span class="status" id="rp-compute" title="Compute status">…</span>
+          </span>
+        </div>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -86,6 +105,7 @@
           <span class="seg" id="rp-view" data-guide="view" hidden><button type="button" data-v="cutaway" class="on">Cutaway</button><button type="button" data-v="port">Inside the vessel</button></span></h2>
         <div class="grow"><div id="rp-3d" class="fill"></div>
           <div class="chips" data-guide="q-chips"><span>q<sub>95</sub> traced <b id="rp-q-tr">–</b></span><span>q<sub>95</sub> EFIT <b id="rp-q-ef">–</b></span></div></div>
+        <p class="small muted cr-note">Magnetic-surface reconstruction is lossy (axisymmetric only: no islands, no 3D fields) — read the field lines as indicative.</p>
         <details class="small"><summary>What am I looking at?</summary>
           <p>The vessel and PF coils are the FAIR-MAST limiter contour and coil filaments revolved about the axis; the glowing shell is EFIT's last closed flux surface at this time slice, coloured by core T<sub>e</sub>. <span id="rp-3d-note"></span></p>
           <p class="muted">Each line is integrated through the EFIT flux map of this time slice (RK4 in toroidal angle, one GPU thread per line, every slice of the shot in one kernel launch). Counting toroidal turns per poloidal turn gives q without using EFIT's own q, so the agreement is a check of the whole chain: archive → units → interpolation → integrator. Axisymmetric reconstruction only: no islands, no 3D fields. Drag to rotate. The same lines are in the OpenUSD download.</p></details>
@@ -172,6 +192,7 @@
 
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
   let shot = null, db = null, lines3dOk = true, linesFail503 = 0, use3 = false, playTimer = null, speed = 1;
+  let linesOn = true;   // the Field lines toggle (shot actions): false stops line fetches and clears them from the 3D panel
   let initP = null, loadSeq = 0;
   const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
   let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
@@ -303,6 +324,24 @@
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
     $('rp-wi-x').addEventListener('click', () => whatIf(false));
     $('rp-wi').addEventListener('close', finishWhatIf);
+    // Share (audit seed 8): the URL is the state — copy a link that reproduces this view.
+    $('rp-share').addEventListener('click', async () => {
+      const url = await shareUrl();
+      let ok = false;
+      try { await navigator.clipboard.writeText(url); ok = true; }
+      catch (e) {   // clipboard API absent (non-secure context) or refused: fall back to a temp input
+        const inp = document.createElement('input');
+        inp.value = url; document.body.appendChild(inp); inp.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        inp.remove();
+      }
+      if (ok) flash('ok', 'Link copied — paste it to share this view');
+      else flash('bad', 'Copy refused — the address bar still holds this view');
+    });
+    // Field lines are an action, not a given: on by default, off with one click (setLines()).
+    $('rp-lines').addEventListener('click', () => setLines(!linesOn));
+    // Compare lives in its own workspace (spec Workspace 02): navigate there instead of re-carving this room.
+    $('rp-cmp-go').addEventListener('click', () => window.FusionLabRouter.navigate('compare'));
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
@@ -388,7 +427,7 @@
     for (let k = 0; k < n; k++) {
       if (!shot || shot.meta.shot_id !== id) return;
       await getPsi(id, k);
-      if (lines3dOk) await getLines(id, k);
+      if (lines3dOk && linesOn) await getLines(id, k);
     }
   }
 
@@ -578,7 +617,7 @@
     Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
     Plotly.restyle('rp-xs', { x: [[me.R_mag_m[i]]], y: [[me.Z_mag_m[i]]] }, [n - 1]);
     if (db) markDb(i);
-    if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
+    if (use3) window.Vessel3D.setSlice(i, linesOn ? linesNow.get(shot.meta.shot_id + ':' + i) : null);   // boundary follows the slider at once
     clearTimeout(psiTimer);
     psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); cmpThomson(); }, 40);   // cmpThomson: the compared shots' profiles follow the cursor
     document.dispatchEvent(new CustomEvent('fusionlab:slice', { detail: sliceState(i) }));
@@ -666,6 +705,27 @@
     }
     const op = wi.opener; wi.opener = null;
     if (op && op.isConnected) op.focus();
+  }
+
+  // Transient status chip in the status cluster (role=status): share feedback, USD export progress/result.
+  // ms=0 sticks until the next flash — an in-flight export keeps its chip up while the request runs.
+  let flashTimer = null;
+  function flash(cls, text, ms = 4000) {
+    const el = $('rp-flash');
+    clearTimeout(flashTimer);
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = text;
+    el.hidden = false;
+    if (ms) flashTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  // Share (audit seed 8): the URL is the state — copy a link that reproduces this view. An explicit hash
+  // route reproduces itself; on the bare landing, build the canonical route from the loaded shot and slice.
+  async function shareUrl() {
+    if (/^#\//.test(location.hash)) return location.href;
+    if (!shot) return location.origin + location.pathname;
+    const t = shot.measured.t_s[+$('rp-t').value] || 0;
+    return location.origin + location.pathname + '#/replay/' + shot.meta.shot_id + '?t=' + Number(t.toFixed(3));
   }
   function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
 
@@ -762,7 +822,7 @@
   }
 
   async function drawLines(i) {
-    if (!lines3dOk) return;
+    if (!lines3dOk || !linesOn) return;
     const id = shot.meta.shot_id, f = await getLines(id, i);
     if (!f) {
       // Transient failures (a network blip, one 503) leave lines3dOk true and retry on the next scrub; only a
@@ -780,6 +840,21 @@
     $('rp-q-tr').textContent = fmt(f.q95_traced); $('rp-q-ef').textContent = fmt(f.q95_efit);
     const c = f.shot_check;
     $('rp-3d-note').innerHTML = `Over all ${c.n_compared} slices of this shot the traced q<sub>95</sub> differs from EFIT's by a median <b>${(c.median_rel_err * 100).toFixed(2)}%</b> (95th percentile ${(c.p95_rel_err * 100).toFixed(2)}%), and a line drifts off its flux surface by at most ${c.psi_n_drift_max.toExponential(1)} in ψ<sub>N</sub>. Traced on ${esc(f.device)}.${f.computed_on ? ` <span class="muted">Computed on ${esc(f.computed_on)}.</span>` : ''}`;
+  }
+
+  // Field lines are an action, not a given (shot actions cluster): on by default, off with one click —
+  // the vessel and boundary stay, the lines (and their fetches) stop, and the q95 chips go quiet with them.
+  function setLines(on) {
+    linesOn = !!on;
+    const b = $('rp-lines');
+    b.classList.toggle('on', linesOn);
+    b.setAttribute('aria-pressed', String(linesOn));
+    if (!shot) return;
+    const i = +$('rp-t').value;
+    if (linesOn) { drawLines(i); return; }   // cached slices repaint at once
+    if (use3) window.Vessel3D.setSlice(i, null);
+    else if ($('rp-3d').data) Plotly.restyle('rp-3d', { x: [[]], y: [[]], z: [[]] }, [2, 3, 4, 5, 6]);   // the five line traces; vessel and LCFS stay
+    $('rp-q-tr').textContent = '–'; $('rp-q-ef').textContent = '–';
   }
 
   async function drawPsi(i) {

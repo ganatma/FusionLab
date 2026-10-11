@@ -53,6 +53,28 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .cr-bar { grid-area:bar; display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--bg); }
 .cr-bar select { width:auto; max-width:300px; }
 .cr-bar input[type=range] { flex:1 1 200px; }
+
+/* the anchored edit drawer (spec L2): a modal layer over the Replay room — the state cell, gauges and
+   logbook underneath stay live while the programme is edited. Anchored to the room itself, right side. */
+#tab-replay { position:relative; }   /* the drawer anchors below the header, not to the page */
+#rp-wi { position:absolute; top:0; right:0; bottom:0; width:min(var(--drawer), 100%); max-height:none; margin:0; padding:12px 16px;
+         background:var(--panel); border:0; border-left:1px solid var(--line); box-shadow:-12px 0 48px rgba(0,0,0,.55); }
+#rp-wi[open] { display:flex; flex-direction:column; }
+#rp-wi::backdrop { background:rgba(8,10,13,.45); }
+.wi-head { display:flex; align-items:flex-start; gap:10px; }
+.wi-head-title { flex:1; min-width:0; }
+.wi-head h2 { margin:0; }
+.wi-head p { margin:2px 0 8px; }
+.wi-scroll { flex:1 1 0; min-height:0; overflow:auto; }
+#rp-wi .wi-grid { grid-template-columns:1fr; }   /* the two-up layout is a wide-panel pattern; the drawer reads top to bottom */
+
+/* the toolbar reads in three labelled clusters (spec §Replay): transport · shot actions · status */
+.cr-cluster { display:flex; align-items:center; gap:8px; min-width:0; }
+.cluster-label { flex:none; font:600 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
+.cluster-body { display:flex; align-items:center; gap:10px; min-width:0; }
+.cr-cluster-transport { flex:1 1 auto; }
+.cr-cluster-status { flex:none; margin-left:auto; }
+.cr-note { margin:6px 0 2px; }
 .cr-cell { background:var(--panel); padding:10px 12px; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .cr-cell.scroll { overflow:auto; }
 #cell-eq { grid-area:eq; } #cell-tr { grid-area:tr; } #cell-st { grid-area:st; } #rp-3d-panel { grid-area:v3; }
@@ -63,6 +85,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
   .cr { height:auto; grid-template-columns:1fr; grid-template-rows:none;
         grid-template-areas:"bar" "hint" "v3" "tr" "st" "eq"; }
   .cr-bar { flex-wrap:wrap; }
+  .cr-cluster { flex-wrap:wrap; } .cluster-body { flex-wrap:wrap; }   /* clusters wrap as units, then within themselves */
   #rp-3d-panel, #cell-eq { height:520px; } #cell-tr { height:460px; }
 }
 

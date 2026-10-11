@@ -93,6 +93,12 @@ checklist is the real-host path that remains.
   version; after that the worker's cache answers and weight traffic is zero.
 - **One job at a time** per worker — it is a single-user GPU box, not a cluster, and a queue of
   depth 1 is honest about that. Jobs can be cancelled.
+- **Progress is wired end-to-end**: the worker's event stream (queued → running → section progress →
+  terminal) is relayed by `GET /compute/progress?task=<name>` and rendered in the replay UI next to
+  the compute chip — the Bench button streams its sections live, and a field-line trace still running
+  after ~1.5 s subscribes automatically. Local runs emit the same event vocabulary, so the readout
+  reads identically either way. (Cancellation from the app is not wired yet; `cancel` exists only at
+  the worker for now.)
 - **The worker executes a fixed registry of named tasks** — field-line tracing, the two
   surrogates, the model-metrics readout, benchmarks. It is not a shell: schema-checked inputs, no
   command execution, payload-size caps. It binds loopback only, reachable through the tunnel.

@@ -8,6 +8,7 @@ task functions are the reference implementation of its payload contract.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -61,16 +62,34 @@ def _model_metrics(inputs: dict) -> dict:
     return json.loads(files[inputs["model"]].read_text())
 
 
-TASKS: dict[str, Callable[[dict], Any]] = {
+def _benchmark(inputs: dict, progress: Callable[[dict], None] | None = None) -> dict:
+    """bench.timings for one profile — the worker's `benchmark` task, in-process. The section hook is
+    what progress subscribers see between sections (the same events the worker's SSE emits)."""
+    from fusionlab import bench  # lazy: pulls torch via surrogate
+
+    return bench.timings(profile=inputs.get("profile", "quick"), progress=progress)
+
+
+# Task bodies take the inputs dict. Bodies that report section progress (declared here) additionally
+# take the event hook: the worker passes its SSE hook, LocalProvider appends to the job's event list —
+# one event vocabulary, both backends.
+_PROGRESS_TASKS = {"benchmark"}
+
+TASKS: dict[str, Callable[..., Any]] = {
     "trace_fieldlines": _trace_fieldlines,
     "run_surrogate": _run_surrogate,
     "run_surrogate_shot": _run_surrogate_shot,
     "run_eq_surrogate": _run_eq_surrogate,
     "model_metrics": _model_metrics,
+    "benchmark": _benchmark,
 }
 
 
 # ---------------------------------------------------------------- the provider
+_TERMINAL_EVENTS = ("completed", "error", "cancelled")
+MAX_JOBS_REMEMBERED = 16   # terminal jobs kept for late progress subscribers (mirrors the worker)
+
+
 class LocalProvider:
     """In-process execution on this machine's CPU/GPU — the behavior the routers had before the seam."""
 
@@ -78,6 +97,7 @@ class LocalProvider:
 
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
+        self._active: dict[str, JobHandle] = {}   # task -> the job submit() is running right now
 
     def capabilities(self) -> dict:
         """Tasks and trained-model availability. The lazy imports are the torch cost the routers used to pay
@@ -88,29 +108,76 @@ class LocalProvider:
                 "surrogate_available": surrogate.available(),
                 "eq_surrogate_available": eq_surrogate.MODEL_FILE.exists()}
 
+    def active_job(self, task: str) -> JobHandle | None:
+        """The job of `task` this provider is running right now, or None. submit() runs synchronously,
+        so a local job is discoverable mid-run — that is what lets the progress route stream its event
+        list while the body works."""
+        return self._active.get(task)
+
     def submit(self, task: str, inputs: dict) -> JobHandle:
         """Run the task in-process, now: a local job is complete when submit returns, and a failure raises
-        here — the same call stack the routers had. The payload is held until result() consumes it once."""
+        here — the same call stack the routers had. The payload is held until result() consumes it once.
+
+        The job's event list grows while the body runs (queued → running → progress? → terminal, the
+        worker's exact vocabulary), so a progress subscriber can watch a local job live.
+        """
         try:
             run = TASKS[task]
         except KeyError:
             raise ValueError(f"unknown compute task {task!r}; available: {sorted(TASKS)}") from None
         job = JobHandle(job_id=uuid4().hex, task=task, provider=self.name)
-        self._jobs[job.job_id] = {"task": task, "result": run(inputs)}
+        record: dict[str, Any] = {"task": task, "result": None,
+                                  "events": [{"event": "queued", "task": task},
+                                             {"event": "running", "task": task}]}
+        self._jobs[job.job_id] = record
+        self._prune()
+        self._active[task] = job
+
+        def progress(event: dict) -> None:
+            record["events"].append({"event": "progress", **event})
+
+        try:
+            record["result"] = run(inputs, progress) if task in _PROGRESS_TASKS else run(inputs)
+            record["events"].append({"event": "completed", "job_id": job.job_id, "task": task})
+        except Exception as e:
+            record["events"].append({"event": "error", "error": str(e), "error_type": type(e).__name__})
+            raise
+        finally:
+            if self._active.get(task) is job:   # a concurrent same-task submit owns the slot now
+                del self._active[task]
         return job
 
     async def stream(self, job: JobHandle) -> AsyncIterator[dict]:
-        """A local job has no queued/running phase (submit already ran it): one completed event."""
+        """The job's events in the worker's vocabulary, replayed from zero and — while the body runs —
+        live: this polls the record exactly like the worker's SSE endpoint does. Local jobs have no
+        remote queue, but the event sequence is identical, so subscribers render both the same."""
         record = self._jobs.get(job.job_id)
         if record is None:
             raise KeyError(f"unknown job {job.job_id}")
-        yield {"event": "completed", "job_id": job.job_id, "task": record["task"]}
+        index = 0
+        while True:
+            while index < len(record["events"]):
+                event = record["events"][index]
+                index += 1
+                yield event
+                if event["event"] in _TERMINAL_EVENTS:
+                    return
+            if self._jobs.get(job.job_id) is not record:   # pruned while nobody was watching
+                return
+            await asyncio.sleep(0.1)
 
     def result(self, job: JobHandle) -> Any:
         try:
             return self._jobs[job.job_id].pop("result")
         except KeyError:
             raise KeyError(f"job {job.job_id} has no result: unknown id, or already consumed") from None
+
+    def _prune(self) -> None:
+        """Keep only the most recent MAX_JOBS_REMEMBERED records: the shared provider instance must not
+        accumulate old jobs (results leave when result() consumes them; event lists are small)."""
+        excess = list(self._jobs)[:-MAX_JOBS_REMEMBERED]
+        for job_id in excess:
+            del self._jobs[job_id]
 
     def health(self) -> None:
         """Always healthy: this provider is the current process."""

@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from fusionlab.agent_config import agent_settings
@@ -47,6 +47,35 @@ def compute_status():
     )
 
     return status.snapshot()
+
+
+@app.get("/compute/progress")
+async def compute_progress(task: str) -> StreamingResponse:
+    """Per-job progress as server-sent events: the selected provider's stream for the named task's
+    in-flight job, relayed in the worker's event vocabulary (queued / running / progress / terminal),
+    so local and remote render identically. The stream ends after the terminal event — following a
+    local-fallback re-run if one appears; with no job it ends after a short wait, never an error."""
+    from fusionlab.compute import (
+        status,  # lazy: pulls LocalProvider (numpy), never asyncssh
+    )
+
+    return StreamingResponse(status.progress_stream(task), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/compute/benchmark")
+def compute_benchmark(profile: str = "quick"):
+    """The measured-timings benchmark through the selected provider (the worker's `benchmark` task,
+    with the local fallback) — the one named task that reports section progress. POST: it occupies
+    the compute slot for its whole run, so it must not be triggerable by navigation or prefetch
+    (same reasoning as the USD export)."""
+    from fusionlab.bench import PROFILES
+    from fusionlab.compute import status
+
+    if profile not in PROFILES:
+        raise HTTPException(422, f"profile must be one of {sorted(PROFILES)}")
+    out = status.run_task("benchmark", {"profile": profile})
+    return {**out, "computed_on": status.provenance("benchmark").get("host")}
 
 
 @app.get("/devices")

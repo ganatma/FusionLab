@@ -55,12 +55,15 @@ MAST_CONFIG = MachineConfig(
     te_usd_ramp_max_kev=1.5,
     warmup_shot="30166",
     clean_limits=CleanLimits(tau_E_max_s=0.5, kappa_min=1.2, a_min_m=0.3),
-    unit_sanity=(
-        ("R_m", 0.4, 1.2),
-        ("a_m", 0.3, 1.0),
-        ("B_T", 0.1, 1.5),
-        ("Ip_MA", 0.2, 1.5),
-        ("n_e20", 0.1, 1.6),
-        ("W_MJ", 0.005, 0.5),
+    unit_sanity=(   # mid-shot guards against a missed SI conversion (the values the suite asserts)
+        ("R_m", 0.6, 1.0),
+        ("a_m", 0.4, 0.7),
+        ("B_T", 0.3, 0.7),          # sign removed
+        ("Ip_MA", 0.3, 1.5),
+        ("n_e20", 0.05, 1.0),
+        ("W_MJ", 0.005, 0.3),       # plasma_energy, not the diamagnetic "wmhd"
+        ("kappa", 1.4, 2.5),
+        ("P_ohm_MW", 0.1, 5.0),
+        ("Te0_keV", 0.1, 3.0),
     ),
 )

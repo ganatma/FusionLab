@@ -3,9 +3,11 @@ import io
 import json
 import logging
 import math
+import re
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -284,6 +286,57 @@ def test_uncached_shot_not_in_catalog_is_404(monkeypatch, tmp_path):
     assert client.get("/replay/99999999").status_code == 404
 
 
+# ---- bundles without equilibrium (DATA-1): /replay used to emit lcfs/psi_grid unconditionally,
+# so a machine without reconstructed equilibria broke the route outright. Now it degrades.
+
+
+def _no_equilibrium_payload(real: dict) -> dict:
+    """A real cached bundle stripped of every equilibrium/tracing array — a ψ-free machine's shot."""
+    eq_keys = ("lcfs_R", "lcfs_Z", "psi_R", "psi_Z", "psi_n", "R_mag_m", "Z_mag_m",
+               "F_Tm", "psi_axis_Wb", "psi_bnd_Wb", "psi_norm", "q_mid", "q_mid_R")
+    return {k: v for k, v in real.items() if k not in eq_keys}
+
+
+def test_replay_of_a_psi_free_bundle_answers_200_with_a_hint(monkeypatch, tmp_path):
+    """A bundle without equilibrium replays its traces: 200, lcfs/psi_grid null, and a
+    human-readable `equilibrium_absent` hint — previously a 500-class breakage."""
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    stripped = _no_equilibrium_payload(real)
+    assert "psi_n" not in stripped and "lcfs_R" not in stripped
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", lambda sid: _fake_payload(stripped, sid))
+    api_replay._shot_cached.cache_clear()   # the process cache is keyed by id alone: earlier
+    # tests in this module replayed a full bundle for the same id — do not serve it stale here.
+
+    r = client.get(f"/replay/{uncached}")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["lcfs"] is None and j["psi_grid"] is None
+    assert "psi" in j["equilibrium_absent"]
+    assert j["measured"]["t_s"] and j["measured"]["Ip_MA"]        # the traces still replay
+    assert j["model"] is not None and j["summary"]                # the 0D twin still answers
+    assert j["wall"] is not None                                  # vessel geometry is independent
+    assert _no_nan_floats(j)                                      # strict JSON: nulls, never NaN
+
+
+def test_equilibrium_dependent_routes_on_a_psi_free_bundle_name_the_gap(monkeypatch, tmp_path):
+    """The per-slice surfaces answer their own honest errors instead of KeyError: ψ 404,
+    field-lines 503 with the reason, USD export 422 (no LCFS to revolve)."""
+    uncached = _uncached_catalog_id()
+    real = mast.load_shot(30420)
+    monkeypatch.setattr(mast, "SHOTS", tmp_path)
+    monkeypatch.setattr(mast, "fetch_shot", lambda sid: _fake_payload(_no_equilibrium_payload(real), sid))
+
+    assert client.get(f"/replay/{uncached}").status_code == 200       # prime the cache
+    r_psi = client.get(f"/replay/{uncached}/psi/0")
+    assert r_psi.status_code == 404 and "psi" in r_psi.json()["detail"]
+    r_fl = client.get(f"/replay/{uncached}/fieldlines/0")
+    assert r_fl.status_code == 503 and "psi" in r_fl.json()["detail"]
+    r_usd = client.post(f"/replay/{uncached}/usd?fmt=usda")
+    assert r_usd.status_code == 422 and "equilibrium" in r_usd.json()["detail"]
+
+
 def test_failed_archive_fetch_is_502_and_leaves_no_cache(monkeypatch, tmp_path):
     """When the archive is unreachable the client hears 502, and no partial cache file is left behind."""
     uncached = _uncached_catalog_id()
@@ -428,13 +481,19 @@ DB_SEARCH_FIELDS = {"shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", 
 
 
 def test_db_search_rows_match_direct_numpy_masks():
-    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table."""
+    """Criterion 1: for every filter field the endpoint's total and ids equal a direct numpy mask over the table.
+    Campaign labels and row totals are derived from the loaded table + the configured campaign
+    pattern (formerly the hard-coded "M9" and 15,969 pins) so a second machine's catalog reads the same."""
     db = mast.load_db()
+    camps = np.unique(db["campaign"])
+    c_first, c_last = int(camps[0]), int(camps[-1])
+    prefix = re.match(r"[A-Za-z]*", mast.CONFIG.campaign_pattern).group(0)   # "M\d+" -> "M"; r"\d+" -> ""
+    label = f"{prefix}{c_last}"
     cases = [
         ({"q": "30421"}, db["shot_id"] == 30421),
         ({"q": "30400-30500"}, (db["shot_id"] >= 30400) & (db["shot_id"] <= 30500)),
-        ({"campaign": "M9"}, db["campaign"] == 9),
-        ({"campaign": "5"}, db["campaign"] == 5),
+        ({"campaign": label}, db["campaign"] == c_last),                   # archive label form ("M9")
+        ({"campaign": str(c_first)}, db["campaign"] == c_first),           # bare-number form
         ({"ip_min": 0.8}, db["Ip_MA"] >= 0.8),
         ({"ip_max": 0.6}, db["Ip_MA"] <= 0.6),
         ({"bt_min": 0.5, "bt_max": 1.0}, (db["B_T"] >= 0.5) & (db["B_T"] <= 1.0)),
@@ -449,8 +508,8 @@ def test_db_search_rows_match_direct_numpy_masks():
         ({"useful": False}, db["useful"] != 1),                # shots the archive never marked useful
         ({"abort": True}, db["abort"] == 1),
         ({"abort": False}, db["abort"] != 1),
-        ({"ip_min": 0.8, "campaign": "M9", "useful": True},    # filters AND together
-         (db["Ip_MA"] >= 0.8) & (db["campaign"] == 9) & (db["useful"] == 1)),
+        ({"ip_min": 0.8, "campaign": label, "useful": True},    # filters AND together
+         (db["Ip_MA"] >= 0.8) & (db["campaign"] == c_last) & (db["useful"] == 1)),
     ]
     for params, mask in cases:
         j = client.get("/db/search", params=params).json()
@@ -464,8 +523,8 @@ def test_db_search_rows_carry_every_metadata_field_as_strict_json():
     assert "NaN" not in r.text and "Infinity" not in r.text   # missing fields surface as null, never NaN
     j = r.json()
     assert set(j["rows"][0]) == DB_SEARCH_FIELDS
-    assert j["total"] == 15_969 and j["limit"] == 5 and j["offset"] == 0
-    assert {row["campaign"] for row in j["rows"]} <= {5, 6, 7, 8, 9}
+    assert j["total"] == int(mast.load_db()["shot_id"].size) and j["limit"] == 5 and j["offset"] == 0
+    assert {row["campaign"] for row in j["rows"]} <= set(int(c) for c in np.unique(mast.load_db()["campaign"]))
 
 
 def test_db_search_pagination_windows():
@@ -498,7 +557,7 @@ def test_db_search_unfiltered_is_fast():
     t0 = time.perf_counter()
     j = client.get("/db/search").json()
     assert time.perf_counter() - t0 < 0.5
-    assert j["total"] == 15_969 and len(j["rows"]) == 200
+    assert j["total"] == int(mast.load_db()["shot_id"].size) and len(j["rows"]) == 200
 
 
 def _no_nan_floats(node) -> bool:

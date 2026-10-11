@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+from fusionlab.data import lh_mode
 from fusionlab.data.machine import MAST_CONFIG
 
 REST = "https://mastapp.site"
@@ -77,6 +78,10 @@ def fetch_db() -> dict:
     db["abort"] = np.nan_to_num(db["abort"])
     db["shot_id"] = np.array([r["shot_id"] for r in rows])
     db["campaign"] = np.array([_campaign_int(str(r.get("campaign") or "M0")) for r in rows])
+    # Derived during catalog build so the stored cache carries it (docs/PHYSICS.md; #38).
+    db["mode_derived"] = lh_mode.derive_mode(
+        db, isotope_md=MAST_CONFIG.isotope_md, enhancement_min=MAST_CONFIG.lh_enhancement_min
+    )
     return db
 
 

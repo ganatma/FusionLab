@@ -40,6 +40,8 @@ class MachineConfig:
     te_usd_ramp_max_kev: float    # USD export Te->colour ramp ceiling [keV] (was usd_export.TE_RAMP_MAX_KEV)
     warmup_shot: str | None        # shot loaded at server start to warm the caches
     clean_limits: CleanLimits      # catalog-filter thresholds
+    lh_enhancement_min: float      # mode_derived cut: H above this tau_E / tau_89 (ITER89-P) ratio
+                                   # (fusionlab.data.lh_mode; MAST value calibrated on the #38 anchors)
     unit_sanity: tuple[tuple[str, float, float], ...] = ()  # (field, lo, hi) mid-shot unit guards
 
 
@@ -55,6 +57,9 @@ MAST_CONFIG = MachineConfig(
     te_usd_ramp_max_kev=1.5,
     warmup_shot="30166",
     clean_limits=CleanLimits(tau_E_max_s=0.5, kappa_min=1.2, a_min_m=0.3),
+    # Midway between the two hand-verified anchors: 30420 (ohmic, ratio 1.29) and 30166
+    # ("H-mode from 223 ms", peak current 0.245 s, ratio 1.81) — scripts/mode_flag_report.py.
+    lh_enhancement_min=1.5,
     unit_sanity=(   # mid-shot guards against a missed SI conversion (the values the suite asserts)
         ("R_m", 0.6, 1.0),
         ("a_m", 0.4, 0.7),

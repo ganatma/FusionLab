@@ -22,7 +22,7 @@ fetch-and-cache path, so any shot in the catalog can be opened on demand (multi-
 
 from __future__ import annotations
 
-from fusionlab.data import reader
+from fusionlab.data import lh_mode, reader
 from fusionlab.data.ingestors import fair_mast
 from fusionlab.data.machine import MAST_CONFIG
 
@@ -67,7 +67,14 @@ def cached_shots() -> list[int]:
 
 def load_db(refresh: bool = False) -> dict:
     """Shot table as a dict of equal-length arrays. Cached in data/mast_db.npz."""
-    return reader.load_db(refresh, db_file=DB_FILE, fetch=fetch_db)
+    db = reader.load_db(refresh, db_file=DB_FILE, fetch=fetch_db)
+    if "mode_derived" not in db:
+        # Cache predating #38: derive on read with the ingestor's rule (not written back —
+        # the shipped cache stays byte-identical; the next catalog rebuild stores it).
+        db["mode_derived"] = lh_mode.derive_mode(
+            db, isotope_md=CONFIG.isotope_md, enhancement_min=CONFIG.lh_enhancement_min
+        )
+    return db
 
 
 def clean_db(db: dict) -> dict:

@@ -77,6 +77,40 @@ about 3.5× larger than the MHD stored energy on shot 30420. `plasma_energy` rep
 Shot table (`mast.load_db`): the `cpf_*` scalars at the time of peak current from `mastapp.site/ndjson/shots`.
 The stored τ_E obeys `cpf_tautot = cpf_wmhd / (P_ohm + P_NBI − dW/dt)`, checked in the tests (median deviation < 5%).
 
+### Derived mode flag (`mode_derived`, `fusionlab/data/lh_mode.py`) — a filter aid, never a mode measurement
+
+The archive's shot table has no confinement-mode field — the ndjson columns are logbook *text* only — and mode is
+the first filter every MAST analysis applies. FusionLab derives a transparent, labelled-derived flag from the
+catalog scalars FusionLab already loads (`fusionlab/data/lh_mode.py`, `lh_enhancement_min` in `MachineConfig`):
+
+```
+ratio = tau_E / tau_89        tau_89: ITER89-P L-mode law (physics.tau_coeff_L) on the same scalars,
+                              with kappa = V / (2π² R a²) — the IPB98 volume-derived elongation
+mode_derived = H (1)   if ratio > 1.5
+             = L (0)   if ratio <= 1.5
+             = unknown (null)  when the ratio is not computable — a missing or non-positive
+                               scalar (the scalings take fractional powers; garbage is unknown, not L)
+```
+
+It is a ratio of two τ_E in the same convention (`cpf_tautot` and the L-mode law are both W/(P_ohm + P_NBI − dW/dt),
+radiation not subtracted), so the comparison is like-for-like. Why not the Martin L-H power threshold
+(`physics.p_lh`)? On MAST it under-predicts the threshold by 7–9× across the catalog — every heating group, ohmic
+included, sits far above it — so a power-threshold flag would mark nearly every row H.
+
+Numbers in this paragraph are computed by `uv run python scripts/mode_flag_report.py` (writes
+`data/mode_flag_report.json`, not committed): of 15,969 catalog rows the flag marks 1,374 H and 6,631 L, leaving
+7,964 unknown (the archive's gaps in the `cpf_*` scalars). The cut sits between the only two mode-certain anchors
+in the catalog — 30420 is ohmic (logbook: L-mode edge), ratio 1.29 → L; 30166's logbook reads "H-mode from 223 ms"
+with peak current at 0.245 s, ratio 1.81 → H — and reproduces the expected heating-group gradient. `tests/test_lh_mode.py`
+pins the anchors and the cut sandwich.
+
+**Known limits (all of them, stated):** the flag describes the *peak-current snapshot*, not the discharge — L–H
+transitions mid-shot are invisible to scalars; ELMy and locked-mode phases depress τ_E and can flip H to L; roughly
+half the catalog lacks the scalars and stays unknown; the cut is calibrated on two hand-verified anchors and the
+heating-label gradient, **not validated against a labelled mode database, because none exists**. Rows whose logbook
+disagrees with the flag are expected — the flag is a filter aid with documented failure modes, never a mode
+measurement, and it is labelled *derived* everywhere it appears (search UI, API rows, agent tool).
+
 Why a spherical tokamak is a useful test of IPB98(y,2): Valovič et al., *Nucl. Fusion* 49 (2009) 075016 fit MAST H-modes
 as W ∝ Ip^0.59 B_T^1.4 P_L^0.27 (N = 97), against IPB98(y,2)'s Ip^0.93 B_T^0.15; the same paper notes the *magnitudes*
 broadly agree. See also Kaye et al., *Nucl. Fusion* 46 (2006) 848 (NSTX) and Buxton et al., *PPCF* 61 (2019) 035006.

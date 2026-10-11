@@ -124,6 +124,7 @@
           ${SRCH_RANGES.map(([n, u, k]) => `<label>${n}${u ? ` <span class="dim">${u}</span>` : ''}<span class="pair">
               <input id="rp-srch-${k}-min" type="number" step="any" placeholder="min" aria-label="${n} min">
               <input id="rp-srch-${k}-max" type="number" step="any" placeholder="max" aria-label="${n} max"></span></label>`).join('')}
+          <label>mode <span class="dim">derived</span><select id="rp-srch-mode" aria-label="derived confinement regime"><option value="">any</option><option value="H">H</option><option value="L">L</option></select></label>
           <label class="chk"><input type="checkbox" id="rp-srch-useful">useful</label>
           <label class="chk"><input type="checkbox" id="rp-srch-abort">aborted</label>
           <button type="button" class="tool" id="rp-srch-clear">Clear</button>
@@ -938,12 +939,14 @@
     });
     if ($('rp-srch-useful').checked) p.set('useful', 'true');
     if ($('rp-srch-abort').checked) p.set('abort', 'true');
+    const mode = $('rp-srch-mode').value;
+    if (mode) p.set('mode', mode);
     return p;
   };
 
   function srchSetUrl() {   // mirror filters + selection into the address bar; other params (shot, whatif) survive
     const shared = new URLSearchParams(location.search);
-    [...SRCH_KEYS, 'useful', 'abort', 'offset', 'compare'].forEach(k => shared.delete(k));
+    [...SRCH_KEYS, 'useful', 'abort', 'mode', 'offset', 'compare'].forEach(k => shared.delete(k));
     for (const [k, v] of srchParams()) shared.set(k, v);
     if (srchOffset) shared.set('offset', srchOffset);
     if (srchSel.size) {
@@ -965,6 +968,7 @@
     });
     $('rp-srch-useful').checked = ['1', 'true'].includes(val('useful'));
     $('rp-srch-abort').checked = ['1', 'true'].includes(val('abort'));
+    $('rp-srch-mode').value = ['H', 'L'].includes(val('mode')) ? val('mode') : '';
     srchOffset = Math.max(0, +val('offset') || 0);
     (val('compare') || '').split(',').forEach(id => +id && srchSel.add(+id));
   }
@@ -1005,16 +1009,17 @@
     }
     $('rp-srch-attr').textContent = srchResp ? srchResp.attribution : '';
     $('rp-srch-tbl').innerHTML = !srchResp ? '' : `
-      <thead><tr><th></th><th>Shot</th><th>Camp</th><th class="num">I<sub>p</sub> MA</th><th class="num">B T</th>
+      <thead><tr><th></th><th>Shot</th><th>Camp</th><th title="derived confinement regime, not measured — docs/PHYSICS.md">mode</th><th class="num">I<sub>p</sub> MA</th><th class="num">B T</th>
         <th class="num">P<sub>nbi</sub> MW</th><th class="num">n<sub>e</sub> 10²⁰</th><th class="num">W MJ</th>
         <th class="num">q<sub>95</sub></th><th>useful</th><th>abort</th></tr></thead>
       <tbody>${srchResp.rows.map(r => `
         <tr><td><input type="checkbox" data-shot="${r.shot_id}" aria-label="select ${r.shot_id} for compare"${srchSel.has(r.shot_id) ? ' checked' : ''}></td>
           <td><a href="?shot=${r.shot_id}" data-shot="${r.shot_id}">#${r.shot_id}</a></td><td>M${r.campaign}</td>
+          ${r.mode_derived == null ? '<td class="muted">–</td>' : r.mode_derived >= 1 ? '<td>H</td>' : '<td>L</td>'}
           <td class="num">${num(r.Ip_MA)}</td><td class="num">${num(r.B_T)}</td><td class="num">${num(r.P_nbi_MW, 1)}</td>
           <td class="num">${num(r.n_e20, 3)}</td><td class="num">${num(r.W_MJ, 3)}</td><td class="num">${num(r.q95)}</td>
           <td>${flag(r.useful)}</td><td>${flag(r.abort)}</td></tr>`).join('')
-        || `<tr><td colspan="11" class="muted">No shots match. <button type="button" class="tool" id="rp-srch-empty-clear">Clear the filters</button></td></tr>`}</tbody>`;
+        || `<tr><td colspan="12" class="muted">No shots match. <button type="button" class="tool" id="rp-srch-empty-clear">Clear the filters</button></td></tr>`}</tbody>`;
   }
 
   function openReplay(id) {   // a search result clicked: the replay tab already deep-links on ?shot=
@@ -1029,6 +1034,7 @@
     ['rp-srch-q', 'rp-srch-campaign'].forEach(id => $(id).value = '');
     SRCH_RANGES.forEach(([, , k]) => ['min', 'max'].forEach(s => $('rp-srch-' + k + '-' + s).value = ''));
     $('rp-srch-useful').checked = $('rp-srch-abort').checked = false;
+    $('rp-srch-mode').value = '';
     srchOffset = 0;
     searchDb();
   }
@@ -1039,7 +1045,7 @@
     const soon = () => { clearTimeout(timer); timer = setTimeout(() => { srchOffset = 0; searchDb(); }, 300); };
     ['rp-srch-q', 'rp-srch-campaign'].forEach(id => $(id).addEventListener('input', soon));
     SRCH_RANGES.forEach(([, , k]) => ['min', 'max'].forEach(s => $('rp-srch-' + k + '-' + s).addEventListener('input', soon)));
-    ['rp-srch-useful', 'rp-srch-abort'].forEach(id => $(id).addEventListener('change', () => { srchOffset = 0; searchDb(); }));
+    ['rp-srch-useful', 'rp-srch-abort', 'rp-srch-mode'].forEach(id => $(id).addEventListener('change', () => { srchOffset = 0; searchDb(); }));
     const panel = $('rp-srch-panel');
     panel.addEventListener('click', e => {
       if (e.target.id === 'rp-srch-clear' || e.target.id === 'rp-srch-empty-clear') return srchClear();

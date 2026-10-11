@@ -53,6 +53,7 @@ Other commands:
 | `make fieldlines` | Warp field-line q check + benchmark |
 | `make validate-virtual` | the virtual shot's gates: fetches ~120 held-out shots |
 | `make data` | re-download the FAIR-MAST cache (the repo already ships it) |
+| `uv run python scripts/mode_flag_report.py` | derived L/H flag counts + anchors (writes `data/mode_flag_report.json`) |
 
 ```python
 from fusionlab import mast
@@ -60,7 +61,7 @@ from fusionlab.physics import replay
 
 s = mast.load_shot(30166)     # dict of arrays on the EFIT time base, in MA, T, 1e20 m^-3, keV, MW, MJ
 r = replay(s)                 # IPB98 / ITER89-P on measured P_loss, H98(t), Greenwald / Troyon / kink fractions
-db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current
+db = mast.clean_db(mast.load_db())   # 6,353 shots at peak current; mode_derived = derived H/L flag (PHYSICS.md)
 ```
 
 `uv run python scripts/fetch_mast.py 29182` caches any other level-2 shot (~27 s, ~1 MB).

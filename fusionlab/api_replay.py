@@ -360,7 +360,7 @@ def db():
 
 _ROW_FIELDS = ("shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
                "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
-               "t_ipmax_s", "useful", "abort")
+               "t_ipmax_s", "useful", "abort", "mode_derived")
 
 
 @lru_cache(maxsize=1)
@@ -427,6 +427,19 @@ def _flag_mask(c: dict, field: str, flag: bool | None) -> np.ndarray | None:
     return marked if flag else ~marked
 
 
+def _mode_mask(c: dict, mode: str | None) -> np.ndarray | None:
+    """Filter on `mode_derived` — FusionLab's derived confinement-regime flag (fusionlab.data.lh_mode,
+    docs/PHYSICS.md). 'H' keeps H-regime rows, 'L' the rest; rows the catalog scalars cannot flag
+    (NaN, 'unknown') match neither — they are not evidence for either regime."""
+    if mode is None:
+        return None
+    m = mode.strip().upper()
+    if m not in ("H", "L"):
+        raise HTTPException(422, "mode must be 'H' or 'L' — the derived confinement-regime flag (docs/PHYSICS.md)")
+    flag = c["mode_derived"]
+    return flag == 1 if m == "H" else flag == 0
+
+
 @router.get("/db/search")
 def db_search(q: str | None = None, campaign: str | None = None,
               ip_min: float | None = None, ip_max: float | None = None,   # MA
@@ -436,12 +449,15 @@ def db_search(q: str | None = None, campaign: str | None = None,
               w_min: float | None = None, w_max: float | None = None,   # MJ
               q95_min: float | None = None, q95_max: float | None = None,
               useful: bool | None = None, abort: bool | None = None,
+              mode: str | None = None,   # derived regime flag ('H'/'L'), never an archive field
               limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0)) -> dict:
     """Vectorized filter over the full FAIR-MAST catalog (15,969 rows), beside /db's cleaned analysis view.
 
     Filters combine (AND); the UI mirrors them into the URL so any result set is shareable. total counts
     the whole match set, independent of the limit/offset window. Units are the repo's: MA, T, MW,
-    1e20 m^-3, MJ. There is no H-mode filter: the archive's metadata table has no H-mode flag.
+    1e20 m^-3, MJ. mode filters on `mode_derived` — FusionLab's derived confinement-regime flag
+    (docs/PHYSICS.md): 'H' or 'L'; rows the scalars cannot flag stay unknown and match neither.
+    Derived, never measured.
     """
     c = _catalog()
     mask = np.ones(c["shot_id"].size, dtype=bool)
@@ -449,7 +465,8 @@ def db_search(q: str | None = None, campaign: str | None = None,
               _range_mask(c, "Ip_MA", ip_min, ip_max), _range_mask(c, "B_T", bt_min, bt_max),
               _range_mask(c, "P_nbi_MW", pnbi_min, pnbi_max), _range_mask(c, "n_e20", ne_min, ne_max),
               _range_mask(c, "W_MJ", w_min, w_max), _range_mask(c, "q95", q95_min, q95_max),
-              _flag_mask(c, "useful", useful), _flag_mask(c, "abort", abort)):
+              _flag_mask(c, "useful", useful), _flag_mask(c, "abort", abort),
+              _mode_mask(c, mode)):
         if m is not None:
             mask &= m
     total = int(mask.sum())

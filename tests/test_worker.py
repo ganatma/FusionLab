@@ -191,6 +191,22 @@ def test_artifact_upload_rejects_mismatched_and_oversized_blobs(client):
     assert client.post("/v1/artifacts/nothex", content=b"x").status_code == 422
 
 
+def test_concurrent_uploads_leave_no_temp_litter(client):
+    """HARN-3: artifact temps are pid-unique dot-files published with os.replace — concurrent
+    uploads of the same and of different hashes leave exactly the hash-named weights, no litter."""
+    import concurrent.futures
+
+    blobs = [b"weight-bytes-a", b"weight-bytes-b"]
+    digests = [hashlib.sha256(b).hexdigest() for b in blobs]
+    with concurrent.futures.ThreadPoolExecutor(4) as pool:
+        futs = [pool.submit(client.post, f"/v1/artifacts/{digests[i % 2]}", content=blobs[i % 2])
+                for i in range(6)]
+        assert all(f.result().status_code == 201 for f in futs)
+    root = worker.artifact_dir()
+    assert sorted(p.name for p in root.iterdir()) == sorted(digests)   # zero .tmp* litter
+    assert (root / digests[0]).read_bytes() == blobs[0]
+
+
 def test_job_rejects_unsatisfied_artifact_hash(client):
     r = client.post("/v1/jobs", json={"task": "run_surrogate", "inputs": {"features": {}},
                                       "artifact_refs": [{"role": "surrogate.pt", "sha256": "f" * 64}]})

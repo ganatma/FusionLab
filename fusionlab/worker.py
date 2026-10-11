@@ -47,6 +47,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from fusionlab import frames
+from fusionlab.atomicio import atomic_write
 from fusionlab.compute.local import TASKS as _LOCAL_TASKS
 
 WORKER_PROTOCOL_VERSION = 1      # bumped when the wire contract (framing, events) changes
@@ -481,9 +482,9 @@ async def upload_artifact(sha256: str, request: Request) -> dict:
         raise HTTPException(422, "sha256 mismatch: the uploaded bytes do not match the requested hash")
     root = artifact_dir()
     root.mkdir(parents=True, exist_ok=True)
-    tmp = root / f".{sha256}.tmp"
-    tmp.write_bytes(body)
-    os.replace(tmp, root / sha256)   # atomic: a reader never sees a half-written weight
+    # atomicio: a pid-unique dot-temp + os.replace — a reader never sees a half-written weight,
+    # and concurrent uploads of different hashes never collide (HARN-3).
+    atomic_write(root / sha256, lambda tmp: tmp.write_bytes(body))
     return {"sha256": sha256, "bytes": len(body)}
 
 

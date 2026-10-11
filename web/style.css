@@ -6,9 +6,11 @@
   --panel:#10141b; --line:#1f2733; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
   --mono:ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --head:46px;
+  --focus-ring:2px solid var(--accent);
 }
 * { box-sizing:border-box; }
 body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+:focus-visible { outline:var(--focus-ring); outline-offset:1px; }   /* keyboard focus everywhere (.term swaps in its own underline) */
 h1 { margin:0; font:600 13px/1 var(--mono); letter-spacing:.18em; }
 h2 { margin:0 0 8px; font:600 11px/1.4 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
 h2 .dim { text-transform:none; letter-spacing:.02em; font-weight:400; }
@@ -29,6 +31,7 @@ h1 .dim { font-weight:400; letter-spacing:.06em; }
 .tabs button:hover { color:var(--fg); }
 .tabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
 section[id^="tab-"]:not(#tab-replay) { padding:16px; }
+#cmdk { flex:none; padding:4px 8px; }
 
 /* layout (sandbox + database tabs) */
 .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); align-items:start; }
@@ -235,6 +238,9 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
 .welcome-pick button:hover { border-color:var(--accent); }
 .welcome-pick button > b { font-size:18px; } .welcome-pick span { color:var(--muted); flex:1; }
 .welcome-pick i { font:600 11px/1 var(--mono); font-style:normal; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); }
+.welcome-alt { margin:14px 0 0; }
+.welcome-alt button { background:none; border:0; padding:0; color:var(--accent); font:600 13px/1.4 system-ui, sans-serif; cursor:pointer; text-decoration:underline; }
+.welcome-alt button:hover { color:var(--fg); }
 @media (max-width:1460px) {
   body.guided { --dock:250px; padding-left:0; padding-bottom:var(--dock); }
   body.guided header { margin-left:0; }
@@ -262,3 +268,12 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
 .srch-rows { max-height:480px; overflow:auto; }
 .srch-rows td { white-space:nowrap; }
 .bad { color:var(--bad); }
+
+/* Mobile header: the legend (its tags repeat on every panel) and the subtitle step aside, and the
+   tabs take their own row, so the title never clips (audit defect at 375 px, screenshot fl_AmO2E2fS).
+   Last in the file: it must out-order the base .prov/.tabs rules it overrides (equal specificity). */
+@media (max-width:760px) {
+  header { flex-wrap:wrap; height:auto; min-height:var(--head); padding:8px 16px; row-gap:2px; }
+  .prov, header h1 .dim { display:none; }
+  header .tabs { order:9; flex:1 1 100%; align-self:auto; height:34px; }
+}

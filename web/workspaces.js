@@ -94,11 +94,11 @@
       return apply(m[1], m[2] === undefined ? undefined : decodeURIComponent(m[2]), m[3] || '', location.hash);
     }
     if (location.hash === '#sandbox') { defaultLanding = false; return apply('explore', undefined, undefined, '#sandbox'); }   // legacy link, kept literal
-    const ws = landingWorkspace();
-    const q = new URLSearchParams(location.search);
-    if (!q.get('shot') && !q.get('compare')) history.replaceState(null, '', '#/' + ws);   // canonicalize a bare landing, no history entry
+    // Bare landing: leave the URL bare (no canonicalizing replaceState — a hash the app itself
+    // wrote would read as an explicit route on the next boot and a reload would strand the
+    // welcome-modal pick on Replay). The hash carries state only once the user navigates.
     defaultLanding = true;
-    apply(ws, undefined, undefined, location.hash);
+    apply(landingWorkspace(), undefined, undefined, location.hash);
   }
 
   // Programmatic navigation (header clicks, guided-study steps, the agent): write the hash — the

@@ -146,3 +146,16 @@ def test_job_progress_is_wired_into_the_served_js():
     bench = replay.split("$('rp-bench').addEventListener")[1]
     assert "watchProgress('benchmark')" in bench
     assert "setTimeout(() => watchProgress('trace_fieldlines'), 1500)" in replay
+
+
+def test_replay_domain_shading_is_the_served_bands_with_a_legend_label():
+    """FEAT-2: the W strip shades the server's own domain bands (never recomputed client-side) and
+    labels them in its legend, present only when the flags mark something out of domain. The what-if
+    bands share the same machinery — one shading style, one vocabulary."""
+    replay = _served("replay.js")
+    strips = replay.split("function drawStrips")[1].split("function insight")[0]
+    assert "shot.domain_bands" in strips               # the coordinates are the replay bundle's
+    assert "oodShapes(ood, 'meas-ood')" in strips      # the shared band builder, the what-if's style
+    assert "'outside the training range'" in strips    # labelled in the plot legend when present
+    whatif = replay.split("function drawWhatIf")[1].split("function revolve")[0]
+    assert "oodShapes(oodRuns(" in whatif              # the what-if path maps its own flags with the same machinery

@@ -6,6 +6,8 @@
   // Categorical slots validated for the dark panel surface (dataviz validate_palette, all pairs pass).
   const C = { blue: '#3987e5', orange: '#d95926', aqua: '#199e70', yellow: '#c98500', magenta: '#d55181',
               ink: '#c3c2b7', muted: '#898781', grid: '#1f2a3a', accent: '#ff8a3d' };
+  const fade = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+  const OOD_FILL = fade(C.muted, 0.10);   // the 'outside the training range' shade, on the replay and what-if paths alike
   const LIMIT_LABEL = { greenwald: 'Greenwald density', troyon: 'Troyon β_N', kink: 'Kink (q95 < 2)' };
 
   // One screen, no page scroll. Toolbar (shot, play, time) over four cells: equilibrium | traces over shot state | the machine.
@@ -159,6 +161,12 @@
   }, extra));
   const line = (x, y, name, color, extra = {}) => Object.assign(
     { x, y, name, mode: 'lines', line: { color, width: 2 }, connectgaps: false }, extra);
+  // Out-of-domain shading: consecutive false flags -> [t0, t1] spans (a run closes on its last slice),
+  // spans -> paper-height rects. One machinery for the replay strip and the what-if bands.
+  const oodRuns = (t, flags) => { const out = []; let a = null;
+    flags.forEach((ok, i) => { if (!ok && a === null) a = i; if ((ok || i === t.length - 1) && a !== null) { out.push([t[a], t[ok ? i - 1 : i]]); a = null; } });
+    return out; };
+  const oodShapes = (runs, name) => runs.map(([x0, x1]) => ({ type: 'rect', name, xref: 'x', yref: 'paper', x0, x1, y0: 0, y1: 1, fillcolor: OOD_FILL, line: { width: 0 }, layer: 'below' }));
   const LOG_TAU = { type: 'log', gridcolor: C.grid, range: [-2.5, -0.7],
                     tickvals: [0.005, 0.01, 0.02, 0.05, 0.1, 0.2], ticktext: ['0.005', '0.01', '0.02', '0.05', '0.1', '0.2'] };
   const TIME_PLOTS = ['rp-w', 'rp-p', 'rp-ip', 'rp-lim'];
@@ -520,13 +528,19 @@
     ], stripLayout(false), CFG);
     Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
     if (cmp.on) { drawCmpW(); drawCmpLim(); return; }
+    const ood = shot.domain_bands || [];   // the server's own coordinates: virtual.py's guard on the measured inputs
     Plotly.react('rp-w', [
       line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
       line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
       line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
       ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
                                  { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
-    ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
+      // the shading's legend label, present exactly when there is something shaded
+      // (a [null] point draws nothing but keeps the legend entry — Plotly skips fully-empty traces)
+      ...(ood.length ? [line([null], [null], 'outside the training range', fade(C.muted, 0.25),
+                             { line: { color: fade(C.muted, 0.25), width: 8 } })] : []),
+    ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 },
+                            shapes: oodShapes(ood, 'meas-ood') }), CFG);
     Plotly.react('rp-lim', [
       line(t, mo.f_greenwald, 'Greenwald', C.blue),
       line(t, mo.troyon, 'Troyon β_N / 3.5', C.orange),
@@ -705,9 +719,7 @@
       Object.assign(dash(t, k(r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2)), WI_TRACES[2], C.magenta), { showlegend: false }),
       Object.assign(dash(t, k(r.W_refly_MJ), WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
     // shade the stretches where the learned correction is outside the range it was trained on (ramps, big edits)
-    const ood = []; let a = null;
-    r.in_distribution.forEach((ok, i) => { if (!ok && a === null) a = i; if ((ok || i === t.length - 1) && a !== null) { ood.push([t[a], t[ok ? i - 1 : i]]); a = null; } });
-    Plotly.relayout(W, { shapes: [...(W.layout.shapes || []), ...ood.map(([x0, x1]) => ({ type: 'rect', name: 'ood', xref: 'x', yref: 'paper', x0, x1, y0: 0, y1: 1, fillcolor: 'rgba(137,135,129,0.10)', line: { width: 0 }, layer: 'below' }))] });
+    Plotly.relayout(W, { shapes: [...(W.layout.shapes || []), ...oodShapes(oodRuns(t, r.in_distribution), 'ood')] });
     if (!r.is_identity) {
       Plotly.addTraces(lim, [dash(t, r.limits.greenwald, 'What-if Greenwald', C.blue), dash(t, r.limits.troyon, 'What-if Troyon', C.orange), dash(t, r.limits.kink, 'What-if kink', C.aqua)].map(x => Object.assign(x, { showlegend: false })));
       Plotly.addTraces(P, [Object.assign(dash(t, r.P_nbi_MW, 'Beams, edited', C.magenta), { line: { color: C.magenta, width: 2, dash: 'dash', shape: 'hv' }, showlegend: false })]);
@@ -1298,7 +1310,7 @@
     const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: tSec, x1: tSec, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
     [...TIME_PLOTS, ...($('rp-dw').data ? ['rp-dw'] : [])].forEach(id => {
       if (!$(id).layout) return;   // a panel mid-boot: no shapes to preserve, skip it
-      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || s.name === 'ood');
+      const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || (s.name || '').endsWith('ood'));   // persistent refs + both shadings
       Plotly.relayout(id, { shapes: [...keep, cursor] });
     });
   }

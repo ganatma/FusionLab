@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fusionlab import api_replay, mast
+from fusionlab import api_replay, mast, virtual
 from fusionlab.api import NoDotfiles, app
 
 client = TestClient(app)
@@ -598,6 +598,48 @@ def test_compare_export_groups_rows_by_shot_and_validates():
     assert client.get("/export", params={"shots": ",".join(["30166"] * 7)}).status_code == 200   # dupes dedupe first
     assert client.get("/export/1").status_code == 404   # not in the catalog
     assert client.get("/export/30420", params={"fmt": "parquet"}).status_code == 422
+
+
+# ---- domain shading on the measured replay (FEAT-2): the bundle carries the virtual path's own guard
+# and the band coordinates are exactly the flags' out-of-domain runs — one shared source, no copied numbers.
+
+
+def test_replay_domain_flags_are_the_virtual_guards_own_output():
+    """The replay's in_distribution is virtual.in_distribution on the measured inputs (the identity edit),
+    not a re-derivation with copied ranges: the same function the what-if path is guarded by."""
+    j = client.get("/replay/30420").json()
+    shot = mast.load_shot(30420)
+    ok = virtual.in_distribution(shot, [virtual.Edit()])[0]
+    assert j["model"]["in_distribution"] == ok.tolist()
+
+
+def test_replay_domain_bands_are_the_domain_flags_own_runs():
+    """Band presence/absence and both coordinates are a pure function of the served flags — nothing shaded
+    that the guard does not mark, nothing marked that the UI does not shade."""
+    j = client.get("/replay/30420").json()
+    t, flags = j["measured"]["t_s"], j["model"]["in_distribution"]
+    expected, start = [], None
+    for i, ok in enumerate(flags):
+        if not ok and start is None:
+            start = i
+        if start is not None and (ok or i == len(flags) - 1):
+            expected.append([t[start], t[i if not ok else i - 1]])
+            start = None
+    assert j["domain_bands"] == expected
+    assert bool(j["domain_bands"]) == (False in flags)   # an all-in-domain shot shades nothing
+
+
+def test_domain_bands_is_run_length_encoding_of_the_flags():
+    """Unit contract of the shared helper: consecutive False slices close on their last slice; a run at
+    either edge, a single slice, and an all-False trace all shade exactly their own slices."""
+    t = [0.0, 0.1, 0.2, 0.3, 0.4]
+    f = virtual.domain_bands
+    assert f(t, [True] * 5) == []
+    assert f(t, [False] * 5) == [[0.0, 0.4]]
+    assert f(t, [False]) == [[0.0, 0.0]]
+    assert f(t, [True, False, False, True, True]) == [[0.1, 0.2]]
+    assert f(t, [True, True, False, False, False]) == [[0.2, 0.4]]
+    assert f(t, [False, True, False, True, False]) == [[0.0, 0.0], [0.2, 0.2], [0.4, 0.4]]
 
 
 def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch):

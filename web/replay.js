@@ -19,16 +19,35 @@
   root.innerHTML = `
     <div class="cr">
       <div class="cr-bar" data-guide="bar">
-        <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
-        <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
-        <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
-          <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
-        <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
-        <span class="mono" id="rp-tlabel">–</span>
-        <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
-        <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
-        <span class="status" id="rp-load" hidden aria-live="polite"></span>
-        <span class="status" id="rp-compute" title="Compute status">…</span>
+        <div class="cr-cluster cr-cluster-transport" role="group" aria-label="Transport">
+          <span class="cluster-label" aria-hidden="true">Transport</span>
+          <span class="cluster-body">
+            <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
+            <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
+            <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
+              <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
+            <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
+            <span class="mono" id="rp-tlabel">–</span>
+          </span>
+        </div>
+        <div class="cr-cluster" role="group" aria-label="Shot actions">
+          <span class="cluster-label" aria-hidden="true">Shot actions</span>
+          <span class="cluster-body">
+            <button type="button" id="rp-whatif" class="tool" aria-haspopup="dialog" aria-expanded="false" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">Edit this shot</button>
+            <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD</button>
+            <button type="button" id="rp-share" class="tool" title="Copy a link that reopens this view: the workspace, the shot, the slice">Share</button>
+            <button type="button" id="rp-lines" class="tool on" aria-pressed="true" title="Trace magnetic field lines through the reconstructed flux map (NVIDIA Warp). The reconstruction is axisymmetric and lossy — read the lines as indicative.">Field lines</button>
+            <button type="button" id="rp-cmp-go" class="tool" title="Pick shots to compare side by side in the catalog">Compare…</button>
+          </span>
+        </div>
+        <div class="cr-cluster cr-cluster-status" role="group" aria-label="Status">
+          <span class="cluster-label" aria-hidden="true">Status</span>
+          <span class="cluster-body">
+            <span class="status" id="rp-load" hidden aria-live="polite"></span>
+            <span class="status" id="rp-flash" role="status" aria-live="polite" hidden></span>
+            <span class="status" id="rp-compute" title="Compute status">…</span>
+          </span>
+        </div>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -55,37 +74,25 @@
       <div class="cr-cell" id="cell-tr" data-guide="traces">
         <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim" id="rp-tr-note">laws are fed the measured power</span></h2>
         <div class="strips">
-          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
-          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">kJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
+          ${strip('rp-w', 'W', 'MJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
+          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">MJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
         </div>
       </div>
 
       <div class="cr-cell scroll" id="cell-st" data-guide="state">
-        <div id="rp-wi" hidden>
-          <h2>What-if on this shot ${TAG.model} ${TAG.learn} <span class="dim">the real programme, edited and re-flown · educational, not a prediction</span></h2>
-          <div class="wi-grid">
-            <div><div id="rp-wi-sliders"></div>
-              <p class="small muted" id="rp-wi-evidence"></p>
-              <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
-            <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
-                <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
-              <div class="wi-out small" id="rp-wi-out"></div>
-              <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
-          </div>
-        </div>
         <h2>Shot state ${TAG.meas} <span id="rp-head" class="dim"></span></h2>
         <div class="params" data-guide="params">
           <div><span>t</span><b id="rp-r-t">–</b><i>s</i></div>
           <div><span>I<sub>p</sub></span><b id="rp-r-ip">–</b><i>MA</i></div>
           <div><span>n̄<sub>e</sub></span><b id="rp-r-n">–</b><i>10²⁰ m⁻³</i></div>
           <div><span>T<sub>e0</sub></span><b id="rp-r-te">–</b><i>keV</i></div>
-          <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
+          <div><span>W</span><b id="rp-r-w">–</b><i>MJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
-        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
-        <div class="gauge-row wi-keep" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
+        <h2 style="margin-top:8px">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
+        <div class="gauge-row" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
         <div class="cols">
           <div data-guide="insight"><h2>What the comparison shows ${TAG.comp}</h2><div id="rp-insight" class="small"></div></div>
           <div data-guide="logbook"><h2>Session leader's logbook ${TAG.meas}</h2><div id="rp-log" class="small"></div></div>
@@ -98,11 +105,33 @@
           <span class="seg" id="rp-view" data-guide="view" hidden><button type="button" data-v="cutaway" class="on">Cutaway</button><button type="button" data-v="port">Inside the vessel</button></span></h2>
         <div class="grow"><div id="rp-3d" class="fill"></div>
           <div class="chips" data-guide="q-chips"><span>q<sub>95</sub> traced <b id="rp-q-tr">–</b></span><span>q<sub>95</sub> EFIT <b id="rp-q-ef">–</b></span></div></div>
+        <p class="small muted cr-note">Magnetic-surface reconstruction is lossy (axisymmetric only: no islands, no 3D fields) — read the field lines as indicative.</p>
         <details class="small"><summary>What am I looking at?</summary>
           <p>The vessel and PF coils are the FAIR-MAST limiter contour and coil filaments revolved about the axis; the glowing shell is EFIT's last closed flux surface at this time slice, coloured by core T<sub>e</sub>. <span id="rp-3d-note"></span></p>
           <p class="muted">Each line is integrated through the EFIT flux map of this time slice (RK4 in toroidal angle, one GPU thread per line, every slice of the shot in one kernel launch). Counting toroidal turns per poloidal turn gives q without using EFIT's own q, so the agreement is a check of the whole chain: archive → units → interpolation → integrator. Axisymmetric reconstruction only: no islands, no 3D fields. Drag to rotate. The same lines are in the OpenUSD download.</p></details>
       </div>
-    </div>`;
+    </div>
+
+    <dialog id="rp-wi" class="wi-drawer" role="dialog" aria-modal="true" aria-labelledby="rp-wi-title">
+      <div class="wi-head">
+        <div class="wi-head-title">
+          <h2 id="rp-wi-title">Edit this shot ${TAG.model} ${TAG.learn}</h2>
+          <p class="small muted">The real programme, edited and re-flown · educational, not a prediction</p>
+        </div>
+        <button type="button" class="tool" id="rp-wi-x" aria-label="Close the editor">✕</button>
+      </div>
+      <div class="wi-scroll">
+        <div class="wi-grid">
+          <div><div id="rp-wi-sliders"></div>
+            <p class="small muted" id="rp-wi-evidence"></p>
+            <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
+          <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
+              <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
+            <div class="wi-out small" id="rp-wi-out"></div>
+            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+        </div>
+      </div>
+    </dialog>`;
 
   // Catalog search filter set (A1): the ranges the API exposes, one row each — [label, unit, url prefix].
   const SRCH_RANGES = [['I<sub>p</sub>', 'MA', 'ip'], ['B', 'T', 'bt'], ['P<sub>nbi</sub>', 'MW', 'pnbi'],
@@ -163,10 +192,11 @@
 
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
   let shot = null, db = null, lines3dOk = true, linesFail503 = 0, use3 = false, playTimer = null, speed = 1;
+  let linesOn = true;   // the Field lines toggle (shot actions): false stops line fetches and clears them from the 3D panel
   let initP = null, loadSeq = 0;
   const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
   let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
-  let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
+  let wi = { on: false, gate: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
   const lineCache = new Map();
   const psiCache = new Map();
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
@@ -217,6 +247,7 @@
       if (!shot) return;
       const id = shot.meta.shot_id;
       $('rp-usd').setAttribute('aria-busy', 'true');
+      flash('wait', 'Exporting the OpenUSD stage…', 0);   // sticks until the export settles
       try {
         const r = await fetch(`/replay/${id}/usd`, { method: 'POST' });
         if (!r.ok) throw new Error(`export failed: ${r.status}`);
@@ -225,8 +256,14 @@
         const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
         a.click();
         URL.revokeObjectURL(a.href);
+        flash('ok', `Exported ${name} — check your downloads`);
+        usdErr = null; renderFallback(lastCompute);   // a clean export re-arms the notice row for the next failure
       } catch (e) {
         console.error('USD export failed:', e);
+        usdErr = `<b>OpenUSD export of shot #${id} failed.</b> ${esc(String(e && e.message || e))} — the stage writer needs the FusionLab server. Check the compute status, then try again.`;
+        usdSeen = false;
+        renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, not console-only
+        flash('bad', 'OpenUSD export failed');
       } finally {
         $('rp-usd').removeAttribute('aria-busy');
       }
@@ -269,16 +306,21 @@
     // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
     // Both notices render in the same grid row, so the banner takes the row while it is up: the
     // operational status outranks the onboarding hint, and the hint comes back (per its own
-    // dismissed state) when the banner goes away.
-    let fallbackSeen = false;
+    // dismissed state) when the banner goes away. renderFallback is the single painter — the /compute
+    // poll and the USD export handler only set state — so a poll cannot overwrite a fresh export error.
+    let fallbackSeen = false, usdErr = null, usdSeen = false;
     function renderFallback(s) {
       if (s && !s.fallback) fallbackSeen = false;
-      const show = !!s && !!s.fallback && !fallbackSeen;
+      const compute = !!s && !!s.fallback && !fallbackSeen;   // the compute fallback outranks a failed export
+      const usd = !compute && !!usdErr && !usdSeen;
+      const show = compute || usd;   // one notice per grid row: it takes the row from the onboarding hint
       $('rp-fallback').hidden = !show;
+      $('rp-fallback').classList.toggle('error', usd);   // red edge for the export failure, amber for compute
       $('rp-hint').hidden = show ? true : hintSeen();
-      if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (compute) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (usd) $('rp-fallback-text').innerHTML = usdErr;   // composed at set time, with esc() on the reason
     }
-    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; usdSeen = true; renderFallback(lastCompute); });
     async function pollCompute() {
       try {
         const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);
@@ -292,6 +334,26 @@
     seg('rp-view', v => { if (use3) window.Vessel3D.setView(v); document.dispatchEvent(new CustomEvent('fusionlab:view', { detail: { view: v } })); });
     $('rp-eq-on').addEventListener('change', () => drawPsi(+$('rp-t').value));
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
+    $('rp-wi-x').addEventListener('click', () => whatIf(false));
+    $('rp-wi').addEventListener('close', finishWhatIf);
+    // Share (audit seed 8): the URL is the state — copy a link that reproduces this view.
+    $('rp-share').addEventListener('click', async () => {
+      const url = await shareUrl();
+      let ok = false;
+      try { await navigator.clipboard.writeText(url); ok = true; }
+      catch (e) {   // clipboard API absent (non-secure context) or refused: fall back to a temp input
+        const inp = document.createElement('input');
+        inp.value = url; document.body.appendChild(inp); inp.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        inp.remove();
+      }
+      if (ok) flash('ok', 'Link copied — paste it to share this view');
+      else flash('bad', 'Copy refused — the address bar still holds this view');
+    });
+    // Field lines are an action, not a given: on by default, off with one click (setLines()).
+    $('rp-lines').addEventListener('click', () => setLines(!linesOn));
+    // Compare lives in its own workspace (spec Workspace 02): navigate there instead of re-carving this room.
+    $('rp-cmp-go').addEventListener('click', () => window.FusionLabRouter.navigate('compare'));
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
@@ -377,7 +439,7 @@
     for (let k = 0; k < n; k++) {
       if (!shot || shot.meta.shot_id !== id) return;
       await getPsi(id, k);
-      if (lines3dOk) await getLines(id, k);
+      if (lines3dOk && linesOn) await getLines(id, k);
     }
   }
 
@@ -483,10 +545,10 @@
     Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
     if (cmp.on) { drawCmpW(); drawCmpLim(); return; }
     Plotly.react('rp-w', [
-      line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
-      line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
-      line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
-      ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
+      line(t, me.W_MJ, 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
+      line(t, mo.W_L_MJ, 'ITER89-P (L-mode law)', C.orange),
+      line(t, mo.W_H_MJ, 'IPB98(y,2) (H-mode law)', C.yellow),
+      ...(mo.W_hybrid_MJ ? [line(t, mo.W_hybrid_MJ, 'IPB98 × PhysicsNeMo correction', C.aqua,
                                  { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
     ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
     Plotly.react('rp-lim', [
@@ -547,7 +609,7 @@
     const me = shot.measured, mo = shot.model, t = me.t_s[i];
     $('rp-tlabel').textContent = `t = ${fmt(t, 3)} s · ${i + 1}/${me.t_s.length}`;
     const worst = Math.max(...[mo.f_greenwald[i], mo.troyon[i], mo.kink[i]].filter(v => v !== null && isFinite(v)), 0);
-    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 0) + ' kJ';
+    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 2) + ' MJ';
     $('rp-p-val').textContent = fmt((me.P_ohm_MW[i] || 0) + (me.P_nbi_MW[i] || 0), 2) + ' MW';
     $('rp-ip-val').textContent = fmt(me.Ip_MA[i]) + ' MA';
     $('rp-lim-val').textContent = fmt(worst) + '×';
@@ -556,7 +618,7 @@
     $('rp-r-ip').textContent = fmt(me.Ip_MA[i]);
     $('rp-r-n').textContent = fmt(me.n_e20[i], 3);
     $('rp-r-te').textContent = fmt(me.Te0_keV?.[i]);
-    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 1);
+    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 3);
     $('rp-r-h').textContent = fmt(mo.H98[i]);
     const L = wi.on && wi.res && !wi.res.is_identity ? wi.res.limits : { greenwald: mo.f_greenwald, troyon: mo.troyon, kink: mo.kink };
     gauge('greenwald', L.greenwald[i]); gauge('troyon', L.troyon[i]); gauge('kink', L.kink[i]);
@@ -567,7 +629,7 @@
     Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
     Plotly.restyle('rp-xs', { x: [[me.R_mag_m[i]]], y: [[me.Z_mag_m[i]]] }, [n - 1]);
     if (db) markDb(i);
-    if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
+    if (use3) window.Vessel3D.setSlice(i, linesOn ? linesNow.get(shot.meta.shot_id + ':' + i) : null);   // boundary follows the slider at once
     clearTimeout(psiTimer);
     psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); cmpThomson(); }, 40);   // cmpThomson: the compared shots' profiles follow the cursor
     document.dispatchEvent(new CustomEvent('fusionlab:slice', { detail: sliceState(i) }));
@@ -591,9 +653,14 @@
 
   async function whatIf(on) {
     const want = !!on && !!shot;
-    if (want && !wi.gate) {
+    if (!want) {   // close: Esc, the ✕ button and programmatic calls (guide.js entering guided) all land here
+      if ($('rp-wi').open) $('rp-wi').close();   // the 'close' listener runs finishWhatIf
+      else finishWhatIf();
+      return;
+    }
+    if (!wi.gate) {
       // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
-      // leave the panel half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
+      // leave the drawer half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
       // refetch on every later click and keep what-if broken until reload.
       let gate = null;
       try {
@@ -602,9 +669,11 @@
         if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
       } catch (e) { /* network failure: the error render just below carries it */ }
       if (!gate) {
-        $('rp-wi').hidden = false;   // open the panel just enough to carry the one-line error
+        $('rp-wi-out').innerHTML = '<p class="muted">The anchored editor needs the FusionLab server (/virtual/gate). <button type="button" class="tool" id="rp-wi-retry">Retry</button></p>';
+        $('rp-wi-retry').addEventListener('click', () => whatIf(true));
         $('rp-whatif').classList.remove('on');
-        $('rp-wi-out').innerHTML = '<p class="muted">What-if needs the FusionLab server (/virtual/gate). Click What-if again to retry.</p>';
+        $('rp-whatif').setAttribute('aria-expanded', 'false');
+        showEditDrawer();   // open the drawer just enough to carry the one-line error and its Retry
         return;
       }
       wi.gate = gate;
@@ -620,12 +689,55 @@
       $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
       $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
-    wi.on = want;
-    $('rp-whatif').classList.toggle('on', wi.on);
-    $('rp-wi').hidden = !wi.on;
-    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
-    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
+    wi.on = true;
+    $('rp-whatif').classList.add('on');
+    $('rp-whatif').setAttribute('aria-expanded', 'true');
+    showEditDrawer();
     askWhatIf();
+  }
+
+  // The anchored editor is a modal drawer over the Replay room (spec L2): the state cell, gauges and
+  // logbook underneath stay live — every edit re-flies the model and repaints them. showModal puts it
+  // on the top layer: Esc closes natively (cancel → close) and the rest of the page is inert meanwhile.
+  // Sliders start from the measured programme (data-zero); edits persist across close/reopen because the
+  // drawer's DOM and the memoized gate survive; "Reset edits" restores the measured programme.
+  function showEditDrawer() {
+    if ($('rp-wi').open) return;
+    wi.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;   // focus returns here on close
+    $('rp-wi').showModal();
+  }
+
+  function finishWhatIf() {   // runs from the dialog 'close' event and from whatIf(false) while closed
+    if (wi.on) {
+      wi.on = false;
+      $('rp-whatif').classList.remove('on');
+      $('rp-whatif').setAttribute('aria-expanded', 'false');
+      wi.res = null;
+      if (shot) { drawWhatIf(); scrub(+$('rp-t').value); }   // the strips read the measured programme again
+    }
+    const op = wi.opener; wi.opener = null;
+    if (op && op.isConnected) op.focus();
+  }
+
+  // Transient status chip in the status cluster (role=status): share feedback, USD export progress/result.
+  // ms=0 sticks until the next flash — an in-flight export keeps its chip up while the request runs.
+  let flashTimer = null;
+  function flash(cls, text, ms = 4000) {
+    const el = $('rp-flash');
+    clearTimeout(flashTimer);
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = text;
+    el.hidden = false;
+    if (ms) flashTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  // Share (audit seed 8): the URL is the state — copy a link that reproduces this view. An explicit hash
+  // route reproduces itself; on the bare landing, build the canonical route from the loaded shot and slice.
+  async function shareUrl() {
+    if (/^#\//.test(location.hash)) return location.href;
+    if (!shot) return location.origin + location.pathname;
+    const t = shot.measured.t_s[+$('rp-t').value] || 0;
+    return location.origin + location.pathname + '#/replay/' + shot.meta.shot_id + '?t=' + Number(t.toFixed(3));
   }
   function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
 
@@ -659,13 +771,13 @@
     Plotly.relayout(W, { shapes: (W.layout.shapes || []).filter(s => s.name !== 'ood') });
     $('rp-lim-src').textContent = wi.on && r && !r.is_identity ? 'scaled from the measured values by the what-if · 1.0 = limit' : 'limit formulas on the measured values · 1.0 = limit';
     if (!wi.on || !r) { $('rp-wi-out').innerHTML = ''; return; }
-    const t = r.t_s, k = a => scale(a, 1e3), dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
+    const t = r.t_s, dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
     const band = r.timing_edit ? 0.10 : 0.28;   // a timing edit keeps the real shot's events at their old times: the anchored band is shown faint
     Plotly.addTraces(W, [
-      line(t, k(r.anchored.lo), WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
-      line(t, k(r.anchored.hi), WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
-      Object.assign(dash(t, k(r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2)), WI_TRACES[2], C.magenta), { showlegend: false }),
-      Object.assign(dash(t, k(r.W_refly_MJ), WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
+      line(t, r.anchored.lo, WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
+      line(t, r.anchored.hi, WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
+      Object.assign(dash(t, r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2), WI_TRACES[2], C.magenta), { showlegend: false }),
+      Object.assign(dash(t, r.W_refly_MJ, WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
     // shade the stretches where the learned correction is outside the range it was trained on (ramps, big edits)
     const ood = []; let a = null;
     r.in_distribution.forEach((ok, i) => { if (!ok && a === null) a = i; if ((ok || i === t.length - 1) && a !== null) { ood.push([t[a], t[ok ? i - 1 : i]]); a = null; } });
@@ -722,7 +834,7 @@
   }
 
   async function drawLines(i) {
-    if (!lines3dOk) return;
+    if (!lines3dOk || !linesOn) return;
     const id = shot.meta.shot_id, f = await getLines(id, i);
     if (!f) {
       // Transient failures (a network blip, one 503) leave lines3dOk true and retry on the next scrub; only a
@@ -740,6 +852,21 @@
     $('rp-q-tr').textContent = fmt(f.q95_traced); $('rp-q-ef').textContent = fmt(f.q95_efit);
     const c = f.shot_check;
     $('rp-3d-note').innerHTML = `Over all ${c.n_compared} slices of this shot the traced q<sub>95</sub> differs from EFIT's by a median <b>${(c.median_rel_err * 100).toFixed(2)}%</b> (95th percentile ${(c.p95_rel_err * 100).toFixed(2)}%), and a line drifts off its flux surface by at most ${c.psi_n_drift_max.toExponential(1)} in ψ<sub>N</sub>. Traced on ${esc(f.device)}.${f.computed_on ? ` <span class="muted">Computed on ${esc(f.computed_on)}.</span>` : ''}`;
+  }
+
+  // Field lines are an action, not a given (shot actions cluster): on by default, off with one click —
+  // the vessel and boundary stay, the lines (and their fetches) stop, and the q95 chips go quiet with them.
+  function setLines(on) {
+    linesOn = !!on;
+    const b = $('rp-lines');
+    b.classList.toggle('on', linesOn);
+    b.setAttribute('aria-pressed', String(linesOn));
+    if (!shot) return;
+    const i = +$('rp-t').value;
+    if (linesOn) { drawLines(i); return; }   // cached slices repaint at once
+    if (use3) window.Vessel3D.setSlice(i, null);
+    else if ($('rp-3d').data) Plotly.restyle('rp-3d', { x: [[]], y: [[]], z: [[]] }, [2, 3, 4, 5, 6]);   // the five line traces; vessel and LCFS stay
+    $('rp-q-tr').textContent = '–'; $('rp-q-ef').textContent = '–';
   }
 
   async function drawPsi(i) {
@@ -1003,7 +1130,7 @@
     $('rp-dw-strip').hidden = !showing;
     document.querySelector('#cell-tr .strips').classList.toggle('cmp-on', showing);
     $('rp-tr-note').textContent = cmp.on ? 'one measured trace per shot' : 'laws are fed the measured power';
-    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">kJ · dashed W/W<sub>ref</sub> · computed</span>`;
+    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">MJ · dashed W/W<sub>ref</sub> · computed</span>`;
   }
 
   async function startCompare(idsIn) {
@@ -1166,7 +1293,7 @@
   function drawCmpW() {
     const traces = cmpReadyIds().map(id => {
       const d = cmpData(id), c = cmpColor(id), ref = id === cmp.ref;
-      return line(d.measured.t_s, scale(d.measured.W_MJ, 1e3), `#${id} measured${ref ? ' · reference' : ''}`, c,
+      return line(d.measured.t_s, d.measured.W_MJ, `#${id} measured${ref ? ' · reference' : ''}`, c,
                   { line: { color: c, width: ref ? 3 : 2 } });
     });
     Plotly.react('rp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);
@@ -1200,7 +1327,7 @@
     return out;
   }
 
-  // The difference strip: ΔW(t) in kJ (solid) and W/W_ref (dotted, right axis), both computed from the
+  // The difference strip: ΔW(t) in MJ (solid) and W/W_ref (dotted, right axis), both computed from the
   // measured EFIT stored energies relative to the reference shot.
   function drawDw() {
     if (!cmp.on) return;
@@ -1214,7 +1341,7 @@
       if (!d) continue;
       const Wi = SL.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
       const c = cmpColor(id);
-      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i]) * 1e3) : [],
+      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i])) : [],
                        `ΔW #${id} − #${cmp.ref} (computed)`, c, { line: { color: c, width: 2 } }));
       traces.push(line(t0, Wi ? Wi.map((w, i) => (!w || W0[i] == null) ? null : w / W0[i]) : [],
                        `#${id} / #${cmp.ref} W (computed)`, c,

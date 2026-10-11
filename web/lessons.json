@@ -170,7 +170,7 @@
 
     { "id": "5.2", "ch": 5, "title": "Beams on",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.1 }, "focus": ["strip-p", "strip-w", "bar"],
-      "body": "So far the only heating is ohmic, under 1 MW, and the stored energy is about 10 kJ. Find the moment the [[neutral beam|nbi]] switches on.",
+      "body": "So far the only heating is ohmic, under 1 MW, and the stored energy is about 0.01 MJ. Find the moment the [[neutral beam|nbi]] switches on.",
       "task": { "text": "Scrub forward to the first slice with the beam on.", "check": { "event": "fusionlab:slice", "all": [{ "path": "nbi_on", "op": "==", "value": true }, { "path": "t_s", "op": "<=", "value": 0.135 }] } },
       "deeper": "From 0.12 s about 2 MW of beam power arrives and the stored energy triples within 30 ms. Part of that early rise is the beam's own fast ions, which EFIT counts as stored energy." },
 
@@ -181,7 +181,7 @@
 
     { "id": "5.4", "ch": 5, "title": "The peak",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["params", "gauge-troyon", "strip-w"],
-      "body": "At 0.27 s the stored energy peaks at 127 kJ and the Troyon gauge reaches 0.92. H<sub>98</sub> reads 1.3, which would be excellent confinement. Be careful. The measured energy includes fast beam ions that the scaling law knows nothing about, so H<sub>98</sub> reads high whenever beams are on. A number is only as good as your knowledge of what went into it, and the panel says so." },
+      "body": "At 0.27 s the stored energy peaks at 0.13 MJ and the Troyon gauge reaches 0.92. H<sub>98</sub> reads 1.3, which would be excellent confinement. Be careful. The measured energy includes fast beam ions that the scaling law knows nothing about, so H<sub>98</sub> reads high whenever beams are on. A number is only as good as your knowledge of what went into it, and the panel says so." },
 
     { "id": "5.5", "ch": 5, "title": "What the comparison shows",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["insight", "logbook"],
@@ -222,6 +222,6 @@
 
     { "id": "8.1", "ch": 8, "title": "Into the lab",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": true, "highlight": null, "view": "cutaway", "focus": [], "last": true,
-      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>What-if</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
+      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>Edit this shot</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
   ]
 }

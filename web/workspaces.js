@@ -48,8 +48,8 @@
       const t = q.get('t');
       F.replay.select(id).then((st) => {   // renders its own error in the replay cell on failure (never rejects)
         if (t !== null && st && isFinite(Number(t))) F.replay.scrubTo({ t: Number(t) });
-        // ?edit=1: edit intent — Explore's "Edit a real shot instead →" lands here. Until the drawer change
-        // owns ?edit=1 (spec L2), it opens today's anchored what-if on the replayed shot.
+        // ?edit=1: edit intent — Explore's "Edit a real shot instead →" lands here and opens the anchored
+        // edit drawer (spec L2) over the replayed shot.
         if (q.has('edit') && F.replay.whatIf) F.replay.whatIf(true);
       });
     },

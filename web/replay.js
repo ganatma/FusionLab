@@ -74,8 +74,8 @@
       <div class="cr-cell" id="cell-tr" data-guide="traces">
         <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim" id="rp-tr-note">laws are fed the measured power</span></h2>
         <div class="strips">
-          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
-          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">kJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
+          ${strip('rp-w', 'W', 'MJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
+          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">MJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
         </div>
       </div>
 
@@ -86,7 +86,7 @@
           <div><span>I<sub>p</sub></span><b id="rp-r-ip">–</b><i>MA</i></div>
           <div><span>n̄<sub>e</sub></span><b id="rp-r-n">–</b><i>10²⁰ m⁻³</i></div>
           <div><span>T<sub>e0</sub></span><b id="rp-r-te">–</b><i>keV</i></div>
-          <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
+          <div><span>W</span><b id="rp-r-w">–</b><i>MJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
         <h2 style="margin-top:8px">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
@@ -545,10 +545,10 @@
     Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
     if (cmp.on) { drawCmpW(); drawCmpLim(); return; }
     Plotly.react('rp-w', [
-      line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
-      line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
-      line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
-      ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
+      line(t, me.W_MJ, 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
+      line(t, mo.W_L_MJ, 'ITER89-P (L-mode law)', C.orange),
+      line(t, mo.W_H_MJ, 'IPB98(y,2) (H-mode law)', C.yellow),
+      ...(mo.W_hybrid_MJ ? [line(t, mo.W_hybrid_MJ, 'IPB98 × PhysicsNeMo correction', C.aqua,
                                  { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
     ], stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
     Plotly.react('rp-lim', [
@@ -609,7 +609,7 @@
     const me = shot.measured, mo = shot.model, t = me.t_s[i];
     $('rp-tlabel').textContent = `t = ${fmt(t, 3)} s · ${i + 1}/${me.t_s.length}`;
     const worst = Math.max(...[mo.f_greenwald[i], mo.troyon[i], mo.kink[i]].filter(v => v !== null && isFinite(v)), 0);
-    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 0) + ' kJ';
+    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 2) + ' MJ';
     $('rp-p-val').textContent = fmt((me.P_ohm_MW[i] || 0) + (me.P_nbi_MW[i] || 0), 2) + ' MW';
     $('rp-ip-val').textContent = fmt(me.Ip_MA[i]) + ' MA';
     $('rp-lim-val').textContent = fmt(worst) + '×';
@@ -618,7 +618,7 @@
     $('rp-r-ip').textContent = fmt(me.Ip_MA[i]);
     $('rp-r-n').textContent = fmt(me.n_e20[i], 3);
     $('rp-r-te').textContent = fmt(me.Te0_keV?.[i]);
-    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 1);
+    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 3);
     $('rp-r-h').textContent = fmt(mo.H98[i]);
     const L = wi.on && wi.res && !wi.res.is_identity ? wi.res.limits : { greenwald: mo.f_greenwald, troyon: mo.troyon, kink: mo.kink };
     gauge('greenwald', L.greenwald[i]); gauge('troyon', L.troyon[i]); gauge('kink', L.kink[i]);
@@ -771,13 +771,13 @@
     Plotly.relayout(W, { shapes: (W.layout.shapes || []).filter(s => s.name !== 'ood') });
     $('rp-lim-src').textContent = wi.on && r && !r.is_identity ? 'scaled from the measured values by the what-if · 1.0 = limit' : 'limit formulas on the measured values · 1.0 = limit';
     if (!wi.on || !r) { $('rp-wi-out').innerHTML = ''; return; }
-    const t = r.t_s, k = a => scale(a, 1e3), dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
+    const t = r.t_s, dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
     const band = r.timing_edit ? 0.10 : 0.28;   // a timing edit keeps the real shot's events at their old times: the anchored band is shown faint
     Plotly.addTraces(W, [
-      line(t, k(r.anchored.lo), WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
-      line(t, k(r.anchored.hi), WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
-      Object.assign(dash(t, k(r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2)), WI_TRACES[2], C.magenta), { showlegend: false }),
-      Object.assign(dash(t, k(r.W_refly_MJ), WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
+      line(t, r.anchored.lo, WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
+      line(t, r.anchored.hi, WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
+      Object.assign(dash(t, r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2), WI_TRACES[2], C.magenta), { showlegend: false }),
+      Object.assign(dash(t, r.W_refly_MJ, WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
     // shade the stretches where the learned correction is outside the range it was trained on (ramps, big edits)
     const ood = []; let a = null;
     r.in_distribution.forEach((ok, i) => { if (!ok && a === null) a = i; if ((ok || i === t.length - 1) && a !== null) { ood.push([t[a], t[ok ? i - 1 : i]]); a = null; } });
@@ -1130,7 +1130,7 @@
     $('rp-dw-strip').hidden = !showing;
     document.querySelector('#cell-tr .strips').classList.toggle('cmp-on', showing);
     $('rp-tr-note').textContent = cmp.on ? 'one measured trace per shot' : 'laws are fed the measured power';
-    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">kJ · dashed W/W<sub>ref</sub> · computed</span>`;
+    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">MJ · dashed W/W<sub>ref</sub> · computed</span>`;
   }
 
   async function startCompare(idsIn) {
@@ -1293,7 +1293,7 @@
   function drawCmpW() {
     const traces = cmpReadyIds().map(id => {
       const d = cmpData(id), c = cmpColor(id), ref = id === cmp.ref;
-      return line(d.measured.t_s, scale(d.measured.W_MJ, 1e3), `#${id} measured${ref ? ' · reference' : ''}`, c,
+      return line(d.measured.t_s, d.measured.W_MJ, `#${id} measured${ref ? ' · reference' : ''}`, c,
                   { line: { color: c, width: ref ? 3 : 2 } });
     });
     Plotly.react('rp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);
@@ -1327,7 +1327,7 @@
     return out;
   }
 
-  // The difference strip: ΔW(t) in kJ (solid) and W/W_ref (dotted, right axis), both computed from the
+  // The difference strip: ΔW(t) in MJ (solid) and W/W_ref (dotted, right axis), both computed from the
   // measured EFIT stored energies relative to the reference shot.
   function drawDw() {
     if (!cmp.on) return;
@@ -1341,7 +1341,7 @@
       if (!d) continue;
       const Wi = SL.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
       const c = cmpColor(id);
-      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i]) * 1e3) : [],
+      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i])) : [],
                        `ΔW #${id} − #${cmp.ref} (computed)`, c, { line: { color: c, width: 2 } }));
       traces.push(line(t0, Wi ? Wi.map((w, i) => (!w || W0[i] == null) ? null : w / W0[i]) : [],
                        `#${id} / #${cmp.ref} W (computed)`, c,

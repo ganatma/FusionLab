@@ -1286,7 +1286,7 @@
     if (!b) return;
     if (b.dataset.act === 'cancel') return SL.cancelAll();   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
-    if (b.dataset.act === 'search') return $('rp-srch-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (b.dataset.act === 'search') return $('rp-srch-panel').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     if (b.dataset.act === 'share') return void shareCompare(b);
     if (b.dataset.act === 'retry')   // "Retry failed": every failed chip refetches under the shared machine
       return void cmp.ids.filter(x => SL.get(x) === 'error').forEach(id => cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null));

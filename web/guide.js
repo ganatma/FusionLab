@@ -107,7 +107,7 @@
     const keep = new Set();                          // the lit elements and every ancestor up to the tab
     inTab.forEach((el) => { for (let n = el; n && n !== section.parentNode; n = n.parentNode) keep.add(n); });
     const dock = parseFloat(getComputedStyle(document.body).getPropertyValue('--dock')) || 0, r = inTab[0].getBoundingClientRect();
-    if (r.top < 0 || r.top > innerHeight - dock - 80) inTab[0].scrollIntoView({ block: 'start', behavior: 'smooth' });   // its top is off screen (pages that scroll)
+    if (r.top < 0 || r.top > innerHeight - dock - 80) inTab[0].scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });   // its top is off screen (pages that scroll)
     keep.forEach((node) => {
       if (inTab.includes(node)) return;              // a lit element keeps all of its children
       [...node.children].forEach((c) => {

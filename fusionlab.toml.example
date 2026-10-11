@@ -9,18 +9,33 @@
 # "User-provided compute (SSH)" and docs/COMPUTE.md.
 # provider = "local"
 
-[compute.ssh]
-# The host to run compute on. Any alias your ~/.ssh/config already resolves works as-is.
-# host = "ousaisrvr"
+# Which [compute.hosts.*] profile to use when several are defined (FUSIONLAB_COMPUTE_HOST wins).
+# With a single profile defined it is used without a selector.
+# host = "gpu-lab"
 
-# Where the FusionLab clone lives on that host; the worker autostarts from here.
+# One table per GPU box; switch with FUSIONLAB_COMPUTE_HOST (env) or the [compute] host key above.
+# Each profile carries the same keys as the legacy [compute.ssh] table below.
+[compute.hosts.gpu-lab]
+host = "gpu-lab"             # any ~/.ssh/config alias resolves as-is
+remote_dir = "~/FusionLab"   # where the FusionLab clone lives on that host
+autostart = true             # run `uv run fusionlab-worker` over SSH when no worker answers
+# port = 8420                # local end of the tunnel on this machine — give each host its own
+#                            # port when two FusionLab instances share this laptop
+# remote_port = 8420         # port the worker binds on the remote host, loopback-only
+
+# A second box is one more block away — select it with FUSIONLAB_COMPUTE_HOST=gpu-lab-2.
+# [compute.hosts.gpu-lab-2]
+# host = "gpu-lab-2"
 # remote_dir = "~/FusionLab"
-
-# Run `uv run fusionlab-worker` over SSH when no worker answers (default true).
 # autostart = true
+# port = 8421
+# remote_port = 8420
 
-# Local end of the tunnel on this machine (default 8420).
+[compute.ssh]
+# The degenerate single-host table, still supported unchanged; prefer a [compute.hosts.*] profile
+# once you might own more than one box. A populated [compute.ssh] table wins when no host is selected.
+# host = "ousaisrvr"
+# remote_dir = "~/FusionLab"
+# autostart = true
 # port = 8420
-
-# Port the worker binds on the remote host, loopback-only (default 8420).
 # remote_port = 8420

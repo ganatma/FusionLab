@@ -5,7 +5,10 @@ at the repo root, beside .env ([compute] provider = "local"), and defaults to Lo
 in-process behavior, so a bare checkout with no config runs exactly as before. SshProvider (PR 2) is
 registered behind a lazy import:
 the default install never pulls asyncssh; selecting ssh requires `uv sync --extra remote` and a
-[compute.ssh] host (or FUSIONLAB_SSH_HOST) — keys and passwords never appear in config, by design.
+[compute.hosts.<name>] profile — or the legacy single [compute.ssh] table — (or FUSIONLAB_SSH_HOST).
+Host profiles are selected by FUSIONLAB_COMPUTE_HOST (env) or [compute] host in fusionlab.toml; with
+no selector the legacy table wins, a lone profile is unambiguous, and several profiles fail loudly
+until one is named. Keys and passwords never appear in config, by design.
 """
 
 from __future__ import annotations
@@ -34,8 +37,37 @@ _SSH_ENV_VARS: dict[str, str] = {   # FUSIONLAB_SSH_* overrides; keys map to Ssh
 }
 
 
+def _ssh_table(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The base ssh table for the selected host — raw [compute.ssh]-shaped keys, no env merging yet.
+
+    Selection: FUSIONLAB_COMPUTE_HOST (env) wins over [compute] host in the toml; either names a
+    [compute.hosts.<name>] profile, and an unknown name fails loudly here (get_provider's contract),
+    never by silently falling back to another host. With no selector the legacy [compute.ssh] table
+    still works unchanged — the degenerate single-host case — then a lone profile is unambiguous,
+    and several profiles are an error until one is named.
+    """
+    hosts = cfg.get("hosts") or {}
+    selected = os.environ.get("FUSIONLAB_COMPUTE_HOST", "").strip() or str(cfg.get("host", "")).strip()
+    if selected:
+        if selected not in hosts:
+            known = f"known hosts: {sorted(hosts)}" if hosts else "no [compute.hosts.*] profiles are defined"
+            raise ValueError(f"unknown compute host {selected!r} (FUSIONLAB_COMPUTE_HOST or [compute] host); "
+                             f"{known} — see fusionlab.toml.example")
+        return dict(hosts[selected])
+    legacy = cfg.get("ssh") or {}
+    if legacy:
+        return dict(legacy)
+    if len(hosts) == 1:
+        return dict(next(iter(hosts.values())))
+    if len(hosts) > 1:
+        raise ValueError(f"{len(hosts)} [compute.hosts.*] profiles are defined ({sorted(hosts)}) but no host "
+                         f"is selected — set FUSIONLAB_COMPUTE_HOST or [compute] host in fusionlab.toml")
+    return {}
+
+
 def ssh_options() -> dict[str, Any]:
-    """The [compute.ssh] table from fusionlab.toml, merged with FUSIONLAB_SSH_* env overrides (env wins).
+    """The selected host's ssh options — [compute.hosts.<name>] (or the legacy [compute.ssh] table)
+    from fusionlab.toml, merged with FUSIONLAB_SSH_* env overrides (env wins).
 
     Returns kwargs ready for SshProvider(**...). Never contains credentials — the connection uses the
     user's own SSH agent, keys, and ~/.ssh/config (design §8).
@@ -43,8 +75,8 @@ def ssh_options() -> dict[str, Any]:
     opts: dict[str, Any] = {}
     if _TOML_PATH.exists():
         with _TOML_PATH.open("rb") as f:
-            opts.update(tomllib.load(f).get("compute", {}).get("ssh", {}))
-    if "port" in opts:   # the design's toml key names the local end of the tunnel
+            opts.update(_ssh_table(tomllib.load(f).get("compute", {})))
+    if "port" in opts:   # every toml spelling names the local end of the tunnel
         opts["local_port"] = opts.pop("port")
     for key, var in _SSH_ENV_VARS.items():
         raw = os.environ.get(var, "").strip()

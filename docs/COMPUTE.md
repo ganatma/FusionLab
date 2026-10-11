@@ -38,14 +38,38 @@ On the machine with the browser (your laptop):
    # port = 8420               # local end of the tunnel
    ```
 
+   More than one GPU box? Define one `[compute.hosts.<name>]` profile per host instead — each takes
+   the same keys as `[compute.ssh]` — and switch with `FUSIONLAB_COMPUTE_HOST` (give each profile
+   its own `port`, the local tunnel end, so two FusionLab instances on this machine don't collide):
+
+   ```toml
+   [compute.hosts.gpu-lab]
+   host = "gpu-lab"
+   remote_dir = "~/FusionLab"
+   autostart = true
+   port = 8420
+
+   [compute.hosts.gpu-lab-2]
+   host = "gpu-lab-2"
+   remote_dir = "~/FusionLab"
+   autostart = true
+   port = 8421
+   ```
+
+   The single `[compute.ssh]` table keeps working unchanged — with no host selected it wins over
+   any profiles. A lone profile needs no selector; several profiles without a selection, or a
+   selector naming an unknown host, are startup errors — never a quiet pick.
+
 3. `make dev`, open the Replay tab, and watch the header chip. Within a few seconds it should
    read **GPU: gpu-lab (…)** — the worker's own handshake answering through the tunnel.
 
 Every value has an environment-variable form — `FUSIONLAB_COMPUTE_PROVIDER=ssh`,
-`FUSIONLAB_SSH_HOST=gpu-lab`, `FUSIONLAB_SSH_REMOTE_DIR=…`, `FUSIONLAB_SSH_AUTOSTART=…`,
-`FUSIONLAB_SSH_PORT=…` (full list in `.env.example`) — and the environment wins over the TOML
-file. Nothing loads `.env` automatically — not the app, not `make dev` — so these take effect
-when they are in the actual environment: export them, or set them in your service manager.
+`FUSIONLAB_COMPUTE_HOST=gpu-lab`, `FUSIONLAB_SSH_HOST=gpu-lab`, `FUSIONLAB_SSH_REMOTE_DIR=…`,
+`FUSIONLAB_SSH_AUTOSTART=…`, `FUSIONLAB_SSH_PORT=…` (full list in `.env.example`) — and the
+environment wins over the TOML file. (The `FUSIONLAB_SSH_*` overrides apply on top of whichever
+host profile is selected — leave them unset when you switch hosts.) Nothing loads `.env`
+automatically — not the app, not `make dev` — so these take effect when they are in the actual
+environment: export them, or set them in your service manager.
 
 ## What the UI tells you
 

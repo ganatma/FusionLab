@@ -76,7 +76,9 @@ def test_failed_shot_switch_reverts_the_select():
 def test_fire_and_forget_panels_render_their_errors():
     """JS-07: the /db and /surrogate fetches carry the figures.js one-line .catch."""
     replay = _served("replay.js")
-    assert ".catch(() => { $('tab-compare').innerHTML" in replay
+    # /db failure: only the catalog-clouds panel blanks — the comparison bar and the search live in the
+    # same Compare workspace and must survive a /db outage.
+    assert ".catch(() => { const el = $('rp-clouds'); if (el) el.innerHTML" in replay
     assert ".catch(() => { const el = $('rp-sur'); if (el) el.innerHTML" in replay
 
 

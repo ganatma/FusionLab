@@ -204,7 +204,7 @@
 
     { "id": "7.1", "ch": 7, "title": "A law is a fit",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["strip-w"],
-      "body": "The warm curves come from [[scaling laws|scaling-law]]: power-law fits of confinement time across thousands of shots on many machines. They are how ITER was sized. But the machines in that database were conventional, doughnut-shaped tokamaks. MAST is a cored apple, and published studies found it scales differently, with a weaker dependence on current and a much stronger one on field. So on MAST the law is a reference line, not the truth.",
+      "body": "The warm curves come from [[scaling laws|scaling-law]]: power-law fits of confinement time across thousands of shots on many machines. They are how ITER was sized. But the machines in those fits were conventional, doughnut-shaped tokamaks. MAST is a cored apple, and published studies found it scales differently, with a weaker dependence on current and a much stronger one on field. So on MAST the law is a reference line, not the truth.",
       "deeper": "Valovič et al., <i>Nucl. Fusion</i> 49 (2009) 075016 fitted MAST H-modes as W ∝ I<sub>p</sub><sup>0.59</sup> B<sub>T</sub><sup>1.4</sup>, against [[IPB98(y,2)|ipb98]]'s I<sub>p</sub><sup>0.93</sup> B<sub>T</sub><sup>0.15</sup>. The same paper notes the magnitudes broadly agree." },
 
     { "id": "7.2", "ch": 7, "title": "One shot among thousands",

@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from fusionlab import mast, surrogate
+from fusionlab import surrogate
 from fusionlab.physics import DEVICES, Controls, replay, simulate
 
 PROFILES = ("quick", "full")
@@ -31,28 +31,41 @@ def best(fn, repeat=5):
     return min(out)
 
 
-def timings(profile: str = "full", progress: Callable[[dict], None] | None = None) -> dict[str, Any]:
-    """Run the benchmark sections and return {"rows": [...], "profile", "n_slices"}.
+def timings(profile: str = "full", progress: Callable[[dict], None] | None = None,
+            source: str | None = None, shot: str | None = None) -> dict[str, Any]:
+    """Run the benchmark sections and return {"rows": [...], "profile", "n_slices", "shot"}.
 
     profile "full" is `make bench` (the README numbers); "quick" skips the per-slice loop
     reference and the large operating map — the worker's smoke-level benchmark. `progress`, when
     given, is called once per section: the worker turns that into SSE progress events and its
-    cancellation point between sections.
+    cancellation point between sections. `source`/`shot` pick the bundle to replay through the
+    data seam (the configured source's bench shot by default) — never a hard-coded archive id.
     """
     if profile not in PROFILES:
         raise ValueError(f"unknown benchmark profile {profile!r}; available: {PROFILES}")
     report = progress or (lambda event: None)
+    from fusionlab.data import (
+        sources,  # lazy: keeps bench importable ahead of the data seam in tests
+    )
+
+    src = sources.get_source(source)
+    shot_id = str(shot) if shot is not None else src.config.bench_shot
+    if shot_id is None:   # a source without a configured bench shot: the first cached bundle
+        cached = src.cached_shots()
+        if not cached:
+            raise ValueError(f"source {src.name!r} has no bench_shot configured and no cached bundles to benchmark")
+        shot_id = cached[0]
     rows: list[dict] = []
-    shot = mast.load_shot(30166)
-    nt = shot["t_s"].size
+    shot_d = src.load_shot(shot_id)
+    nt = shot_d["t_s"].size
 
     # 1. replay: every time slice in one numpy call vs one call per slice
     report({"section": "replay"})
 
     def one(i):
-        return {k: (v[i:i + 1] if isinstance(v, np.ndarray) and v.shape[:1] == (nt,) else v) for k, v in shot.items()}
+        return {k: (v[i:i + 1] if isinstance(v, np.ndarray) and v.shape[:1] == (nt,) else v) for k, v in shot_d.items()}
 
-    t_vec = best(lambda: replay(shot))
+    t_vec = best(lambda: replay(shot_d))
     rows.append({"label": f"Replay of a real shot ({nt} EFIT slices), vectorized",
                  "time": f"{t_vec * 1e3:.2f} ms", "note": f"{nt / t_vec:,.0f} slices/s"})
     if profile == "full":
@@ -63,9 +76,10 @@ def timings(profile: str = "full", progress: Callable[[dict], None] | None = Non
 
     # 2. shot cache
     report({"section": "shot_cache"})
-    t_load = best(lambda: mast.load_shot(30166))
-    rows.append({"label": "Load a cached shot (npz, no network)", "time": f"{t_load * 1e3:.1f} ms",
-                 "note": "first fetch from S3: ~27 s"})
+    t_load = best(lambda: src.load_shot(shot_id))
+    rows.append({"label": f"Load a cached bundle ({src.name}, npz, no network)",
+                 "time": f"{t_load * 1e3:.1f} ms",
+                 "note": "first fetch from S3: ~27 s" if src.name == "fair-mast" else "imported bundle"})
 
     # 3. IPB98 over the whole usable shot table
     report({"section": "ipb98"})
@@ -107,4 +121,4 @@ def timings(profile: str = "full", progress: Callable[[dict], None] | None = Non
         rows.append({"label": f"Sandbox operating map {nx}x{nx} (0D power-balance solve per point)",
                      "time": f"{t_map * 1e3:.0f} ms", "note": f"{nx * nx / t_map:,.0f} points/s"})
 
-    return {"rows": rows, "profile": profile, "n_slices": int(nt)}
+    return {"rows": rows, "profile": profile, "n_slices": int(nt), "shot": shot_id}

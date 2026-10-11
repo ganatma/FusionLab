@@ -33,10 +33,11 @@ from typing import Any
 import numpy as np
 from fastapi import HTTPException
 
-from fusionlab import mast, virtual
+from fusionlab import virtual
 from fusionlab.api import devices, simulate_point
 from fusionlab.api_replay import _replay_bundle, _shot, db_search, shots
 from fusionlab.api_virtual import EditIn, VirtualIn, _virtual_shot_body, virtual_gate
+from fusionlab.data import sources
 from fusionlab.physics import DEVICES
 
 SEARCH_LIMIT = 200   # the tool's own cap; /db/search itself allows 1000 — the model works page-size
@@ -113,15 +114,16 @@ def list_cached_shots() -> ToolResult:
 
 
 @_guard
-def load_shot(shot_id: int, H: float = 1.0) -> ToolResult:
-    """A cached shot's replay summary — the /replay/{id} internals. Time arrays stay out of the model's
+def load_shot(shot_id: str, H: float = 1.0) -> ToolResult:
+    """A shot's replay summary — the /replay/{id} internals. Time arrays stay out of the model's
     context: the UI draws the traces after the driver opens the shot."""
     try:
-        r = _replay_bundle(int(shot_id), H=float(H))
+        r = _replay_bundle(str(shot_id), H=float(H))
     except HTTPException as e:
-        cached = mast.cached_shots()
-        return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
-                    "use search_shots to explore the full catalog instead.", {"shot_id": int(shot_id), "cached_shot_ids": cached})
+        cached = sources.get_source(None).cached_shots()   # what the route can actually load
+        return _err(f"{e.detail} Replay covers the shots cached under data/shots ({len(cached)}: {cached}) "
+                    "plus any imported bundles; use search_shots to explore the full catalog instead.",
+                    {"shot_id": str(shot_id), "cached_shot_ids": cached})
     meta = r["meta"]
     n = len(r["measured"]["t_s"])
     s = meta.get("postshot") or ""
@@ -129,7 +131,7 @@ def load_shot(shot_id: int, H: float = 1.0) -> ToolResult:
         summary=(f"Shot {shot_id} (campaign {meta.get('campaign')}): {n} slices over "
                  f"{r['measured']['t_s'][0]}–{r['measured']['t_s'][-1]} s, peak beam power "
                  f"{meta.get('P_nbi_max_MW')} MW. {r['summary']} Logbook: {s[:200]}"),
-        data={"shot_id": int(shot_id), "meta": meta, "summary": r["summary"], "limit_names": r["limit_names"],
+        data={"shot_id": str(shot_id), "meta": meta, "summary": r["summary"], "limit_names": r["limit_names"],
               "n_slices": n, "attribution": r["attribution"]},
     )
 
@@ -150,18 +152,18 @@ def _limit_extremes(t: np.ndarray, frac: np.ndarray) -> tuple[dict[str, float] |
 
 
 @_guard
-def limit_distances(shot_id: int) -> ToolResult:
+def limit_distances(shot_id: str) -> ToolResult:
     """Distances to the operating limits over time for one cached shot — the replay panel's own
     numbers (physics.replay's limit fractions on the measured traces, the same formulas /map draws).
     Answers 'how close is shot X to the beta limit over time'. Distances, never forecasts: 1.0 is
     at the limit, not a prediction of a disruption."""
     try:
-        r = _replay_bundle(int(shot_id))
+        r = _replay_bundle(str(shot_id))
     except HTTPException as e:
-        cached = mast.cached_shots()
+        cached = sources.get_source(None).cached_shots()   # what the route can actually load
         return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
                     "use search_shots to explore the full catalog instead.",
-                    {"shot_id": int(shot_id), "cached_shot_ids": cached})
+                    {"shot_id": str(shot_id), "cached_shot_ids": cached})
     mo, me = r["model"], r["measured"]
     def arr(xs: list) -> np.ndarray:
         return np.array([np.nan if v is None else v for v in xs], dtype=float)
@@ -187,7 +189,7 @@ def limit_distances(shot_id: int) -> ToolResult:
     out.append("These are computed distances to the limits (1.0 = at the limit), never a forecast of a disruption.")
     return ToolResult(
         summary=" ".join(out),
-        data={"shot_id": int(shot_id), "limit_names": list(r["limit_names"]), "n_slices": int(t.size),
+        data={"shot_id": str(shot_id), "limit_names": list(r["limit_names"]), "n_slices": int(t.size),
               "closest": closest, "first_cross_s": crosses, "series": series, "series_stride": stride,
               "archive": archive, "attribution": r["attribution"]},
     )
@@ -242,7 +244,7 @@ def _fmt(value: float, places: int) -> str:
 
 
 @_guard
-def run_whatif(shot_id: int, p_nbi_MW: float | None = None, p_nbi_scale: float | None = None,
+def run_whatif(shot_id: str, p_nbi_MW: float | None = None, p_nbi_scale: float | None = None,
                n_scale: float | None = None, ip_scale: float | None = None, bt_scale: float | None = None,
                nbi_shift_s: float | None = None, closure: str | None = None) -> ToolResult:
     """Compute a bounded what-if on a cached shot and propose it — the /virtual/{id} route function, so
@@ -260,7 +262,7 @@ def run_whatif(shot_id: int, p_nbi_MW: float | None = None, p_nbi_scale: float |
     elif p_nbi_scale is not None:
         power = float(p_nbi_scale)
     if power is not None:
-        pmax = float(_shot(int(shot_id))["meta"].get("P_nbi_max_MW") or 0.0)
+        pmax = float(_shot(str(shot_id))[0]["meta"].get("P_nbi_max_MW") or 0.0)
         if not pmax:
             return _err(f"shot {shot_id} has no NBI beams in the archive (P_nbi_max 0 MW): beam power cannot be "
                         "scaled — try n_scale or a beam-timing edit (nbi_shift_s)")
@@ -288,11 +290,11 @@ def run_whatif(shot_id: int, p_nbi_MW: float | None = None, p_nbi_scale: float |
     if not edit:
         return _err("no edit given: pass at least one of p_nbi_MW/p_nbi_scale, n_scale, ip_scale, bt_scale, nbi_shift_s")
 
-    r = _virtual_shot_body(int(shot_id), VirtualIn(edit=EditIn(**edit), closure=closure))
+    r = _virtual_shot_body(str(shot_id), VirtualIn(edit=EditIn(**edit), closure=closure))
     apply = {"sliders": {k: _fmt(v, 3 if k == "nbi_shift_s" else 2) for k, v in edit.items()},
              "events": ["fusionlab:tab"]}
     proposal = {"tool": "run_whatif",
-                "args": {k: v for k, v in dict(shot_id=int(shot_id), p_nbi_MW=p_nbi_MW, p_nbi_scale=p_nbi_scale,
+                "args": {k: v for k, v in dict(shot_id=str(shot_id), p_nbi_MW=p_nbi_MW, p_nbi_scale=p_nbi_scale,
                                                n_scale=n_scale, ip_scale=ip_scale, bt_scale=bt_scale,
                                                nbi_shift_s=nbi_shift_s, closure=closure).items() if v is not None},
                 "math": "; ".join(math_bits),
@@ -300,10 +302,10 @@ def run_whatif(shot_id: int, p_nbi_MW: float | None = None, p_nbi_scale: float |
     data = {k: r[k] for k in ("shot_id", "closure", "closure_name", "edit", "is_identity", "timing_edit", "laws",
                               "dW_flat_pct", "would_cross_at_s", "in_distribution", "refly_error", "validated",
                               "caveats", "attribution")}
-    return ToolResult(summary=_whatif_summary(int(shot_id), r), data=data, proposal=proposal)
+    return ToolResult(summary=_whatif_summary(str(shot_id), r), data=data, proposal=proposal)
 
 
-def _whatif_summary(shot_id: int, r: dict) -> str:
+def _whatif_summary(shot_id: str, r: dict) -> str:
     """Plain language for the bands the route computed. House wording: crossings are distances,
     confinement is compared with MAST data, nothing is a prediction."""
     lo, hi = r["dW_flat_pct"]["anchored"]
@@ -320,17 +322,17 @@ def _whatif_summary(shot_id: int, r: dict) -> str:
 
 
 @_guard
-def export_usd(shot_id: int) -> ToolResult:
-    """Propose an OpenUSD export (Omniverse-compatible) of a cached shot. The write happens only after
-    confirmation, when the driver POSTs the route — the export path stays the route's own (temp file,
-    atomic publish); the registry never writes."""
-    _shot(int(shot_id))   # the cache boundary is the route's: a 404 here is the verbatim refusal
+def export_usd(shot_id: str) -> ToolResult:
+    """Propose an OpenUSD export (Omniverse-compatible) of a cached shot or imported bundle. The write
+    happens only after confirmation, when the driver POSTs the route — the export path stays the
+    route's own (temp file, atomic publish); the registry never writes."""
+    _shot(str(shot_id))   # the cache boundary is the route's: a 404 here is the verbatim refusal
     return ToolResult(
         summary=f"Shot {shot_id} is in the local cache; confirming will export it as an OpenUSD stage "
                 "(Omniverse-compatible) and download it.",
-        data={"shot_id": int(shot_id)},
-        proposal={"tool": "export_usd", "args": {"shot_id": int(shot_id)},
-                  "apply": {"download": {"method": "POST", "url": f"/replay/{int(shot_id)}/usd"}}},
+        data={"shot_id": str(shot_id)},
+        proposal={"tool": "export_usd", "args": {"shot_id": str(shot_id)},
+                  "apply": {"download": {"method": "POST", "url": f"/replay/{shot_id}/usd"}}},
     )
 
 
@@ -384,7 +386,7 @@ TOOLS: dict[str, Tool] = {
     "list_cached_shots": Tool(
         definition={
             "name": "list_cached_shots",
-            "description": "List the shots cached locally under data/shots — the only shots replay can run offline. The app never fetches from the network.",
+            "description": "List the shots replay can run on offline: the archive's cache under data/shots plus any imported shot bundles (ids like user_*). Uncached catalog shots are fetched on demand by replay.",
             "input_schema": {"type": "object", "properties": {}},
         },
         handler=list_cached_shots,
@@ -398,7 +400,7 @@ TOOLS: dict[str, Tool] = {
             ),
             "input_schema": {
                 "type": "object",
-                "properties": {"shot_id": {"type": "integer", "description": "a cached shot id (list_cached_shots)"},
+                "properties": {"shot_id": {"type": "string", "description": "a cached shot number or imported-bundle id (list_cached_shots)"},
                                "H": {"type": "number", "default": 1.0, "description": "confinement multiplier on the model traces"}},
                 "required": ["shot_id"],
             },
@@ -447,7 +449,7 @@ TOOLS: dict[str, Tool] = {
             ),
             "input_schema": {
                 "type": "object",
-                "properties": {"shot_id": {"type": "integer", "description": "a cached shot id (list_cached_shots)"},
+                "properties": {"shot_id": {"type": "string", "description": "a cached shot number or imported-bundle id (list_cached_shots)"},
                                "p_nbi_MW": {"type": "number", "description": "absolute beam power in MW; converted to a scale factor server-side, math echoed"},
                                "p_nbi_scale": {**_slider_bounds("P_nbi"), "description": "beam-power scale factor (1.0 = the shot's logged peak)"},
                                "n_scale": {**_slider_bounds("n"), "description": "density scale factor"},
@@ -500,7 +502,7 @@ TOOLS: dict[str, Tool] = {
             ),
             "input_schema": {
                 "type": "object",
-                "properties": {"shot_id": {"type": "integer", "description": "a cached shot id (list_cached_shots)"}},
+                "properties": {"shot_id": {"type": "string", "description": "a cached shot number or imported-bundle id (list_cached_shots)"}},
                 "required": ["shot_id"],
             },
         },

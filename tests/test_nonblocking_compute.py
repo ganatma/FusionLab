@@ -182,7 +182,7 @@ async def _health_stays_responsive_while_replays_wait() -> None:
     post-HARN-4 the replays wait on the compute pool and /health keeps its token.
     """
     anyio.to_thread.current_default_thread_limiter().total_tokens = 2
-    compute._provider = SlowRemote(delay_s=1.0, psi_shape=api_replay._shot(30166)["psi_n"].shape)
+    compute._provider = SlowRemote(delay_s=1.0, psi_shape=api_replay._shot(30166)[0]["psi_n"].shape)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

@@ -42,6 +42,7 @@ class MachineConfig:
     clean_limits: CleanLimits      # catalog-filter thresholds
     lh_enhancement_min: float      # mode_derived cut: H above this tau_E / tau_89 (ITER89-P) ratio
                                    # (fusionlab.data.lh_mode; MAST value calibrated on the #38 anchors)
+    bench_shot: str | None = None  # the shot the benchmark task replays (None: the caller names one)
     unit_sanity: tuple[tuple[str, float, float], ...] = ()  # (field, lo, hi) mid-shot unit guards
 
 
@@ -60,6 +61,7 @@ MAST_CONFIG = MachineConfig(
     # Midway between the two hand-verified anchors: 30420 (ohmic, ratio 1.29) and 30166
     # ("H-mode from 223 ms", peak current 0.245 s, ratio 1.81) — scripts/mode_flag_report.py.
     lh_enhancement_min=1.5,
+    bench_shot="30166",
     unit_sanity=(   # mid-shot guards against a missed SI conversion (the values the suite asserts)
         ("R_m", 0.6, 1.0),
         ("a_m", 0.4, 0.7),

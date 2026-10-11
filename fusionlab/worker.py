@@ -104,6 +104,8 @@ class BenchmarkInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profile: Literal["quick", "full"] = "quick"
+    source: str | None = None   # data seam: which source's bundle to replay (None: the configured one)
+    shot: str | None = None     # which shot/bundle id (None: the source's configured bench shot)
 
 
 class ArtifactRef(BaseModel):
@@ -142,7 +144,12 @@ def _run_benchmark(inputs: BaseModel, progress: Callable[[dict], None]) -> dict:
 
     if not isinstance(inputs, BenchmarkInputs):   # registry dispatch guarantees this; keep it honest
         raise TypeError(f"benchmark inputs must be BenchmarkInputs, got {type(inputs).__name__}")
-    return bench.timings(profile=inputs.profile, progress=progress)
+    kwargs: dict = {"profile": inputs.profile}
+    if inputs.source is not None:
+        kwargs["source"] = inputs.source
+    if inputs.shot is not None:
+        kwargs["shot"] = inputs.shot
+    return bench.timings(progress=progress, **kwargs)
 
 
 TASKS: dict[str, Task] = {

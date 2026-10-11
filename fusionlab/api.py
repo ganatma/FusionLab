@@ -83,18 +83,30 @@ def compute_cancel(task: str):
 
 
 @app.post("/compute/benchmark")
-async def compute_benchmark(profile: str = "quick"):
+async def compute_benchmark(profile: str = "quick", source: str | None = None, shot: str | None = None):
     """The measured-timings benchmark through the selected provider (the worker's `benchmark` task,
     with the local fallback) — the one named task that reports section progress. POST: it occupies
     the compute slot for its whole run, so it must not be triggerable by navigation or prefetch
-    (same reasoning as the USD export). The body is awaited on the compute pool (HARN-4): the run
-    — remote or local — never pins a shared request-threadpool token."""
+    (same reasoning as the USD export). source/shot pick the bundle through the data seam — the
+    configured source's bench shot by default. The body is awaited on the compute pool (HARN-4): the
+    run — remote or local — never pins a shared request-threadpool token."""
     from fusionlab.bench import PROFILES
     from fusionlab.compute import status
+    from fusionlab.data import sources
 
     if profile not in PROFILES:
         raise HTTPException(422, f"profile must be one of {sorted(PROFILES)}")
-    out = await status.run_task_async("benchmark", {"profile": profile})
+    if source is not None:
+        try:
+            sources.get_source(source)
+        except ValueError as e:   # unknown source names fail loudly, before a job is submitted
+            raise HTTPException(422, str(e)) from e
+    inputs: dict = {"profile": profile}
+    if source is not None:
+        inputs["source"] = source
+    if shot is not None:
+        inputs["shot"] = shot
+    out = await status.run_task_async("benchmark", inputs)
     return {**out, "computed_on": status.provenance("benchmark").get("host")}
 
 

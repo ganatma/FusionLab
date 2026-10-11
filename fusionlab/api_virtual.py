@@ -61,16 +61,16 @@ def virtual_gate():
 
 
 @router.post("/virtual/{shot_id}")
-async def virtual_shot(shot_id: int, body: VirtualIn):
+async def virtual_shot(shot_id: str, body: VirtualIn):
     """A what-if anchored on a cached real shot — the body runs on the compute pool (HARN-4):
     the learned closure reaches the surrogate through run_task, whose remote wait must not pin a
     shared request-threadpool token."""
     return await run_compute_async(partial(_virtual_shot_body, shot_id, body))
 
 
-def _virtual_shot_body(shot_id: int, body: VirtualIn) -> dict:
+def _virtual_shot_body(shot_id: str, body: VirtualIn) -> dict:
     """The virtual-shot response body (the blocking part the async route above runs on the pool)."""
-    s = _shot(shot_id)
+    s, _src = _shot(shot_id)
     g = virtual.gate()
     edit = virtual.Edit(**body.edit.model_dump())
     for slider, act in SLIDER_GATE.items():   # the gate is enforced here, not only drawn in the UI

@@ -22,6 +22,8 @@
     <div class="cr">
       <div class="cr-bar" data-guide="bar">
         <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
+        <input type="file" id="rp-import-file" accept=".npz" hidden>
+        <button type="button" id="rp-import" class="tool" title="Bring your own data: import a ShotBundle v1 npz (docs/DATA_CONTRACT.md) so it replays, compares and exports beside the archive's shots. The file's name, minus .npz, becomes its id.">⬆ Import bundle</button>
         <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
         <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
           <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
@@ -283,12 +285,17 @@
     return initP;
   }
 
-  async function start() {
+  async function fillShotPicker() {   // the dropdown: the archive's cache plus any imported bundles
     const list = await (await fetch('/shots')).json();
     $('rp-attr').textContent = list.attribution + '. Compared with the experiment, not validated against it.';
     $('rp-shot').innerHTML = list.shots.map(s =>
       `<option value="${s.shot_id}">#${s.shot_id} · ${esc(s.heating || 'unknown heating')} · ${fmt(s.Ip_max_MA)} MA</option>`).join('');
-    $('rp-shot').addEventListener('change', e => { play(false); loadShot(+e.target.value); });
+    return list;
+  }
+
+  async function start() {
+    const list = await fillShotPicker();
+    $('rp-shot').addEventListener('change', e => { play(false); loadShot(e.target.value); });
     $('rp-t').addEventListener('input', e => { play(false); scrub(+e.target.value); });
     $('rp-play').addEventListener('click', () => play(!playTimer));
     // Export recomputes the stage and writes out/ — state-changing, so it POSTs (audit F1) and saves the blob under the served filename.
@@ -312,6 +319,31 @@
     });
     // Take-away export (FEAT-1): the replay bundle's own numbers as a CSV, every row labelled with its
     // provenance so derived quantities stay honest outside the app.
+    // Bring-your-own-data: upload a bundle npz, refresh the picker, replay the import. A contract
+    // violation surfaces verbatim — the server names the first bad field.
+    $('rp-import').addEventListener('click', () => $('rp-import-file').click());
+    $('rp-import-file').addEventListener('change', async () => {
+      const f = $('rp-import-file').files[0];
+      if (!f) return;
+      const id = f.name.replace(/\.npz$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'imported_bundle';
+      const b = $('rp-import');
+      b.setAttribute('aria-busy', 'true');
+      try {
+        const fd = new FormData();
+        fd.append('file', f, f.name);
+        const r = await fetch(`/data/bundles/${encodeURIComponent(id)}`, { method: 'POST', body: fd });
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error((j && j.detail) || 'HTTP ' + r.status);
+        await fillShotPicker();            // the picker gains the bundle beside the archive's shots
+        $('rp-shot').value = j.shot_id;
+        await loadShot(j.shot_id);
+      } catch (e) {
+        $('rp-head').textContent = `Import failed — ${e.message}`;
+      } finally {
+        b.removeAttribute('aria-busy');
+        $('rp-import-file').value = '';
+      }
+    });
     $('rp-csv').addEventListener('click', () => {
       if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'));
     });
@@ -419,11 +451,11 @@
     initDbSearch();
     fetch('/surrogate').then(r => r.ok ? r.json() : null).then(drawSurrogate)
       .catch(() => { const el = $('rp-sur'); if (el) el.innerHTML = '<p class="muted">The learned-correction table needs the FusionLab server (/surrogate). Reload to retry.</p>'; });
-    const asked = +q.get('shot');   // deep link: /?shot=30192
-    const cmpIds = (q.get('compare') || '').split(',').map(Number).filter(Boolean);   // deep link: /?compare=30166,30420
+    const asked = q.get('shot') || '';   // deep link: /?shot=30192 or /?shot=<imported bundle id>
+    const cmpIds = (q.get('compare') || '').split(',').map(String).filter(Boolean);   // deep link: /?compare=30166,30420
     // An uncached ?shot= id is replayable too — the dropdown list only knows the shipped cache.
-    const want = list.shots.find(s => s.shot_id === asked) || (asked ? { shot_id: asked } : null)
-      || list.shots.find(s => s.shot_id === 30166) || list.shots[0];
+    const want = list.shots.find(s => String(s.shot_id) === asked) || (asked ? { shot_id: asked } : null)
+      || list.shots.find(s => String(s.shot_id) === '30166') || list.shots[0];
     if (cmpIds.length >= 2) startCompare(cmpIds);   // compare drives the reference render itself
     else {
       if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
@@ -500,6 +532,19 @@
     }
   }
 
+  // A digit id that /replay 404s may simply not be imported yet: POST it to the import route (which
+  // pulls the archive's bundle into the user store) and replay the import. One attempt per id per
+  // page — a second failure means the shot is not in the archive either, and the 404 message stands.
+  const importTried = new Set();
+  async function ensureImported(id) {
+    if (importTried.has(id)) return;
+    importTried.add(id);
+    try {
+      const r = await fetch(`/data/bundles/${encodeURIComponent(id)}`, { method: 'POST' });
+      if (r.ok) await loadShot(id);
+    } catch { /* offline or not in the archive: the original 404 message stands */ }
+  }
+
   async function loadShot(id) {
     if (cmp.on) return cmpSetRef(id);   // in compare, every pick — dropdown, search row — re-points the reference
     const seq = ++loadSeq;
@@ -508,9 +553,10 @@
       next = await getReplay(id);
     } catch (e) {
       if (seq === loadSeq) {
-        $('rp-shot').value = shot ? shot.meta.shot_id : '';   // the select stays in sync with the panels
+        $('rp-shot').value = shot ? String(shot.meta.shot_id) : '';   // the select stays in sync with the panels
         $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
       }
+      if (e?.status === 404 && /^\d+$/.test(String(id))) void ensureImported(id);   // bring-your-own-data: a not-yet-imported archive shot imports itself once
       return;
     }
     if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
@@ -970,7 +1016,7 @@
     $('rp-srch-abort').checked = ['1', 'true'].includes(val('abort'));
     $('rp-srch-mode').value = ['H', 'L'].includes(val('mode')) ? val('mode') : '';
     srchOffset = Math.max(0, +val('offset') || 0);
-    (val('compare') || '').split(',').forEach(id => +id && srchSel.add(+id));
+    (val('compare') || '').split(',').forEach(id => id && srchSel.add(id));   // ids are strings: archive numbers or imported bundle ids
   }
 
   async function searchDb() {
@@ -1013,8 +1059,8 @@
         <th class="num">P<sub>nbi</sub> MW</th><th class="num">n<sub>e</sub> 10²⁰</th><th class="num">W MJ</th>
         <th class="num">q<sub>95</sub></th><th>useful</th><th>abort</th></tr></thead>
       <tbody>${srchResp.rows.map(r => `
-        <tr><td><input type="checkbox" data-shot="${r.shot_id}" aria-label="select ${r.shot_id} for compare"${srchSel.has(r.shot_id) ? ' checked' : ''}></td>
-          <td><a href="?shot=${r.shot_id}" data-shot="${r.shot_id}">#${r.shot_id}</a></td><td>M${r.campaign}</td>
+        <tr><td><input type="checkbox" data-shot="${r.shot_id}" aria-label="select ${r.shot_id} for compare"${srchSel.has(String(r.shot_id)) ? ' checked' : ''}></td>
+          <td><a href="?shot=${r.shot_id}" data-shot="${r.shot_id}">#${r.shot_id}</a></td><td>${r.campaign == null ? '—' : 'M' + r.campaign}</td>
           ${r.mode_derived == null ? '<td class="muted">–</td>' : r.mode_derived >= 1 ? '<td>H</td>' : '<td>L</td>'}
           <td class="num">${num(r.Ip_MA)}</td><td class="num">${num(r.B_T)}</td><td class="num">${num(r.P_nbi_MW, 1)}</td>
           <td class="num">${num(r.n_e20, 3)}</td><td class="num">${num(r.W_MJ, 3)}</td><td class="num">${num(r.q95)}</td>
@@ -1058,12 +1104,12 @@
       if (e.target.id === 'rp-srch-next') { srchOffset += SRCH_PAGE; return searchDb(); }
       if (e.target.id === 'rp-srch-cmp') { window.FusionLab.showTab('replay'); return startCompare([...srchSel]); }
       const a = e.target.closest('a[data-shot]');
-      if (a) { e.preventDefault(); openReplay(+a.dataset.shot); }
+      if (a) { e.preventDefault(); openReplay(a.dataset.shot); }
     });
     panel.addEventListener('change', e => {
       const box = e.target.closest('input[data-shot]');
       if (!box) return;
-      const id = +box.dataset.shot;
+      const id = box.dataset.shot;   // string: imported bundle ids are not numbers
       if (box.checked && srchSel.size >= SRCH_MAX) {
         box.checked = false;
         srchNote = 'compare takes 2–6 shots — untick one first';
@@ -1119,14 +1165,14 @@
     cmp.seq++;
     cmp.ctrls.forEach(c => c.abort());
     cmp.ctrls.clear();
-    cmp.ids = [...new Set((idsIn || []).map(Number).filter(Boolean))].slice(0, SRCH_MAX);
+    cmp.ids = [...new Set((idsIn || []).map(String).filter(Boolean))].slice(0, SRCH_MAX);   // ids stay strings — imported bundles are not numbers
     cmp.ref = cmp.ids[0] ?? null;
     cmp.on = true;
     cmp.st.clear(); cmp.err.clear();
     cmpChrome(); cmpUrl(); cmpSyncSel();
     if (cmp.ids.length < 2) { cmpPaint(); return; }   // Empty: a prompt with a shortcut back to the catalog
     // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
-    if (shot && shot.meta.shot_id === cmp.ref) { cmp.st.set(cmp.ref, 'ready'); drawStrips(); scrub(+$('rp-t').value); }
+    if (shot && String(shot.meta.shot_id) === String(cmp.ref)) { cmp.st.set(cmp.ref, 'ready'); drawStrips(); scrub(+$('rp-t').value); }
     for (const id of cmp.ids) {
       if (cmp.st.get(id) === 'ready') continue;
       cmp.st.set(id, 'fetching');
@@ -1170,7 +1216,7 @@
     }
     const my = ++loadSeq;          // the same last-click-wins guard the single-shot pick uses
     if (id !== cmp.ref) { cmp.ref = id; cmpUrl(); cmpChrome(); }
-    if (shot && shot.meta.shot_id === id) {
+    if (shot && String(shot.meta.shot_id) === String(id)) {
       drawStrips(); drawDw(); scrub(+$('rp-t').value);
       cmpPaint();
       return sliceState(+$('rp-t').value);
@@ -1240,7 +1286,7 @@
 
   $('rp-cmp-bar').addEventListener('click', e => {
     const chip = e.target.closest('[data-ref]');
-    if (chip) return void cmpSetRef(+chip.dataset.ref);
+    if (chip) return void cmpSetRef(chip.dataset.ref);
     const b = e.target.closest('[data-act],[data-retry],[data-drop]');
     if (!b) return;
     if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
@@ -1251,11 +1297,11 @@
       return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b);
     }
     if (b.dataset.retry) {
-      const id = +b.dataset.retry;
+      const id = b.dataset.retry;
       cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();
       return void cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
     }
-    if (b.dataset.drop) return cmpDrop(+b.dataset.drop);
+    if (b.dataset.drop) return cmpDrop(b.dataset.drop);
   });
 
   // rp-te carries one trace per compared shot: index 0 is the reference's, as in single-shot mode.

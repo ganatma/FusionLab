@@ -42,6 +42,7 @@ import numpy as np
 import warp as wp
 
 from fusionlab.atomicio import atomic_write
+from fusionlab.data.machine import MachineConfig
 
 wp.config.log_level = wp.LOG_WARNING      # no init banner in the API logs
 
@@ -454,11 +455,13 @@ def usd_lines(shot: dict, psi_n=USD_PSI_N, direction=USD_DIRECTION, *, n_turns: 
 
 def add_field_lines(stage_or_path, shot: dict, *, psi_n=USD_PSI_N, direction=USD_DIRECTION, n_turns: float = USD_TURNS,
                     steps_per_turn: int = STEPS_PER_TURN, store_every: int = USD_STORE_EVERY,
-                    color=LINE_COLOR, width_m: float = LINE_WIDTH_M, device: str | None = None):
-    """Add /MAST/FieldLines (UsdGeom.BasisCurves, linear) to a stage written by usd_export.export_shot.
+                    color=LINE_COLOR, width_m: float = LINE_WIDTH_M, device: str | None = None,
+                    prim_path: str = "/MAST/FieldLines", provenance: str | tuple[str, str] = PROVENANCE):
+    """Add the machine's FieldLines prim (UsdGeom.BasisCurves, linear; /MAST/FieldLines for MAST) to a
+    stage written by usd_export.export_shot.
 
     stage_or_path: an open Usd.Stage (edited in place, not saved) or a path (opened, edited, saved). Points are
-    time-sampled, one sample per EFIT slice (time code = slice index, as in the rest of the stage), with a
+    time-sampled, one sample per equilibrium slice (time code = slice index, as in the rest of the stage), with a
     constant vertex count per line. Returns the BasisCurves prim's schema object.
     """
     from pxr import Sdf, Usd, UsdGeom, Vt
@@ -472,7 +475,7 @@ def add_field_lines(stage_or_path, shot: dict, *, psi_n=USD_PSI_N, direction=USD
     pts = np.round(pts.reshape(nt, n_lines * n_pts, 3), usd_export.ROUND_M).astype(np.float32)
     ext = usd_export._extent(pts)
 
-    curves = UsdGeom.BasisCurves.Define(stage, "/MAST/FieldLines")
+    curves = UsdGeom.BasisCurves.Define(stage, prim_path)
     curves.CreateTypeAttr(UsdGeom.Tokens.linear)
     curves.CreateCurveVertexCountsAttr(Vt.IntArray.FromNumpy(np.full(n_lines, n_pts, dtype=np.int32)))
     curves.CreateWidthsAttr(Vt.FloatArray([float(width_m)]))
@@ -489,7 +492,7 @@ def add_field_lines(stage_or_path, shot: dict, *, psi_n=USD_PSI_N, direction=USD
     shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(tuple(float(c) for c in color))
 
     prim = curves.GetPrim()
-    prim.SetCustomDataByKey("provenance", PROVENANCE)
+    prim.SetCustomDataByKey("provenance", provenance)
     prim.SetCustomDataByKey("psi_n_start", ", ".join(f"{p:g}" for p in np.asarray(psi_n, float)))
     prim.SetCustomDataByKey("direction", ", ".join(f"{d:+g}" for d in np.asarray(direction, float)))
     prim.SetCustomDataByKey("scope_note", "Field lines of the axisymmetric EFIT reconstruction: no islands, no 3D "
@@ -501,12 +504,22 @@ def add_field_lines(stage_or_path, shot: dict, *, psi_n=USD_PSI_N, direction=USD
     return curves
 
 
-def export_shot_with_field_lines(shot: dict, path: str | Path, *, device: str | None = None, **export_kw) -> Path:
-    """usd_export.export_shot (unchanged), then /MAST/FieldLines added to the same file."""
+def export_shot_with_field_lines(shot: dict, path: str | Path, *, device: str | None = None,
+                                 machine: MachineConfig | None = None, **export_kw) -> Path:
+    """usd_export.export_shot (unchanged), then the field-lines prim added under the machine's root.
+
+    The prim path and provenance follow the source's machine config; a MAST export keeps the
+    library's default provenance bytes exactly (the config object is the MAST one by identity).
+    """
     from fusionlab import usd_export
 
-    path = usd_export.export_shot(shot, path, **export_kw)
-    add_field_lines(path, shot, device=device)
+    machine = machine or usd_export.MAST_CONFIG
+    path = usd_export.export_shot(shot, path, machine=machine, **export_kw)
+    provenance = PROVENANCE if machine is usd_export.MAST_CONFIG else (
+        f"Field lines traced with NVIDIA Warp through the {machine.reconstruction_name} reconstruction "
+        "of the loaded shot bundle", f"data: {machine.attribution}")
+    add_field_lines(path, shot, device=device, prim_path=f"{machine.usd_prim_root}/FieldLines",
+                    provenance=provenance)
     return Path(path)
 
 

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from fusionlab import agent_tools, api_replay, mast
 from fusionlab.api import app
 from fusionlab.api_virtual import EditIn
+from fusionlab.data import sources
 
 client = TestClient(app)
 
@@ -106,13 +107,13 @@ def test_load_shot_reports_the_cache_boundary_and_suggests_search():
     r = agent_tools.run_tool("load_shot", shot_id=1)
     assert r.error is not None and route.json()["detail"] in r.error   # the route's own 404, verbatim
     assert "search_shots" in r.error
-    assert r.data["cached_shot_ids"] == mast.cached_shots()
+    assert r.data["cached_shot_ids"] == sources.get_source(None).cached_shots()
 
 
 def test_load_shot_returns_a_compact_summary_without_the_time_arrays():
     r = agent_tools.run_tool("load_shot", shot_id=30166)
     assert r.error is None
-    assert r.data["shot_id"] == 30166 and r.data["n_slices"] == mast.load_shot(30166)["t_s"].size
+    assert r.data["shot_id"] == "30166" and r.data["n_slices"] == mast.load_shot(30166)["t_s"].size
     assert "summary" in r.data and "measured" not in r.data   # traces are the UI's job, not the model's context
 
 
@@ -124,7 +125,7 @@ def test_limit_distances_answers_the_over_time_question():
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None
     d = r.data
-    assert d["shot_id"] == 30166 and d["limit_names"] == ["greenwald", "troyon", "kink"]
+    assert d["shot_id"] == "30166" and d["limit_names"] == ["greenwald", "troyon", "kink"]
     assert d["n_slices"] == mast.load_shot(30166)["t_s"].size
     for name in d["limit_names"]:
         c, x = d["closest"][name], d["first_cross_s"][name]
@@ -146,7 +147,7 @@ def test_limit_distances_uncached_is_the_cache_boundary():
     r = agent_tools.run_tool("limit_distances", shot_id=1)
     assert r.error is not None and route.json()["detail"] in r.error
     assert "search_shots" in r.error
-    assert r.data["cached_shot_ids"] == mast.cached_shots()
+    assert r.data["cached_shot_ids"] == sources.get_source(None).cached_shots()
 
 
 def test_limit_distances_carries_the_catalog_abort_flag(monkeypatch):
@@ -155,11 +156,11 @@ def test_limit_distances_carries_the_catalog_abort_flag(monkeypatch):
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None and r.data["archive"]["abort"] is False
     assert "abort" not in r.summary.lower()
-    c = dict(api_replay._catalog())
+    c = dict(api_replay._catalog("fair-mast"))
     i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
     c["abort"] = c["abort"].copy()
     c["abort"][i] = 1.0
-    monkeypatch.setattr(api_replay, "_catalog", lambda: c)
+    monkeypatch.setattr(api_replay, "_catalog", lambda source="fair-mast": c)
     r = agent_tools.run_tool("limit_distances", shot_id=30166)
     assert r.error is None and r.data["archive"]["abort"] is True
     assert "flags this shot aborted" in r.summary
@@ -181,7 +182,7 @@ def test_run_whatif_proposes_instead_of_applying():
     r = agent_tools.run_tool("run_whatif", shot_id=30166, p_nbi_MW=1.2, n_scale=1.1)
     assert r.error is None and r.proposal is not None
     p = r.proposal
-    assert p["tool"] == "run_whatif" and p["args"]["shot_id"] == 30166 and p["args"]["p_nbi_MW"] == 1.2
+    assert p["tool"] == "run_whatif" and p["args"]["shot_id"] == "30166" and p["args"]["p_nbi_MW"] == 1.2
     assert set(p["apply"]["sliders"]) == {"P_nbi", "n"} and "× P_nbi_max" in p["math"]
     assert r.data["edit"]["P_nbi"] == pytest.approx(1.2 / pmax) and r.data["is_identity"] is False
     assert "t_s" not in r.data and "anchored" not in r.data       # bands, not arrays, reach the model
@@ -239,9 +240,9 @@ def test_export_usd_proposes_and_executes_nothing(monkeypatch):
 
     monkeypatch.setattr("fusionlab.fieldlines.export_shot_with_field_lines", bomb)
     monkeypatch.setattr("fusionlab.usd_export.export_shot", bomb)
-    r = agent_tools.run_tool("export_usd", shot_id=30166)
+    r = agent_tools.run_tool("export_usd", shot_id="30166")
     assert r.error is None and r.proposal is not None
-    assert r.proposal["args"] == {"shot_id": 30166}
+    assert r.proposal["args"] == {"shot_id": "30166"}   # DATA-2: string ids, imported bundles included
     assert r.proposal["apply"]["download"] == {"method": "POST", "url": "/replay/30166/usd"}
 
 
@@ -255,7 +256,7 @@ def test_export_usd_uncached_is_the_verbatim_404():
 # ---- the plain read-only trio and the 0D point
 def test_read_only_tools_execute():
     r = agent_tools.run_tool("list_cached_shots")
-    assert r.error is None and len(r.data["shots"]) == len(mast.cached_shots())
+    assert r.error is None and len(r.data["shots"]) == len(sources.get_source(None).cached_shots())
     r = agent_tools.run_tool("get_whatif_gate")
     assert r.error is None and set(r.data["sliders"]) == {"Ip", "B", "n", "P_nbi", "nbi_shift_s"}
     r = agent_tools.run_tool("list_devices")

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from fusionlab import virtual
 from fusionlab.api_replay import ATTRIBUTION, _j, _shot
+from fusionlab.compute.status import run_compute_async
 
 router = APIRouter()
 
@@ -58,7 +61,15 @@ def virtual_gate():
 
 
 @router.post("/virtual/{shot_id}")
-def virtual_shot(shot_id: int, body: VirtualIn):
+async def virtual_shot(shot_id: int, body: VirtualIn):
+    """A what-if anchored on a cached real shot — the body runs on the compute pool (HARN-4):
+    the learned closure reaches the surrogate through run_task, whose remote wait must not pin a
+    shared request-threadpool token."""
+    return await run_compute_async(partial(_virtual_shot_body, shot_id, body))
+
+
+def _virtual_shot_body(shot_id: int, body: VirtualIn) -> dict:
+    """The virtual-shot response body (the blocking part the async route above runs on the pool)."""
     s = _shot(shot_id)
     g = virtual.gate()
     edit = virtual.Edit(**body.edit.model_dump())

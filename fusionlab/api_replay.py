@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import threading
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +19,12 @@ from zarr.errors import GroupNotFoundError
 from fusionlab import mast
 from fusionlab.compute import warm_up as compute_warm_up
 from fusionlab.compute.status import capabilities as compute_capabilities
-from fusionlab.compute.status import provenance, run_task
+from fusionlab.compute.status import (
+    provenance,
+    run_compute_async,
+    run_task,
+    run_task_async,
+)
 from fusionlab.physics import (
     BETA_N_LIMIT,
     LIMIT_NAMES,
@@ -149,14 +154,13 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
 
 
 @router.get("/replay/{shot_id}")
-def replay_shot(shot_id: int, H: float = 1.0):
+async def replay_shot(shot_id: int, H: float = 1.0):
     """Measured traces, model traces on the same time base, limits, and the geometry to draw the shot."""
-    return _replay_bundle(shot_id, H)
+    return await run_compute_async(partial(_replay_bundle, shot_id, H))
 
 
-@router.get("/replay/{shot_id}/psi/{i}")
-def replay_psi(shot_id: int, i: int):
-    """Normalised poloidal flux (0 axis, 1 separatrix) on the EFIT grid for one time slice, rows = Z."""
+def _replay_psi_slice(shot_id: int, i: int) -> dict:
+    """One psi slice's response body — the blocking part the async route below runs on the compute pool."""
     s = _shot(shot_id)
     if "psi_n" not in s:
         raise HTTPException(404, f"shot {shot_id}'s bundle has no equilibrium reconstruction (psi)")
@@ -170,6 +174,12 @@ def replay_psi(shot_id: int, i: int):
     if "ts_R" in s:
         out["thomson"] = {"R": _j(s["ts_R"], 3), "Te_keV": _j(s["ts_Te_keV"][i], 3), "ne_e20": _j(s["ts_ne_e20"][i], 3)}
     return out
+
+
+@router.get("/replay/{shot_id}/psi/{i}")
+async def replay_psi(shot_id: int, i: int):
+    """Normalised poloidal flux (0 axis, 1 separatrix) on the EFIT grid for one time slice, rows = Z."""
+    return await run_compute_async(partial(_replay_psi_slice, shot_id, i))
 
 
 @router.post("/replay/{shot_id}/usd")
@@ -212,9 +222,9 @@ def _lines(shot_id: int):
     return pts, q, qc["summary"], out["device"], out["psi_n_start"], where
 
 
-@router.get("/replay/{shot_id}/fieldlines/{i}")
-def replay_fieldlines(shot_id: int, i: int):
-    """Field lines of the EFIT reconstruction at one time slice (axisymmetric; no islands or 3D fields)."""
+def _replay_fieldlines_slice(shot_id: int, i: int) -> dict:
+    """One field-lines response body — the blocking part (a Warp trace through run_task) the async
+    route below runs on the compute pool."""
     s = _shot(shot_id)
     if not 0 <= i < s["t_s"].size:
         raise HTTPException(404, "time index out of range")
@@ -229,6 +239,12 @@ def replay_fieldlines(shot_id: int, i: int):
             "lines": [{"x": _j(line[:, 0], 3), "y": _j(line[:, 1], 3), "z": _j(line[:, 2], 3)} for line in pts[i]],
             "q95_traced": _j(q[i], 3), "q95_efit": _j(s["q95"][i], 3),
             "shot_check": {k: summary[k] for k in ("n_compared", "median_rel_err", "p95_rel_err", "psi_n_drift_max")}}
+
+
+@router.get("/replay/{shot_id}/fieldlines/{i}")
+async def replay_fieldlines(shot_id: int, i: int):
+    """Field lines of the EFIT reconstruction at one time slice (axisymmetric; no islands or 3D fields)."""
+    return await run_compute_async(partial(_replay_fieldlines_slice, shot_id, i))
 
 
 @lru_cache(maxsize=1)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
@@ -318,19 +334,19 @@ def start_warm_up():
 
 
 @router.get("/eq_surrogate")
-def eq_surrogate_metrics():
+async def eq_surrogate_metrics():
     """Holdout metrics of the equilibrium surrogate, as written by scripts/train_eq_surrogate.py."""
     try:
-        return run_task("model_metrics", {"model": "eq_surrogate"})
+        return await run_task_async("model_metrics", {"model": "eq_surrogate"})
     except FileNotFoundError:
         raise HTTPException(404, "no metrics: run scripts/train_eq_surrogate.py") from None
 
 
 @router.get("/surrogate")
-def surrogate_metrics():
+async def surrogate_metrics():
     """Holdout errors of the learned correction, as written by `python -m fusionlab.surrogate`."""
     try:
-        return run_task("model_metrics", {"model": "surrogate"})
+        return await run_task_async("model_metrics", {"model": "surrogate"})
     except FileNotFoundError:
         raise HTTPException(404, "no trained model: run `make train`") from None
 
@@ -600,17 +616,24 @@ def _export(bundles: list[dict], fmt: str, H: float):
     raise HTTPException(422, 'fmt must be "csv" or "json"')
 
 
+def _replay_bundles(shot_ids: list[int], H: float) -> list[dict]:
+    """Full replay bundles in request order — one blocking call for the compute pool."""
+    return [_replay_bundle(i, H) for i in shot_ids]
+
+
 @router.get("/export/{shot_id}")
-def export_shot(shot_id: int, H: float = 1.0, fmt: str = "csv"):
+async def export_shot(shot_id: int, H: float = 1.0, fmt: str = "csv"):
     """Take-away export of one shot's derived quantities: every measured trace, model trace and
     summary number the replay serves, as a tidy CSV (one row per shot/slice/quantity, each row
     labelled with its provenance and unit) or as JSON (the full replay bundle + the provenance map).
     The numbers are the replay bundle's own, never a recomputation."""
-    return _export([_replay_bundle(shot_id, H)], fmt, H)
+    bundle = await run_compute_async(partial(_replay_bundle, shot_id, H))
+    return _export([bundle], fmt, H)
 
 
 @router.get("/export")
-def export_compare(shots: str, H: float = 1.0, fmt: str = "csv"):
+async def export_compare(shots: str, H: float = 1.0, fmt: str = "csv"):
     """Compare-variant export: the same tidy table over several shots (the compare view's cap),
     a `shot_id` column so any spreadsheet or notebook can group them. Order follows the request."""
-    return _export([_replay_bundle(i, H) for i in _export_ids(shots)], fmt, H)
+    bundles = await run_compute_async(partial(_replay_bundles, _export_ids(shots), H))
+    return _export(bundles, fmt, H)

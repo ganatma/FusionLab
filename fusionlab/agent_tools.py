@@ -35,8 +35,8 @@ from fastapi import HTTPException
 
 from fusionlab import mast, virtual
 from fusionlab.api import devices, simulate_point
-from fusionlab.api_replay import _shot, db_search, replay_shot, shots
-from fusionlab.api_virtual import EditIn, VirtualIn, virtual_gate, virtual_shot
+from fusionlab.api_replay import _replay_bundle, _shot, db_search, shots
+from fusionlab.api_virtual import EditIn, VirtualIn, _virtual_shot_body, virtual_gate
 from fusionlab.physics import DEVICES
 
 SEARCH_LIMIT = 200   # the tool's own cap; /db/search itself allows 1000 — the model works page-size
@@ -117,7 +117,7 @@ def load_shot(shot_id: int, H: float = 1.0) -> ToolResult:
     """A cached shot's replay summary — the /replay/{id} internals. Time arrays stay out of the model's
     context: the UI draws the traces after the driver opens the shot."""
     try:
-        r = replay_shot(int(shot_id), H=float(H))
+        r = _replay_bundle(int(shot_id), H=float(H))
     except HTTPException as e:
         cached = mast.cached_shots()
         return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
@@ -156,7 +156,7 @@ def limit_distances(shot_id: int) -> ToolResult:
     Answers 'how close is shot X to the beta limit over time'. Distances, never forecasts: 1.0 is
     at the limit, not a prediction of a disruption."""
     try:
-        r = replay_shot(int(shot_id))
+        r = _replay_bundle(int(shot_id))
     except HTTPException as e:
         cached = mast.cached_shots()
         return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
@@ -288,7 +288,7 @@ def run_whatif(shot_id: int, p_nbi_MW: float | None = None, p_nbi_scale: float |
     if not edit:
         return _err("no edit given: pass at least one of p_nbi_MW/p_nbi_scale, n_scale, ip_scale, bt_scale, nbi_shift_s")
 
-    r = virtual_shot(int(shot_id), VirtualIn(edit=EditIn(**edit), closure=closure))
+    r = _virtual_shot_body(int(shot_id), VirtualIn(edit=EditIn(**edit), closure=closure))
     apply = {"sliders": {k: _fmt(v, 3 if k == "nbi_shift_s" else 2) for k, v in edit.items()},
              "events": ["fusionlab:tab"]}
     proposal = {"tool": "run_whatif",

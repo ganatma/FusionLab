@@ -4,15 +4,17 @@ The backend connects with asyncssh — which honors the user's `~/.ssh/config`, 
 FusionLab never sees or stores a credential — opens a local port-forward to the worker, and talks
 plain HTTP over the tunnel:
 
-    FastAPI router (sync def, threadpool) ── SshProvider ── SSH (asyncssh) ── fusionlab worker
+    FastAPI router (async def) ── compute pool ── SshProvider ── SSH (asyncssh) ── fusionlab worker
                                                 │                on the user's host (binds 127.0.0.1)
                                                 └─ local forward 127.0.0.1:<port> → worker
 
 Wiring, with the SSH part as small as possible:
 
 - ``_SshSession`` owns the only async work (connect, forward, remote autostart) on a private event
-  loop in a thread. The routers are sync ``def`` (threadpool), so the blocking protocol methods
-  never touch the API's event loop; PR-1's calling convention is unchanged.
+  loop in a thread. The API's async routes await compute bodies on the compute pool
+  (``status.run_compute_async`` — HARN-4), so the blocking protocol methods and a remote job's
+  whole ``result()`` wait run on the pool's own threads: the shared request threadpool every sync
+  endpoint (``/health``) depends on stays free no matter how many jobs are in flight.
 - ``SshProvider`` implements the PR-1 protocol: ``submit`` queues the job and returns at once,
   ``result`` waits for the terminal state and decodes the FLF1 payload, ``stream`` relays the
   worker's SSE events to async consumers (PR 3's progress chip). Every failure — unreachable host,

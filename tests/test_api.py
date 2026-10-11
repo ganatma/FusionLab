@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import logging
 import math
@@ -528,6 +530,74 @@ def test_replay_answers_null_not_500_when_the_model_has_nothing_to_say(monkeypat
     assert j["summary"]["P_LH_median_MW"] is None
     assert j["summary"]["H98_median"] is None and j["summary"]["H89_median"] is None
     assert _no_nan_floats(j)
+
+
+# ---- take-away export (FEAT-1): the replay bundle's numbers, downloadable with their provenance.
+# The contract is equality: the export serves the very dict /replay serves, never a recomputation.
+
+
+def _cell(v):
+    """The CSV cell the csv module writes for a JSON bundle value: None empty, everything else str()."""
+    return "" if v is None else str(v)
+
+
+def test_export_json_equals_the_replay_bundle():
+    replay = client.get("/replay/30420").json()
+    j = client.get("/export/30420", params={"fmt": "json"}).json()
+    assert len(j["shots"]) == 1
+    b = j["shots"][0]
+    assert b["meta"] == replay["meta"] and b["attribution"] == replay["attribution"]
+    assert b["measured"] == replay["measured"] and b["model"] == replay["model"]
+    assert b["summary"] == replay["summary"]
+
+
+def test_export_csv_equals_the_replay_bundle_and_carries_provenance():
+    replay = client.get("/replay/30420").json()
+    rows = list(csv.DictReader(io.StringIO(client.get("/export/30420").text)))
+    series = {**replay["measured"], **{k: v for k, v in replay["model"].items() if k != "t_s"}}
+    by_q: dict[str, list[str]] = {}
+    for row in rows:
+        by_q.setdefault(row["quantity"], []).append(row["value"])
+    summary_names = {n for n, v in api_replay._flat_summary(replay["summary"]) if isinstance(v, (bool, int, float))}
+    assert set(by_q) == set(series) | summary_names
+    for name, vals in series.items():
+        assert by_q[name] == [_cell(v) for v in vals]   # exact strings: the bundle's own numbers, str()-ed
+    flat = dict(api_replay._flat_summary(replay["summary"]))
+    for row in rows:
+        if row["t_s"] == "":   # a summary row: empty t_s, the summary's own value
+            assert row["value"] == _cell(flat[row["quantity"]])
+    prov = {row["quantity"]: row["provenance"] for row in rows}
+    assert prov["Ip_MA"] == "measured" and prov["W_H_MJ"] == "model"
+    assert prov["H_learned"] == "learned" and prov["H98"] == "computed"
+    assert set(prov.values()) <= {"measured", "model", "learned", "computed"}
+
+
+def test_export_provenance_covers_every_series_with_all_four_labels():
+    b = client.get("/export/30420", params={"fmt": "json"}).json()["shots"][0]
+    prov = b["export"]["provenance"]
+    series = set(b["measured"]) | {k for k in b["model"] if k != "t_s"} \
+        | {n for n, _ in api_replay._flat_summary(b["summary"])}
+    assert set(prov) == series   # every exported series labelled — a new replay() key fails here until labelled
+    assert set(prov.values()) == {"measured", "model", "learned", "computed"}
+
+
+def test_export_csv_downloads_as_an_attachment():
+    r = client.get("/export/30420")
+    assert r.headers["content-type"].startswith("text/csv")
+    assert 'filename="fusionlab_shot_30420.csv"' in r.headers["content-disposition"]
+    assert set(csv.DictReader(io.StringIO(r.text)).fieldnames) == set(api_replay._EXPORT_COLUMNS)
+
+
+def test_compare_export_groups_rows_by_shot_and_validates():
+    j = client.get("/export", params={"shots": "30420,30166,30420", "fmt": "json"}).json()
+    assert [s["meta"]["shot_id"] for s in j["shots"]] == [30420, 30166]   # deduped, request order kept
+    rows = list(csv.DictReader(io.StringIO(client.get("/export", params={"shots": "30420,30166"}).text)))
+    assert {r["shot_id"] for r in rows} == {"30420", "30166"}
+    assert client.get("/export", params={"shots": "30420,nope"}).status_code == 422
+    assert client.get("/export", params={"shots": "1,2,3,4,5,6,7"}).status_code == 422   # cap: 7 distinct ids
+    assert client.get("/export", params={"shots": ",".join(["30166"] * 7)}).status_code == 200   # dupes dedupe first
+    assert client.get("/export/1").status_code == 404   # not in the catalog
+    assert client.get("/export/30420", params={"fmt": "parquet"}).status_code == 422
 
 
 def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch):

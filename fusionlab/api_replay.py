@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import os
 import re
@@ -11,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from zarr.errors import GroupNotFoundError
 
 from fusionlab import mast
@@ -108,9 +110,9 @@ def shots():
     return {"shots": out, "attribution": ATTRIBUTION}
 
 
-@router.get("/replay/{shot_id}")
-def replay_shot(shot_id: int, H: float = 1.0):
-    """Measured traces, model traces on the same time base, limits, and the geometry to draw the shot."""
+def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
+    """The full replay response: measured traces, model traces on the same time base, limits, geometry.
+    /export serves the very same dict, so exported values equal replayed values by construction."""
     s = _shot(shot_id)
     r = replay(s, H=H)
     summary = _summary(s, r)
@@ -129,6 +131,12 @@ def replay_shot(shot_id: int, H: float = 1.0):
         "coils": {k[5:]: _j(s[k], 3) for k in ("coil_R", "coil_Z", "coil_W", "coil_H")} if "coil_R" in s else None,
         "psi_grid": {"R": _j(s["psi_R"], 3), "Z": _j(s["psi_Z"], 3)},
     }
+
+
+@router.get("/replay/{shot_id}")
+def replay_shot(shot_id: int, H: float = 1.0):
+    """Measured traces, model traces on the same time base, limits, and the geometry to draw the shot."""
+    return _replay_bundle(shot_id, H)
 
 
 @router.get("/replay/{shot_id}/psi/{i}")
@@ -415,3 +423,140 @@ def db_search(q: str | None = None, campaign: str | None = None,
     cols = {k: _j(c[k][idx]) for k in _ROW_FIELDS}
     rows = [dict(zip(_ROW_FIELDS, row, strict=True)) for row in zip(*cols.values(), strict=True)]
     return {"total": total, "limit": limit, "offset": offset, "rows": rows, "attribution": ATTRIBUTION}
+
+
+# ---- take-away export (FEAT-1): the replay bundle's numbers, downloadable with their provenance.
+# The UI tags every panel measured / model / learned / computed; the export carries the same labels so
+# derived quantities stay honest outside the app (in a notebook or a group meeting, not just on screen).
+
+_LEARNED = frozenset({"H_learned", "W_hybrid_MJ"})   # the learned correction's outputs (_add_hybrid)
+_MODEL = frozenset({                                 # replay()'s published-scaling outputs (IPB98/ITER89/Martin)
+    "P_LH_MW", "W_model_MJ", "W_L_MJ", "W_H_MJ", "tau_98_s", "tau_89_s",
+    "T_avg_model_keV", "Te0_model_keV", "P_ohm_model_MW", "hmode_model",
+})
+_MEASURED_PASSTHROUGH = frozenset({"t_s", "W_meas_MJ"})   # archive diagnostics inside replay()'s dict
+
+_UNIT = {   # the repo's fixed units (CLAUDE.md); "" is dimensionless
+    "t_s": "s", "Ip_MA": "MA", "B_T": "T", "n_e20": "1e20 m^-3", "P_ohm_MW": "MW", "P_nbi_MW": "MW",
+    "P_rad_MW": "MW", "W_MJ": "MJ", "q95": "", "beta_N": "", "kappa": "", "a_m": "m", "R_m": "m",
+    "Te0_keV": "keV", "R_mag_m": "m", "Z_mag_m": "m",
+    "P_in_MW": "MW", "P_loss_MW": "MW", "P_LH_MW": "MW", "W_meas_MJ": "MJ", "W_model_MJ": "MJ",
+    "W_L_MJ": "MJ", "W_H_MJ": "MJ", "W_hybrid_MJ": "MJ", "tau_meas_s": "s", "tau_98_s": "s",
+    "tau_89_s": "s", "T_avg_model_keV": "keV", "Te0_model_keV": "keV", "P_ohm_model_MW": "MW",
+    "f_greenwald": "", "troyon": "", "kink": "", "worst_limit": "", "steady": "", "hmode_model": "",
+    "binding": "", "H98": "", "H89": "", "H_learned": "",
+    "n_steady": "", "H98_median": "", "H89_median": "", "peak_limit_fraction": "", "peak_limit_t_s": "s",
+    "P_LH_median_MW": "MW", "P_loss_median_MW": "MW", "rmse_ln_tau_ipb98": "", "rmse_ln_tau_hybrid": "",
+    "tau_correction_held_out": "", "eq_surrogate_held_out": "", "eq_surrogate_median_rel_l2": "",
+    "eq_surrogate_p95_rel_l2": "",
+}
+
+_EXPORT_COLUMNS = ("shot_id", "t_s", "quantity", "value", "unit", "provenance")
+_EXPORT_MAX_SHOTS = 6   # the compare view's limit (SRCH_MAX in web/replay.js); each id is a full replay
+
+
+def _provenance(name: str, group: str) -> str:
+    """One series' label in the measured/model/learned/computed vocabulary. `group` is the bundle's
+    series group. Unknown model keys answer 'computed' — the conservative label — and the coverage
+    tripwire in test_api.py pins every real series to its honest label."""
+    if group == "measured" or name in _MEASURED_PASSTHROUGH:
+        return "measured"
+    if name in _LEARNED:
+        return "learned"
+    if name in _MODEL:
+        return "model"
+    return "computed"
+
+
+def _summary_provenance(name: str) -> str:
+    """Summary numbers are computed here, except the learned models' own metadata (the correction's
+    holdout flag, the equilibrium surrogate's errors), which carry the learned label."""
+    return "learned" if name.startswith("eq_surrogate") or name == "tau_correction_held_out" else "computed"
+
+
+def _flat_summary(summary: dict) -> list[tuple[str, object]]:
+    """(name, value) pairs of the summary panel: nested dicts (the eq-surrogate block) get a name prefix."""
+    out: list[tuple[str, object]] = []
+    for k, v in summary.items():
+        if isinstance(v, dict):
+            out += [(f"{k}_{sk}", sv) for sk, sv in v.items()]
+        else:
+            out.append((k, v))
+    return out
+
+
+def _export_provenance_map(bundle: dict) -> dict[str, str]:
+    """quantity -> provenance for every series and summary number a bundle exports. The CSV's
+    provenance column and the JSON export block share this one source of truth."""
+    prov = {k: _provenance(k, "measured") for k in bundle["measured"]}
+    prov.update({k: _provenance(k, "model") for k in bundle["model"] if k != "t_s"})
+    prov.update({name: _summary_provenance(name) for name, _ in _flat_summary(bundle["summary"])})
+    return prov
+
+
+def _export_rows(bundles: list[dict]) -> list[dict]:
+    """The tidy take-away table: one row per (shot, time slice, quantity), every row carrying its
+    provenance and the repo's fixed unit. Values are the replay bundle's own JSON-safe numbers
+    (rounded, NaN empty), so the CSV equals the API response by construction. Summary scalars ride
+    once per shot with an empty t_s; string-valued summary entries stay in the JSON export only."""
+    rows = []
+    for b in bundles:
+        sid = b["meta"]["shot_id"]
+        series = [(k, v, "measured") for k, v in b["measured"].items()] \
+            + [(k, v, "model") for k, v in b["model"].items() if k != "t_s"]   # model shares the measured time base
+        for i, t in enumerate(b["measured"]["t_s"]):
+            for name, vals, group in series:
+                rows.append({"shot_id": sid, "t_s": t, "quantity": name, "value": vals[i],
+                             "unit": _UNIT.get(name, ""), "provenance": _provenance(name, group)})
+        for name, v in _flat_summary(b["summary"]):
+            if isinstance(v, (bool, int, float)):
+                rows.append({"shot_id": sid, "t_s": "", "quantity": name, "value": v,
+                             "unit": _UNIT.get(name, ""), "provenance": _summary_provenance(name)})
+    return rows
+
+
+def _export_ids(shots: str) -> list[int]:
+    """Comma-separated shot numbers for the compare export: deduped, request order kept, capped —
+    each id is a full replay, the cap keeps an accidental URL cheap."""
+    ids: list[int] = []
+    for part in shots.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            raise HTTPException(422, "shots must be comma-separated shot numbers, e.g. shots=30166,30420")
+        if (i := int(part)) not in ids:
+            ids.append(i)
+    if len(ids) > _EXPORT_MAX_SHOTS:
+        raise HTTPException(422, f"export covers at most {_EXPORT_MAX_SHOTS} shots — the compare view's limit")
+    return ids
+
+
+def _export(bundles: list[dict], fmt: str, H: float):
+    """CSV as an attachment download, or JSON: the full replay bundles, each plus its provenance map."""
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS)
+        w.writeheader()
+        w.writerows(_export_rows(bundles))
+        ids = [b["meta"]["shot_id"] for b in bundles]
+        name = f"fusionlab_shot_{ids[0]}.csv" if len(ids) == 1 else f"fusionlab_shots_{'_'.join(map(str, ids))}.csv"
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    if fmt == "json":
+        return {"shots": [{**b, "export": {"provenance": _export_provenance_map(b), "H": H}} for b in bundles]}
+    raise HTTPException(422, 'fmt must be "csv" or "json"')
+
+
+@router.get("/export/{shot_id}")
+def export_shot(shot_id: int, H: float = 1.0, fmt: str = "csv"):
+    """Take-away export of one shot's derived quantities: every measured trace, model trace and
+    summary number the replay serves, as a tidy CSV (one row per shot/slice/quantity, each row
+    labelled with its provenance and unit) or as JSON (the full replay bundle + the provenance map).
+    The numbers are the replay bundle's own, never a recomputation."""
+    return _export([_replay_bundle(shot_id, H)], fmt, H)
+
+
+@router.get("/export")
+def export_compare(shots: str, H: float = 1.0, fmt: str = "csv"):
+    """Compare-variant export: the same tidy table over several shots (the compare view's cap),
+    a `shot_id` column so any spreadsheet or notebook can group them. Order follows the request."""
+    return _export([_replay_bundle(i, H) for i in _export_ids(shots)], fmt, H)

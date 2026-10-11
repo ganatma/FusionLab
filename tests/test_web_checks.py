@@ -114,3 +114,17 @@ def test_agent_panel_drives_only_public_hooks(monkeypatch):
     assert "window.FusionLab.replay" in agent_js                      # public hooks only
     assert "dispatchEvent(new Event('input', { bubbles: true }))" in agent_js
     assert "EventSource" not in agent_js                              # the chat is a POST; EventSource is GET-only
+
+
+def test_export_downloads_are_wired_into_the_served_js():
+    """FEAT-1: both take-away export affordances exist in the served replay.js — the toolbar's per-shot
+    download and the compare bar's multi-shot download — and the CSV helper keeps the fetch-error
+    discipline (the .ok check, the busy state) instead of failing silently."""
+    replay = _served("replay.js")
+    assert 'id="rp-csv"' in replay                                    # the toolbar's export button
+    assert "`/export/${shot.meta.shot_id}`" in replay                 # single-shot download URL
+    assert "`/export?shots=" in replay                               # compare download URL
+    assert 'data-act="export"' in replay                              # the compare bar's export button
+    dl = replay.split("async function dlExport", 1)[1].split("CSV export failed", 1)[0]
+    assert "if (!r.ok) throw" in dl
+    assert "aria-busy" in dl

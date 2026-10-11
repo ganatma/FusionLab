@@ -34,6 +34,7 @@ import os
 import platform
 import re
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -237,6 +238,11 @@ def _weights_for_job(resolved: dict[str, Path]):
 
 
 # ---------------------------------------------------------------- job book (in-memory, depth-1)
+def _now() -> float:
+    """Monotonic clock, module-level so tests can drive eviction order deterministically."""
+    return time.monotonic()
+
+
 @dataclass
 class _Job:
     job_id: str
@@ -248,10 +254,17 @@ class _Job:
     error_type: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     runner: asyncio.Task | None = None
+    completed_at: float | None = None   # monotonic stamp the FIFO eviction sorts by
+
+    def park(self, state: str) -> None:
+        """Move to a terminal state with the completion stamp the FIFO eviction sorts by."""
+        self.state = state
+        self.completed_at = _now()
 
 
 class _JobBook:
-    """One job at a time; terminal jobs kept until MAX_JOBS_REMEMBERED lets them be evicted."""
+    """One job at a time; terminal jobs kept until MAX_JOBS_REMEMBERED lets them be evicted,
+    oldest completion first."""
 
     def __init__(self) -> None:
         self._jobs: dict[str, _Job] = {}
@@ -270,7 +283,7 @@ class _JobBook:
 
     def _evict_locked(self) -> None:
         terminal = sorted((j for j in self._jobs.values() if j.state in TERMINAL_STATES),
-                          key=lambda j: j.job_id)
+                          key=lambda j: j.completed_at if j.completed_at is not None else 0.0)
         for job in terminal[:max(len(terminal) - MAX_JOBS_REMEMBERED + 1, 0)]:
             del self._jobs[job.job_id]
 
@@ -311,20 +324,22 @@ async def _run_job(job: _Job, task: Task, inputs: BaseModel, resolved: dict[str,
         blob = await asyncio.to_thread(execute)
         if job.cancel.is_set():   # the task finished after a cancel arrived: discard the result
             raise _JobCancelled
-        job.result, job.state = blob, "completed"
+        job.result = blob
+        job.park("completed")
         _JOBS.append(job, {"event": "completed", "job_id": job.job_id, "task": job.task})
     except _JobCancelled:
-        job.state = "cancelled"
+        job.park("cancelled")
         _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
     except asyncio.CancelledError:
         # The runner task itself was cancelled (worker shutdown, a reaped stuck job) — a
         # BaseException, so the handlers above never see it. Park terminal and re-raise:
         # an unparked job wedges the depth-1 queue, 409ing every later submit (HARN-3).
-        job.state = "cancelled"
+        job.park("cancelled")
         _JOBS.append(job, {"event": "cancelled", "job_id": job.job_id})
         raise
     except Exception as e:   # a task failure is a job outcome, not a worker crash
-        job.state, job.error, job.error_type = "error", str(e), type(e).__name__
+        job.park("error")
+        job.error, job.error_type = str(e), type(e).__name__
         _JOBS.append(job, {"event": "error", "error": str(e), "error_type": type(e).__name__})
 
 

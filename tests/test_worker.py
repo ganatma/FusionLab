@@ -264,11 +264,32 @@ def test_cancelling_the_runner_task_frees_the_depth_one_slot(client, monkeypatch
             break
         time.sleep(0.05)
     assert job.state == "cancelled"
+    assert job.completed_at is not None   # HARN-3: terminal jobs carry the FIFO eviction stamp
     assert _event_names(client, job_id)[-1] == "cancelled"
 
     nxt = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}})
     assert nxt.status_code == 201, nxt.text   # the slot freed: no 409
     assert _wait_result(client, nxt.json()["job_id"]).status_code == 200
+
+
+def test_terminal_job_eviction_is_fifo_not_random(monkeypatch):
+    """Eviction sorted by random uuid4 hex, so a fresh unconsumed result could be evicted while an
+    old consumed one lingered — its later result fetch would 404. Evict oldest completion first."""
+    worker._JOBS._jobs.clear()
+    clock = iter(range(1, 1000))
+    monkeypatch.setattr(worker, "_now", lambda: float(next(clock)))
+    jobs = []
+    for _ in range(17):                          # depth-1 book: create, finish, then the next
+        j = worker._JOBS.create("benchmark")
+        j.park("completed")                      # the real stamping path, deterministic clock
+        jobs.append(j)
+    jobs[-1].result = b"fresh-unconsumed"        # the newest terminal job's result is not yet fetched
+    fresh = worker._JOBS.create("benchmark")     # 18th job: eviction makes room (16 kept + 1 incoming)
+    evicted = [j.job_id for j in jobs if j.job_id not in worker._JOBS._jobs]
+    assert evicted == [jobs[0].job_id, jobs[1].job_id]   # the two oldest completions, in order
+    assert jobs[-1].result == b"fresh-unconsumed"        # the fresh unconsumed result survived
+    assert fresh.state == "queued"
+    worker._JOBS._jobs.clear()
 
 
 # ---------------------------------------------------------------- runner safety net

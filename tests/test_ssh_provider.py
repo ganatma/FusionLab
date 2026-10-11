@@ -479,3 +479,32 @@ def test_loopback_composite_task_matches_the_local_answer(worker_url):
     local = local_p.result(local_p.submit("run_surrogate_shot", inputs))
     assert remote.shape == local.shape == shot["t_s"].shape
     assert np.array_equal(remote, local)
+
+
+def test_loopback_cancel_reaches_the_worker_and_frees_the_slot(worker_url, monkeypatch):
+    """HARN-2 end-to-end: submit a job on the real worker, cancel it through the provider's new
+    cancel(), and result() raises the typed cancelled error run_task's fallback consumes (the
+    provider-level mirror of the worker's own cancel test). The depth-1 slot then frees — the
+    next submit is not a 409 — because the worker parks the cancelled runner terminal (HARN-3):
+    that park is what made this test's second half possible."""
+    from dataclasses import replace as dc_replace
+
+    def slow(_inputs, progress):
+        for i in range(200):                     # ~10 s ceiling; the cancel lands far earlier
+            progress({"section": f"section-{i}"})
+            time.sleep(0.05)
+        return {}
+
+    monkeypatch.setitem(worker.TASKS, "benchmark", dc_replace(worker.TASKS["benchmark"], run=slow))
+    p = SshProvider(session=FakeSession(worker_url))
+    job = p.submit("benchmark", {"profile": "quick"})
+    p.cancel(job)                                # queued or running: the worker unwinds either way
+    with pytest.raises(RemoteComputeError) as ei:
+        p.result(job)
+    assert ei.value.phase == "job" and "cancelled" in ei.value.message
+
+    nxt = p.submit("benchmark", {"profile": "quick"})   # the slot freed: no 409
+    p.cancel(nxt)
+    with pytest.raises(RemoteComputeError, match="cancelled"):
+        p.result(nxt)
+    p.close()

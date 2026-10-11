@@ -166,6 +166,13 @@ class LocalProvider:
                 return
             await asyncio.sleep(0.1)
 
+    def cancel(self, job: JobHandle) -> None:
+        """An honest no-op by construction: a local job runs synchronously inside submit() on the
+        caller's thread, so there is no out-of-band handle to interrupt it with — and in-process
+        compute pays no tunnel or queue, so stopping it is not worth a cancellation protocol.
+        The UI's cancel affordance shows only for remote jobs (the progress relay labels each
+        event with the provider actually running the job)."""
+
     def result(self, job: JobHandle) -> Any:
         try:
             return self._jobs[job.job_id].pop("result")

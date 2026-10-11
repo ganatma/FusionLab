@@ -63,6 +63,25 @@ async def compute_progress(task: str) -> StreamingResponse:
                              headers={"Cache-Control": "no-cache"})
 
 
+@app.post("/compute/cancel")
+def compute_cancel(task: str):
+    """Cancel the named task's in-flight job (HARN-2): the provider's cancel on the handle the
+    progress relay is streaming. POST — state-changing, so not triggerable by navigation or
+    prefetch. The cancelled remote job's result() raises the typed cancelled error and run_task's
+    existing local-fallback semantics re-run the work unchanged; the banner and provenance report
+    honestly where it ran. With no job in flight this is a 404, never a 5xx."""
+    from fusionlab.compute import (
+        status,  # lazy: pulls LocalProvider (numpy), never asyncssh
+    )
+
+    try:
+        return status.cancel_task(task)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except status.remote_errors() as e:      # dead tunnel: result() is about to raise the same thing
+        raise HTTPException(503, str(e)) from None
+
+
 @app.post("/compute/benchmark")
 def compute_benchmark(profile: str = "quick"):
     """The measured-timings benchmark through the selected provider (the worker's `benchmark` task,

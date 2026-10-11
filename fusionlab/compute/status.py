@@ -48,9 +48,10 @@ _probing = False
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fusionlab-compute-status")
 
 
-def _remote_errors() -> tuple[type[Exception], ...]:
+def remote_errors() -> tuple[type[Exception], ...]:
     """RemoteComputeError without importing ssh.py (and httpx) on the default install: the `remote`
-    extra may simply not be here, in which case no remote provider can exist either."""
+    extra may simply not be here, in which case no remote provider can exist either. Routes that
+    surface remote failures catch this tuple — the same one run_task's fallback is built on."""
     try:
         from fusionlab.compute.ssh import RemoteComputeError
     except ImportError:
@@ -131,6 +132,26 @@ def _drop_job(task: str, handle: JobHandle) -> None:
             del _active[task]
 
 
+# ---------------------------------------------------------------- cancellation
+def cancel_task(task: str) -> dict[str, Any]:
+    """Stop the named task's in-flight job (HARN-2): the provider's own cancel on the handle
+    active_job() reports — the same handle the progress relay streams. A remote job is cancelled
+    cooperatively at the worker; result()'s poll then raises the typed cancelled error and
+    run_task's existing fallback re-runs the work locally (banner and provenance stay honest).
+    A local job cannot be interrupted — the response says so instead of pretending. Raises
+    LookupError when nothing is in flight (the route renders it as a 404)."""
+    entry = active_job(task)
+    if entry is None:
+        raise LookupError(f"no {task!r} job is running right now")
+    provider, handle = entry
+    provider.cancel(handle)
+    out: dict[str, Any] = {"job_id": handle.job_id, "task": task, "provider": provider.name,
+                           "cancelling": provider.name != "local"}
+    if provider.name == "local":
+        out["note"] = "local jobs run synchronously in-process; nothing to interrupt"
+    return out
+
+
 # ---------------------------------------------------------------- the routers' entry point
 def run_task(task: str, inputs: dict) -> Any:
     """One named task through the selected provider, falling back to Local on a remote failure.
@@ -144,14 +165,14 @@ def run_task(task: str, inputs: dict) -> Any:
     if provider.name != "local":
         try:
             handle = provider.submit(task, inputs)
-        except _remote_errors() as e:
+        except remote_errors() as e:
             record_fallback(str(e))
             logger.warning("remote compute failed; falling back to Local: %s", e)
         else:
             _record_job(task, provider, handle)
             try:
                 out = provider.result(handle)
-            except _remote_errors() as e:
+            except remote_errors() as e:
                 record_fallback(str(e))
                 logger.warning("remote compute failed; falling back to Local: %s", e)
             else:
@@ -187,8 +208,13 @@ async def progress_stream(task: str, *, wait_s: float | None = None,
     while True:
         try:
             async for event in provider.stream(handle):
-                yield f"event: {event['event']}\ndata: {json.dumps(event, allow_nan=True)}\n\n"
-        except _remote_errors():
+                # The provider rides on every relayed event (an additive key; the event vocabulary
+                # itself is unchanged): the UI's cancel affordance shows only for remote jobs —
+                # local ones are synchronous, nothing to interrupt — and a fallback re-run
+                # re-labels its own events, so the affordance follows the job actually running.
+                yield (f"event: {event['event']}\n"
+                       f"data: {json.dumps({**event, 'provider': provider.name}, allow_nan=True)}\n\n")
+        except remote_errors():
             return
         deadline = time.monotonic() + grace_s
         successor = None
@@ -209,7 +235,7 @@ def capabilities() -> dict:
     provider = get_provider()
     try:
         return provider.capabilities()
-    except _remote_errors() as e:
+    except remote_errors() as e:
         record_fallback(str(e))
         logger.warning("remote capabilities failed; falling back to Local: %s", e)
         return LocalProvider().capabilities()
@@ -238,7 +264,7 @@ def _build_snapshot() -> dict[str, Any]:
         try:
             handshake = provider.capabilities()  # cached after the first connect; autostarts the worker
             provider.health()                    # a live probe through the tunnel, right now
-        except _remote_errors() as e:
+        except remote_errors() as e:
             out.update(provider=provider.name, reachable=False, reason=str(e))
         else:
             out.update(provider=provider.name, reachable=True, host=handshake.get("host"),

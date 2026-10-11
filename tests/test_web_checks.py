@@ -145,18 +145,34 @@ def test_job_progress_is_wired_into_the_served_js():
     """HARN-1: the replay UI opens the SSE progress relay for a named task, renders the shared event
     vocabulary, and closes the stream on terminal and native-end events — EventSource's auto-reconnect
     must not spin against a route that ends after the terminal event. The benchmark control and the
-    slow field-line threshold wire the same watcher."""
+    slow field-line threshold wire the same watcher. (HARN-2 consciously changed the terminal set:
+    'cancelled' keeps the stream open so the UI can follow the local-fallback re-run.)"""
     replay = _served("replay.js")
     watch = replay.split("function watchProgress")[1].split("const psiCache")[0]
     assert "new EventSource(`/compute/progress?task=${encodeURIComponent(task)}`)" in watch
     assert "es.addEventListener('progress'" in watch
-    assert "['completed', 'error', 'cancelled'].forEach(name => es.addEventListener(name, end))" in watch
+    assert "['completed', 'error'].forEach(name => es.addEventListener(name, end))" in watch
+    assert "es.addEventListener('cancelled'" in watch
     native = watch.split("es.addEventListener('error'")[1]
     assert "if (e.data) return;" in native.split("es.close()")[0]   # stream end closes; a job error event doesn't
     assert 'id="rp-bench"' in replay
     bench = replay.split("$('rp-bench').addEventListener")[1]
     assert "watchProgress('benchmark')" in bench
     assert "setTimeout(() => watchProgress('trace_fieldlines'), 1500)" in replay
+
+
+def test_cancel_affordance_is_wired_into_the_served_js():
+    """HARN-2: the progress readout carries a cancel control, shown only while the relayed events
+    name the ssh provider (local jobs are synchronous — nothing to interrupt), POSTing the app's
+    cancel route with the fetch-error discipline (no silent failures)."""
+    replay = _served("replay.js")
+    assert 'id="rp-progress-cancel"' in replay
+    watch = replay.split("function watchProgress")[1].split("const psiCache")[0]
+    assert "cancelBtn.hidden = progressProvider !== 'ssh'" in watch
+    click = replay.split("$('rp-progress-cancel').addEventListener")[1]
+    assert "fetch(`/compute/cancel?task=${encodeURIComponent(progressTask)}`" in click
+    assert "{ method: 'POST' }" in click
+    assert "if (!r.ok)" in click
 
 
 def test_replay_domain_shading_is_the_served_bands_with_a_legend_label():

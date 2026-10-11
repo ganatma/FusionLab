@@ -44,6 +44,13 @@ class ComputeProvider(Protocol):
         """Progress events for one job (queued / running / progress / completed — whatever this backend has)."""
         ...
 
+    def cancel(self, job: JobHandle) -> None:
+        """Ask a queued or running job to stop — cooperative, and never an error for being too
+        late (a job that already went terminal is simply not running anymore). Local jobs run
+        synchronously inside submit(), so there is nothing out-of-band to interrupt: a no-op.
+        A remote job's result() then raises the failure the caller's fallback already handles."""
+        ...
+
     def result(self, job: JobHandle) -> Any:
         """The job's payload, consumed once."""
         ...

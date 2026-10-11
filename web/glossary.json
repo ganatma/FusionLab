@@ -1,5 +1,5 @@
 {
-  "_about": "One sentence per term, shared by the guided study (hover on a dotted word) and the lab (hover on a panel label, help line under a slider). 'on' lists data-guide names that get this definition as their tooltip; 'help' is the line under a sandbox slider. Physics statements follow docs/PHYSICS.md.",
+  "_about": "One sentence per term, shared by the guided study (hover on a dotted word) and the lab (hover on a panel label, help line under a slider). 'on' lists data-guide names that get this definition as their tooltip; 'help' is the line under an Explore slider. Physics statements follow docs/PHYSICS.md.",
   "terms": {
     "plasma": { "name": "Plasma", "def": "A gas hot enough that electrons have left their atoms, so it conducts electricity and can be pushed and held by magnetic fields." },
     "kev": { "name": "keV", "def": "The temperature unit used in fusion: 1 keV is about 11.6 million °C. A burning D-T plasma needs roughly 10 keV." },

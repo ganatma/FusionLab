@@ -269,6 +269,12 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
 .srch-rows td { white-space:nowrap; }
 .bad { color:var(--bad); }
 
+/* Explore workspace: the visible path into the anchored editor (Replay, edit intent in the URL) */
+.entry-action { margin:14px 0 0; }
+.entry-action a { color:var(--accent); font:600 13px/1.4 system-ui, sans-serif; text-decoration:underline; }
+.entry-action a:hover { color:var(--fg); }
+.entry-action a:focus-visible { outline:1px solid var(--accent); outline-offset:2px; }
+
 /* Mobile header: the legend (its tags repeat on every panel) and the subtitle step aside, and the
    tabs take their own row, so the title never clips (audit defect at 375 px, screenshot fl_AmO2E2fS).
    Last in the file: it must out-order the base .prov/.tabs rules it overrides (equal specificity). */

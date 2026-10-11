@@ -126,6 +126,8 @@ def _replay_bundle(shot_id: int, H: float = 1.0) -> dict:
                                    "computed_on": eq.get("computed_on")}
     return {
         "meta": s["meta"], "attribution": ATTRIBUTION, "limit_names": LIMIT_NAMES, "summary": summary,
+        # The archive's own bookkeeping (FEAT-3): the abort flag the limit panel overlays as context.
+        "archive": _archive_flags(shot_id),
         "measured": {k: _j(s[k]) for k in _TRACES if k in s},
         "model": {k: _j(v) for k, v in r.items()},
         "lcfs": {"R": _j(s["lcfs_R"], 3), "Z": _j(s["lcfs_Z"], 3)},
@@ -347,6 +349,20 @@ _ROW_FIELDS = ("shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_oh
 def _catalog() -> dict:
     """The full FAIR-MAST shot table (data/mast_db.npz), read once per process and shared by every search."""
     return mast.load_db()
+
+
+def _archive_flags(shot_id: int) -> dict[str, bool | None]:
+    """The archive's own bookkeeping for one shot — the catalog's cpf_useful/cpf_abort columns.
+    None where the row is missing or a flag is NaN (the archive never graded it): the UI degrades
+    silently, never invents a flag. These are archive bookkeeping, not physics."""
+    c = _catalog()
+    hits = np.nonzero(c["shot_id"] == shot_id)[0]
+    if not hits.size:
+        return {"useful": None, "abort": None}
+    def flag(col: str) -> bool | None:
+        v = float(c[col][int(hits[0])])
+        return None if not np.isfinite(v) else bool(v)
+    return {"useful": flag("useful"), "abort": flag("abort")}
 
 
 def _q_mask(c: dict, q: str | None) -> np.ndarray | None:

@@ -115,6 +115,7 @@ week of plumbing; a student gets a real discharge to scrub through and watch hit
 | **Equilibrium surrogate** | A PhysicsNeMo network reconstructs the flux map ψ(R,Z) from 93 magnetic signals; shown dashed over EFIT's surfaces with the per-slice error. |
 | **OpenUSD export** | Each shot as a time-sampled stage: real vessel, PF coils, plasma boundary, field lines. OpenUSD export (Omniverse-compatible); opens in usdview, USD Composer or Blender. |
 | **CSV export** | Every number a replay or compare shows — measured traces, model traces, summary — as one CSV, one row per shot, slice and quantity, each labelled measured / model / learned / computed. |
+| **Limit-distance panel** | The replayed shot's distance to the Greenwald, Troyon β<sub>N</sub> and kink limits over time (1.0 = at the limit) — computed distances, never forecasts — with the archive's abort flag overlaid where the catalog carries one. |
 | **Python loader** | `mast.load_shot()` and a cleaned shot table, in consistent units on one time base. |
 
 Every panel in the UI is tagged **measured / model / learned / computed**, so data is never mistaken for model.

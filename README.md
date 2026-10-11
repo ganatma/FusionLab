@@ -114,6 +114,7 @@ week of plumbing; a student gets a real discharge to scrub through and watch hit
 | **Virtual shot** | Edit a real shot's programme (beam power and timing, density) and re-fly it through a time-dependent 0D energy balance anchored on the measurement. A slider exists only where matched pairs of real shots can test the edit; the result is worded as a distance to a limit, never a forecast. |
 | **Equilibrium surrogate** | A PhysicsNeMo network reconstructs the flux map ψ(R,Z) from 93 magnetic signals; shown dashed over EFIT's surfaces with the per-slice error. |
 | **OpenUSD export** | Each shot as a time-sampled stage: real vessel, PF coils, plasma boundary, field lines. OpenUSD export (Omniverse-compatible); opens in usdview, USD Composer or Blender. |
+| **CSV export** | Every number a replay or compare shows — measured traces, model traces, summary — as one CSV, one row per shot, slice and quantity, each labelled measured / model / learned / computed. |
 | **Python loader** | `mast.load_shot()` and a cleaned shot table, in consistent units on one time base. |
 
 Every panel in the UI is tagged **measured / model / learned / computed**, so data is never mistaken for model.
@@ -203,7 +204,7 @@ flowchart LR
   F --> U
   F --> A
   M --> U[usd_export.py<br/>time-sampled OpenUSD stage]
-  R --> A[FastAPI<br/>/shots /replay /db /db/search /surrogate /simulate /map]
+  R --> A[FastAPI<br/>/shots /replay /export /db /db/search /surrogate /simulate /map]
   S --> A
   U --> A
   E[physics.simulate<br/>0D power balance<br/>ITER · SPARC · JET · DIII-D · MAST] --> A

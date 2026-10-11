@@ -247,6 +247,7 @@
       if (!shot) return;
       const id = shot.meta.shot_id;
       $('rp-usd').setAttribute('aria-busy', 'true');
+      flash('wait', 'Exporting the OpenUSD stage…', 0);   // sticks until the export settles
       try {
         const r = await fetch(`/replay/${id}/usd`, { method: 'POST' });
         if (!r.ok) throw new Error(`export failed: ${r.status}`);
@@ -255,8 +256,14 @@
         const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
         a.click();
         URL.revokeObjectURL(a.href);
+        flash('ok', `Exported ${name} — check your downloads`);
+        usdErr = null; renderFallback(lastCompute);   // a clean export re-arms the notice row for the next failure
       } catch (e) {
         console.error('USD export failed:', e);
+        usdErr = `<b>OpenUSD export of shot #${id} failed.</b> ${esc(String(e && e.message || e))} — the stage writer needs the FusionLab server. Check the compute status, then try again.`;
+        usdSeen = false;
+        renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, not console-only
+        flash('bad', 'OpenUSD export failed');
       } finally {
         $('rp-usd').removeAttribute('aria-busy');
       }
@@ -299,16 +306,21 @@
     // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
     // Both notices render in the same grid row, so the banner takes the row while it is up: the
     // operational status outranks the onboarding hint, and the hint comes back (per its own
-    // dismissed state) when the banner goes away.
-    let fallbackSeen = false;
+    // dismissed state) when the banner goes away. renderFallback is the single painter — the /compute
+    // poll and the USD export handler only set state — so a poll cannot overwrite a fresh export error.
+    let fallbackSeen = false, usdErr = null, usdSeen = false;
     function renderFallback(s) {
       if (s && !s.fallback) fallbackSeen = false;
-      const show = !!s && !!s.fallback && !fallbackSeen;
+      const compute = !!s && !!s.fallback && !fallbackSeen;   // the compute fallback outranks a failed export
+      const usd = !compute && !!usdErr && !usdSeen;
+      const show = compute || usd;   // one notice per grid row: it takes the row from the onboarding hint
       $('rp-fallback').hidden = !show;
+      $('rp-fallback').classList.toggle('error', usd);   // red edge for the export failure, amber for compute
       $('rp-hint').hidden = show ? true : hintSeen();
-      if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (compute) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (usd) $('rp-fallback-text').innerHTML = usdErr;   // composed at set time, with esc() on the reason
     }
-    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; usdSeen = true; renderFallback(lastCompute); });
     async function pollCompute() {
       try {
         const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);

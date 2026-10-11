@@ -246,6 +246,18 @@
   modeSeg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setMode(b.dataset.v); });
   welcome.addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
 
+  // ---------------------------------------------------------------- the command palette's hook
+  // The palette (web/palette.js) starts or resumes the study through this — the same jump the per-panel
+  // "?" buttons take (find the lesson, setMode). Additive: existing FusionLab keys untouched.
+  window.FusionLab = Object.assign(window.FusionLab || {}, { guided: {
+    start(lessonId) {
+      if (!L) return false;   // lessons not loaded (boot failed): the palette reports it, nothing breaks
+      if (lessonId != null) { const i = L.steps.findIndex((s) => s.id === lessonId); if (i >= 0) idx = i; }
+      setMode('guided');
+      return true;
+    },
+  } });
+
   async function boot() {
     const [lessons, glossary] = await Promise.all(['lessons', 'glossary'].map((f) => fetch(`/static/${f}.json`).then((r) => r.json())));
     L = lessons; G = glossary.terms;

@@ -90,6 +90,9 @@ remote_dir = "~/FusionLab"  # the clone on that host
 autostart = true            # start the worker over SSH when none is answering
 ```
 
+More than one GPU box? Define a `[compute.hosts.<name>]` profile per host (same keys) and switch
+with `FUSIONLAB_COMPUTE_HOST` — see [docs/COMPUTE.md](docs/COMPUTE.md).
+
 Full guide — prerequisites, what the chip and banner mean, and a first-run checklist against a real
 host: [docs/COMPUTE.md](docs/COMPUTE.md).
 

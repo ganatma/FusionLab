@@ -170,3 +170,18 @@ def test_replay_domain_shading_is_the_served_bands_with_a_legend_label():
     assert "'outside the training range'" in strips    # labelled in the plot legend when present
     whatif = replay.split("function drawWhatIf")[1].split("function revolve")[0]
     assert "oodShapes(oodRuns(" in whatif              # the what-if path maps its own flags with the same machinery
+
+
+def test_abort_overlay_is_conditional_on_the_catalog_flag():
+    """FEAT-3: the abort badge and the limit-strip annotation exist only as conditions on the
+    bundle's archive.abort — absent or false flags leave the panel untouched (silent degradation) —
+    and the panel wording keeps the house rule: computed distances, never forecasts."""
+    replay = _served("replay.js")
+    assert 'id="rp-abort" hidden' in replay                     # the badge ships hidden, shown per shot
+    assert "$('rp-abort').hidden = !shot.archive?.abort" in replay   # toggled only from the bundle flag
+    strip_fn = replay.split("function drawStrips")[1].split("function insight(s)")[0]
+    assert "shot.archive?.abort" in strip_fn                    # the annotation is conditional, not static
+    assert "⚠ archive abort flag" in strip_fn
+    assert "a distance, never a forecast" in replay             # the house wording, on the panel itself
+    ins_fn = replay.split("function insight(s)")[1].split("const ohmic")[0]
+    assert "flags this shot <b>aborted</b>" in ins_fn and "catalog bookkeeping" in ins_fn

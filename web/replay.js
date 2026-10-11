@@ -59,7 +59,7 @@
       <div class="cr-cell" id="cell-tr" data-guide="traces">
         <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim" id="rp-tr-note">laws are fed the measured power</span></h2>
         <div class="strips">
-          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
+          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limit distance', '1.0 = limit', 'strip-lim')}
           <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">kJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
         </div>
       </div>
@@ -86,7 +86,7 @@
           <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
-        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span></h2>
+        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span> <span class="dim">· a distance, never a forecast</span> <span class="tag abort" id="rp-abort" hidden title="The archive's own bookkeeping (cpf_abort) for this shot — context for reading these distances, never a forecast.">⚠ archive abort</span></h2>
         <div class="gauge-row wi-keep" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
         <div class="gauge-row wi-keep" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
         <div class="gauge-row wi-keep" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
@@ -500,6 +500,7 @@
       (m.preshot ? `<p><span class="muted">Before:</span> ${esc(m.preshot)}</p>` : '') +
       (m.postshot ? `<p><span class="muted">After:</span> ${esc(m.postshot)}</p>` : '');
     $('rp-insight').innerHTML = insight(shot);
+    $('rp-abort').hidden = !shot.archive?.abort;   // archive bookkeeping: the marker exists only when the catalog carries the flag
 
     drawStrips();
 
@@ -547,7 +548,12 @@
       line(t, mo.troyon, 'Troyon β_N / 3.5', C.orange),
       line(t, mo.kink, 'Kink 2 / q95', C.aqua),
     ], stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
-              shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
+              shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }],
+              // Abort overlay (FEAT-3): the archive's own per-shot flag, drawn only when the catalog carries it —
+              // context for reading the distances, never a forecast. False or unknown flags leave the panel untouched.
+              annotations: shot.archive?.abort ? [{ text: '⚠ archive abort flag', xref: 'paper', yref: 'paper', x: 0.5, y: 0.94,
+                                                     showarrow: false, font: { color: C.orange, size: 9 },
+                                                     bgcolor: 'rgba(217,89,38,0.14)', borderpad: 1 }] : [] }), CFG);
   }
 
   function insight(s) {
@@ -558,6 +564,8 @@
     out.push(q.peak_limit_fraction >= 1
       ? `<b>${name}</b> limit exceeded: ${fmt(q.peak_limit_fraction)}× at t = ${fmt(q.peak_limit_t_s, 3)} s.`
       : `Closest approach to a limit: <b>${name}</b> at ${fmt(q.peak_limit_fraction)}× (t = ${fmt(q.peak_limit_t_s, 3)} s).`);
+    if (s.archive?.abort)
+      out.push(`The archive flags this shot <b>aborted</b> (catalog bookkeeping) — context for the limit distances above, never a forecast.`);
     // Only claimed for ohmic shots: with beams the energy holds fast ions and the late phase may well be H-mode.
     const ohmic = (s.meta.heating || '').toLowerCase() === 'ohmic';
     if (ohmic && q.P_loss_median_MW !== null && q.P_loss_median_MW > 2 * q.P_LH_median_MW && Math.abs(q.H89_median - 1) < 0.25)

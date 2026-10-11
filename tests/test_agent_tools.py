@@ -8,17 +8,18 @@ applying: no export write, no applied edit, ever, from the registry itself.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from fusionlab import agent_tools, mast
+from fusionlab import agent_tools, api_replay, mast
 from fusionlab.api import app
 from fusionlab.api_virtual import EditIn
 
 client = TestClient(app)
 
-BLUEPRINT_TOOLS = {"search_shots", "list_cached_shots", "load_shot", "get_whatif_gate",
-                   "run_whatif", "get_simulate", "list_devices", "export_usd"}
+BLUEPRINT_TOOLS = {"search_shots", "list_cached_shots", "load_shot", "limit_distances", "get_whatif_gate",
+                   "run_whatif", "get_simulate", "list_devices", "export_usd"}   # +limit_distances: FEAT-3
 
 # (tool kwargs, the /db/search query params they must mean) — the ranges are the tool's [min, max] shape
 FILTER_CASES = [
@@ -35,7 +36,9 @@ FILTER_CASES = [
 
 
 # ---- the registry itself
-def test_registry_has_the_eight_blueprint_tools():
+def test_registry_has_the_blueprint_tools_plus_the_limit_panel_tool():
+    """The blueprint's eight tools plus FEAT-3's limit_distances (the measured limit-distance
+    panel's query tool) — confirm-then-apply stays exactly the two state-changers."""
     assert set(agent_tools.TOOLS) == BLUEPRINT_TOOLS
     assert {n for n, t in agent_tools.TOOLS.items() if t.confirm_then_apply} == {"run_whatif", "export_usd"}
     defs = agent_tools.tool_definitions()
@@ -109,6 +112,55 @@ def test_load_shot_returns_a_compact_summary_without_the_time_arrays():
     assert r.error is None
     assert r.data["shot_id"] == 30166 and r.data["n_slices"] == mast.load_shot(30166)["t_s"].size
     assert "summary" in r.data and "measured" not in r.data   # traces are the UI's job, not the model's context
+
+
+# ---- limit_distances (FEAT-3): the measured limit-distance panel's query tool
+def test_limit_distances_answers_the_over_time_question():
+    """The tool reports per-limit closest approach and first crossing from the replay bundle's own
+    per-slice distances, plus a coarse over-time series whose values are the bundle's (downsampled,
+    never recomputed) — and the summary keeps the house wording: distances, never forecasts."""
+    r = agent_tools.run_tool("limit_distances", shot_id=30166)
+    assert r.error is None
+    d = r.data
+    assert d["shot_id"] == 30166 and d["limit_names"] == ["greenwald", "troyon", "kink"]
+    assert d["n_slices"] == mast.load_shot(30166)["t_s"].size
+    for name in d["limit_names"]:
+        c, x = d["closest"][name], d["first_cross_s"][name]
+        if c is not None:
+            assert c["fraction"] >= 0 and 0 <= c["t_s"] <= d["series"]["t_s"][-1]
+            assert x is None or x <= d["series"]["t_s"][-1]
+    assert "never a forecast" in r.summary
+    # the coarse series is the bundle's own values at the stride grid — spot-check one point
+    b = client.get("/replay/30166").json()
+    k = 7
+    assert d["series"]["troyon"][k] == b["model"]["troyon"][k * d["series_stride"]]
+    assert len(d["series"]["t_s"]) * d["series_stride"] < d["n_slices"] + 2 * d["series_stride"]
+
+
+def test_limit_distances_uncached_is_the_cache_boundary():
+    """Same verbatim refusal as load_shot, with the search_shots pointer."""
+    route = client.get("/replay/1")
+    assert route.status_code == 404
+    r = agent_tools.run_tool("limit_distances", shot_id=1)
+    assert r.error is not None and route.json()["detail"] in r.error
+    assert "search_shots" in r.error
+    assert r.data["cached_shot_ids"] == mast.cached_shots()
+
+
+def test_limit_distances_carries_the_catalog_abort_flag(monkeypatch):
+    """The abort flag rides the bundle's archive block: the tool reports it and says it is
+    bookkeeping — and unflagged shots say nothing about abort."""
+    r = agent_tools.run_tool("limit_distances", shot_id=30166)
+    assert r.error is None and r.data["archive"]["abort"] is False
+    assert "abort" not in r.summary.lower()
+    c = dict(api_replay._catalog())
+    i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
+    c["abort"] = c["abort"].copy()
+    c["abort"][i] = 1.0
+    monkeypatch.setattr(api_replay, "_catalog", lambda: c)
+    r = agent_tools.run_tool("limit_distances", shot_id=30166)
+    assert r.error is None and r.data["archive"]["abort"] is True
+    assert "flags this shot aborted" in r.summary
 
 
 # ---- run_whatif: conversion, gate, proposal

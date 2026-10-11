@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
+import numpy as np
 from fastapi import HTTPException
 
 from fusionlab import mast, virtual
@@ -129,6 +130,65 @@ def load_shot(shot_id: int, H: float = 1.0) -> ToolResult:
                  f"{meta.get('P_nbi_max_MW')} MW. {r['summary']} Logbook: {s[:200]}"),
         data={"shot_id": int(shot_id), "meta": meta, "summary": r["summary"], "limit_names": r["limit_names"],
               "n_slices": n, "attribution": r["attribution"]},
+    )
+
+
+_LIMIT_TITLES = {"greenwald": "Greenwald density", "troyon": "Troyon β_N", "kink": "kink (q95 < 2)"}
+_LIMIT_KEYS = {"greenwald": "f_greenwald", "troyon": "troyon", "kink": "kink"}
+
+
+def _limit_extremes(t: np.ndarray, frac: np.ndarray) -> tuple[dict[str, float] | None, float | None]:
+    """(closest approach, first crossing time) for one limit's per-slice fractions — (None, None)
+    when the limit's inputs are NaN everywhere (an honest gap, like the UI's)."""
+    if not np.isfinite(frac).any():
+        return None, None
+    i = int(np.nanargmin(frac))
+    closest = {"fraction": round(float(frac[i]), 3), "t_s": round(float(t[i]), 3)}
+    cross = np.nonzero(np.isfinite(frac) & (frac >= 1.0))[0]
+    return closest, (round(float(t[cross[0]]), 3) if cross.size else None)
+
+
+@_guard
+def limit_distances(shot_id: int) -> ToolResult:
+    """Distances to the operating limits over time for one cached shot — the replay panel's own
+    numbers (physics.replay's limit fractions on the measured traces, the same formulas /map draws).
+    Answers 'how close is shot X to the beta limit over time'. Distances, never forecasts: 1.0 is
+    at the limit, not a prediction of a disruption."""
+    try:
+        r = replay_shot(int(shot_id))
+    except HTTPException as e:
+        cached = mast.cached_shots()
+        return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
+                    "use search_shots to explore the full catalog instead.",
+                    {"shot_id": int(shot_id), "cached_shot_ids": cached})
+    mo, me = r["model"], r["measured"]
+    def arr(xs: list) -> np.ndarray:
+        return np.array([np.nan if v is None else v for v in xs], dtype=float)
+    t = arr(me["t_s"])
+    closest, crosses = {}, {}
+    for name, key in _LIMIT_KEYS.items():
+        closest[name], crosses[name] = _limit_extremes(t, arr(mo[key]))
+    stride = max(1, int(t.size) // 64)   # coarse over-time series: the shape, not 500 numbers
+    series: dict[str, list[float | None]] = {"t_s": [float(v) for v in t[::stride]]}
+    for name, key in _LIMIT_KEYS.items():
+        series[name] = [None if not np.isfinite(v) else float(v) for v in arr(mo[key])[::stride]]
+    bits = [f"{_LIMIT_TITLES[name]} {c['fraction']}× at t = {c['t_s']} s" for name, c in closest.items() if c]
+    archive = r["archive"]
+    if bits:
+        out = [f"Shot {shot_id}, closest approach over the shot's time base: " + ", ".join(bits) + "."]
+        crossed = [f"{_LIMIT_TITLES[name]} at t = {crosses[name]} s" for name in crosses if crosses[name] is not None]
+        out.append("First crossing: " + ", ".join(crossed) + "." if crossed
+                   else "No operating limit is crossed across the shot.")
+    else:
+        out = [f"Shot {shot_id}'s limit distances are unavailable: the measured inputs are NaN on every slice."]
+    if archive.get("abort"):
+        out.append("The archive flags this shot aborted (catalog bookkeeping).")
+    out.append("These are computed distances to the limits (1.0 = at the limit), never a forecast of a disruption.")
+    return ToolResult(
+        summary=" ".join(out),
+        data={"shot_id": int(shot_id), "limit_names": list(r["limit_names"]), "n_slices": int(t.size),
+              "closest": closest, "first_cross_s": crosses, "series": series, "series_stride": stride,
+              "archive": archive, "attribution": r["attribution"]},
     )
 
 
@@ -339,6 +399,24 @@ TOOLS: dict[str, Tool] = {
             },
         },
         handler=load_shot,
+    ),
+    "limit_distances": Tool(
+        definition={
+            "name": "limit_distances",
+            "description": (
+                "Per-slice distances to the operating limits for one cached shot: Greenwald density fraction, "
+                "Troyon β_N fraction and kink (2/q95) over the shot's time base — the replay panel's own numbers, "
+                "computed from the measured traces. Reports each limit's closest approach, the first time a limit "
+                "is crossed (1.0 = at the limit) and the archive's abort flag where the catalog carries one. "
+                "A distance, never a forecast of a disruption."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"shot_id": {"type": "integer", "description": "a cached shot id (list_cached_shots)"}},
+                "required": ["shot_id"],
+            },
+        },
+        handler=limit_distances,
     ),
     "get_whatif_gate": Tool(
         definition={

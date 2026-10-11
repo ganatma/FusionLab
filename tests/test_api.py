@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from fusionlab import api_replay, mast, virtual
 from fusionlab.api import NoDotfiles, app
+from fusionlab.physics import BETA_N_LIMIT
 
 client = TestClient(app)
 WEB = Path(__file__).resolve().parents[1] / "web"
@@ -209,6 +210,59 @@ def test_replay_psi_slice_matches_the_efit_grid():
     p = client.get("/replay/30420/psi/10").json()
     assert len(p["psi_n"]) == len(j["psi_grid"]["Z"]) and len(p["psi_n"][0]) == len(j["psi_grid"]["R"])
     assert client.get("/replay/30420/psi/9999").status_code == 404
+
+
+# ---- limit-distance panel (FEAT-3): measured limits over time, the archive's abort flag as context
+
+def _arr(xs: list) -> np.ndarray:
+    """A bundle's JSON-safe series (None for NaN) back to a float array."""
+    return np.array([np.nan if v is None else v for v in xs], dtype=float)
+
+
+def test_limit_distances_match_the_map_limit_formulas():
+    """FEAT-3: the panel's per-slice distances are /map's limit formulas evaluated on the shot's own
+    measured geometry — api.operating_map's f_gw = n/n_gw with n_gw = Ip/(pi a^2), troyon =
+    beta_N/BETA_N_LIMIT, kink = 2/q95 — and worst_limit is their nan-propagating max (/map's
+    stability_limit relation). physics.replay computes the same stack by construction; the test pins
+    it against drift. Bundle series are rounded to 4 dp, so compare at rounding tolerance."""
+    for sid in mast.cached_shots():
+        b = client.get(f"/replay/{sid}").json()
+        me, mo = b["measured"], b["model"]
+        n, ip, a = (_arr(me[k]) for k in ("n_e20", "Ip_MA", "a_m"))
+        want = {"f_greenwald": n / (ip / (np.pi * a**2)),
+                "troyon": _arr(me["beta_N"]) / BETA_N_LIMIT,
+                "kink": 2.0 / _arr(me["q95"])}
+        for name, w in want.items():
+            assert np.allclose(_arr(mo[name]), w, rtol=1e-3, atol=1e-3, equal_nan=True), (sid, name)
+        worst = np.max(np.stack(list(want.values())), axis=0)
+        assert np.allclose(_arr(mo["worst_limit"]), worst, rtol=1e-3, atol=1e-3, equal_nan=True), sid
+
+
+def test_archive_flags_align_with_the_catalog():
+    """FEAT-3: the bundle's archive block is the catalog's own cpf_useful/cpf_abort row — None where
+    the archive never graded the shot (NaN), so absent flags degrade silently downstream."""
+    c = api_replay._catalog()
+    for sid in mast.cached_shots():
+        i = int(np.nonzero(c["shot_id"] == sid)[0][0])
+        def row_flag(col, i=i):
+            v = float(c[col][i])
+            return None if not np.isfinite(v) else bool(v)
+        b = client.get(f"/replay/{sid}").json()
+        assert b["archive"] == {"useful": row_flag("useful"), "abort": row_flag("abort")}, sid
+
+
+def test_abort_marker_aligns_with_a_flagged_catalog_row(monkeypatch):
+    """Where the archive DOES flag a shot, the bundle carries abort=True and the UI marker aligns
+    with the catalog by construction. No cached shot ships flagged, so the alignment is proven on a
+    synthetic catalog row (the shipped cache exercises only the silent-degradation path)."""
+    c = dict(api_replay._catalog())
+    i = int(np.nonzero(c["shot_id"] == 30166)[0][0])
+    c["abort"] = c["abort"].copy()
+    c["abort"][i] = 1.0
+    monkeypatch.setattr(api_replay, "_catalog", lambda: c)
+    b = client.get("/replay/30166").json()
+    assert b["archive"] == {"useful": True, "abort": True}
+    assert client.get("/replay/30420").json()["archive"]["abort"] is False   # unflagged rows stay False
 
 
 # ---- multi-shot compare (A2), criterion 4: any shot id is replayable. An uncached catalog shot rides

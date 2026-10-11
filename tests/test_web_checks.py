@@ -76,7 +76,7 @@ def test_failed_shot_switch_reverts_the_select():
 def test_fire_and_forget_panels_render_their_errors():
     """JS-07: the /db and /surrogate fetches carry the figures.js one-line .catch."""
     replay = _served("replay.js")
-    assert ".catch(() => { $('tab-db').innerHTML" in replay
+    assert ".catch(() => { $('tab-compare').innerHTML" in replay
     assert ".catch(() => { const el = $('rp-sur'); if (el) el.innerHTML" in replay
 
 

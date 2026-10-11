@@ -107,7 +107,7 @@
   const SRCH_RANGES = [['I<sub>p</sub>', 'MA', 'ip'], ['B', 'T', 'bt'], ['P<sub>nbi</sub>', 'MW', 'pnbi'],
                        ['n<sub>e</sub>', '10²⁰ m⁻³', 'ne'], ['W', 'MJ', 'w'], ['q<sub>95</sub>', '', 'q95']];
 
-  const dbRoot = document.getElementById('tab-db');
+  const dbRoot = document.getElementById('tab-compare');
   if (dbRoot) dbRoot.innerHTML = `
     <div class="stack">
       <div class="panel stack" id="rp-srch-panel">
@@ -284,7 +284,7 @@
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
     [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => { db = j; drawDb(); })
-      .catch(() => { $('tab-db').innerHTML = '<p class="muted">The shot database needs the FusionLab server (/db). Reload to retry.</p>'; });
+      .catch(() => { $('tab-compare').innerHTML = '<p class="muted">The shot catalog needs the FusionLab server (/db). Reload to retry.</p>'; });
     // Snapshot the shared link BEFORE initDbSearch(): its searchDb() rewrite canonicalizes ?compare= into
     // numeric order while no live compare exists yet, which silently re-points the reference — the first id
     // of a shared link is the reference and must survive the boot.
@@ -807,7 +807,7 @@
       shared.set('compare', (ref != null ? [ref, ...sel.filter(x => x !== ref)] : sel).join(','));   // selection order: tick order, or the shared link's reference-first order
     }
     const qs = shared.toString();
-    history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+    history.replaceState(null, '', (qs ? '?' + qs : location.pathname) + location.hash);   // the hash is the route — never strip it
   }
 
   function srchReadUrl() {   // a shared link restores the filters, the page and the selection
@@ -872,12 +872,9 @@
         || `<tr><td colspan="11" class="muted">No shots match. <button type="button" class="tool" id="rp-srch-empty-clear">Clear the filters</button></td></tr>`}</tbody>`;
   }
 
-  function openReplay(id) {   // a search result clicked: the replay tab already deep-links on ?shot=
-    const shared = new URLSearchParams(location.search);
-    shared.set('shot', id);
-    history.replaceState(null, '', `?${shared}`);
-    window.FusionLab.showTab('replay');
-    window.FusionLab.replay.select(id);
+  function openReplay(id) {   // a search result clicked: the hash grammar owns the route — mount the shot through the router
+    location.hash = '#/replay/' + id;
+    window.FusionLabRouter.route();   // applies the new route synchronously (the async hashchange becomes a no-op)
   }
 
   function srchClear() {
@@ -946,7 +943,7 @@
     const shared = new URLSearchParams(location.search);
     if (cmp.on && cmp.ref != null && cmp.ids.length) shared.set('compare', cmpUrlParam());
     else shared.delete('compare');
-    history.replaceState(null, '', shared.toString() ? '?' + shared : location.pathname);
+    history.replaceState(null, '', (shared.toString() ? '?' + shared : location.pathname) + location.hash);   // the hash is the route — never strip it
   }
 
   function cmpSyncSel() {   // the db-view checkboxes mirror the live compare selection
@@ -1093,7 +1090,7 @@
     if (!b) return;
     if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
-    if (b.dataset.act === 'search') return window.FusionLab.showTab('db');
+    if (b.dataset.act === 'search') return window.FusionLab.showTab('compare');
     if (b.dataset.retry) {
       const id = +b.dataset.retry;
       cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();
@@ -1233,7 +1230,7 @@
     if (use3) { $('rp-3d-panel').hidden = false; scrub(+$('rp-t').value); }
   });
   document.addEventListener('fusionlab:tab', e => {
-    if (e.detail !== 'replay' && e.detail !== 'db') return;
+    if (e.detail !== 'replay' && e.detail !== 'compare') return;
     init().then(() => {
       [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw', 'rp-3d', 'rp-db-tau', 'rp-db-ops'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
       if (use3) window.Vessel3D.resize();
@@ -1262,6 +1259,9 @@
     view(v) { const b = $('rp-view').querySelector(`button[data-v="${v}"]`); if (b && !$('rp-view').hidden) b.click(); },
     state: () => (shot ? sliceState(+$('rp-t').value) : null),
     whatIf: on => whatIf(on),
+    compare(ids) {   // public hook for the router's #/compare/{ids} deep links (workspaces.js)
+      return init().then(() => startCompare(ids));
+    },
   } });
 
   if (!root.hidden) init().catch(() => { /* rendered in the replay cell; retried on the next tab entry */ });

@@ -316,6 +316,22 @@ class SshProvider:
         except httpx.HTTPError as e:
             raise RemoteComputeError("job", f"event stream broke: {type(e).__name__}: {e}") from None
 
+    def cancel(self, job: JobHandle) -> None:
+        """Stop a queued or running job: POST the worker's cancel endpoint (worker.py's cooperative
+        cancel — immediate while queued, checked between task sections while running). The next
+        result() poll then sees state `cancelled` and raises the typed error run_task's fallback
+        consumes, so the work re-runs locally and the user still gets an answer. A 409 means the
+        job went terminal before the cancel landed — nothing left to stop, not a failure; a dead
+        tunnel raises the same typed error result() is about to raise anyway."""
+        try:
+            r = self._http.post(f"/v1/jobs/{job.job_id}/cancel")
+        except httpx.HTTPError as e:
+            raise RemoteComputeError("job", f"cancel failed: {type(e).__name__}: {e}") from None
+        if r.status_code == 409:
+            return
+        if r.status_code >= 400:
+            raise RemoteComputeError("job", f"cancel failed: HTTP {r.status_code}")
+
     def result(self, job: JobHandle) -> Any:
         """Wait for the terminal state, then decode the FLF1 payload once. A remote task failure
         raises RemoteComputeError carrying the worker's own error text — the local-fallback signal."""

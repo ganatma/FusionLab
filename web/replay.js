@@ -28,7 +28,9 @@
         <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
         <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
         <button type="button" id="rp-csv" class="tool" title="Take-away export: every measured, model, learned and computed number this replay shows, one CSV row per slice and quantity, each labelled with its provenance. Opens in Excel, pandas or a notebook.">↓ CSV export</button>
+        <button type="button" id="rp-bench" class="tool" title="Measured timings for this install's compute path (replay, caching, IPB98, the learned correction, the 0D map), run through the compute provider with live section progress. The README's full table is make bench.">⏱ Bench</button>
         <span class="status" id="rp-compute" title="Compute status">…</span>
+        <span class="status" id="rp-progress" hidden></span>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -166,6 +168,40 @@
   let initP = null, loadSeq = 0;
   let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
   const lineCache = new Map();
+
+  // Per-job progress (HARN-1): an SSE relay of the selected provider's stream for one task's job,
+  // rendered next to the compute chip. Local and remote providers speak the same event vocabulary
+  // (queued / running / progress / completed / error / cancelled), so this reads the same either way.
+  // The server ends the stream after the terminal event; closing on the stream's own end suppresses
+  // EventSource's auto-reconnect (no job running → no pointless reconnect loop).
+  let progressEs = null, progressHide = null;
+  function watchProgress(task) {
+    if (progressEs) progressEs.close();
+    clearTimeout(progressHide);
+    const el = $('rp-progress');
+    el.hidden = false;
+    el.textContent = `${task}: starting…`;
+    const es = new EventSource(`/compute/progress?task=${encodeURIComponent(task)}`);
+    progressEs = es;
+    const say = t => { el.textContent = `${task}: ${t}`; };
+    es.addEventListener('queued', () => say('queued…'));
+    es.addEventListener('running', () => say('running…'));
+    es.addEventListener('progress', e => say(`${(JSON.parse(e.data).section || 'section')}…`));
+    const end = e => {   // terminal events carry data; the native 'error' (stream end) does not
+      const d = e.data ? JSON.parse(e.data) : {};
+      say(e.type === 'completed' ? 'done' : `${e.type}${d.error ? ' — ' + d.error : ''}`);
+      es.close();
+      if (progressEs === es) progressEs = null;
+      progressHide = setTimeout(() => { el.hidden = true; }, 6000);
+    };
+    ['completed', 'error', 'cancelled'].forEach(name => es.addEventListener(name, end));
+    es.addEventListener('error', e => {
+      if (e.data) return;   // a job's own error event: handled by the terminal handler above
+      es.close();
+      if (progressEs === es) progressEs = null;
+      progressHide = setTimeout(() => { el.hidden = true; }, 2000);
+    });
+  }
   const psiCache = new Map();
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
   let psiTimer = null;
@@ -251,6 +287,24 @@
     // provenance so derived quantities stay honest outside the app.
     $('rp-csv').addEventListener('click', () => {
       if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'));
+    });
+    // Measured benchmark (HARN-1): runs through the compute provider (remote worker or local fallback)
+    // and reports its sections live in the progress readout next to the compute chip.
+    $('rp-bench').addEventListener('click', async () => {
+      const b = $('rp-bench');
+      b.setAttribute('aria-busy', 'true');
+      watchProgress('benchmark');
+      try {
+        const r = await fetch('/compute/benchmark', { method: 'POST' });
+        if (!r.ok) {
+          const d = await r.json().catch(() => null);
+          throw new Error((d && d.detail) || r.status);
+        }
+      } catch (e) {
+        $('rp-progress').textContent = `benchmark failed: ${e.message || e}`;
+      } finally {
+        b.removeAttribute('aria-busy');
+      }
     });
     const hintSeen = () => { try { return localStorage.getItem('fusionlab-hint') === 'seen'; } catch (e) { return false; } };
     const seen = hintSeen;
@@ -371,7 +425,11 @@
   const getLines = (id, i) => {
     const key = id + ':' + i;
     if (!lineCache.has(key)) {
+      // A real trace (not a cache hit) can run for minutes on a remote worker: past a short slow
+      // threshold, watch its job's progress next to the compute chip (HARN-1).
+      const slow = setTimeout(() => watchProgress('trace_fieldlines'), 1500);
       const p = fetch(`/replay/${id}/fieldlines/${i}`)
+        .finally(() => clearTimeout(slow))
         .then(r => { if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; } return r.json(); })
         .then(f => { linesFail503 = 0; linesNow.set(key, f.lines); return f; })
         .catch(e => {

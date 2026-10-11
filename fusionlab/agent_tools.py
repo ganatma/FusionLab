@@ -36,6 +36,7 @@ from fastapi import HTTPException
 from fusionlab import mast, virtual
 from fusionlab.api import devices, simulate_point
 from fusionlab.api_replay import _replay_bundle, _shot, db_search, shots
+from fusionlab.data import sources
 from fusionlab.api_virtual import EditIn, VirtualIn, _virtual_shot_body, virtual_gate
 from fusionlab.physics import DEVICES
 
@@ -119,7 +120,7 @@ def load_shot(shot_id: str, H: float = 1.0) -> ToolResult:
     try:
         r = _replay_bundle(str(shot_id), H=float(H))
     except HTTPException as e:
-        cached = mast.cached_shots()
+        cached = sources.get_source(None).cached_shots()   # what the route can actually load
         return _err(f"{e.detail} Replay covers the shots cached under data/shots ({len(cached)}: {cached}) "
                     "plus any imported bundles; use search_shots to explore the full catalog instead.",
                     {"shot_id": str(shot_id), "cached_shot_ids": cached})
@@ -159,7 +160,7 @@ def limit_distances(shot_id: str) -> ToolResult:
     try:
         r = _replay_bundle(str(shot_id))
     except HTTPException as e:
-        cached = mast.cached_shots()
+        cached = sources.get_source(None).cached_shots()   # what the route can actually load
         return _err(f"{e.detail} Replay covers only the shots cached under data/shots ({len(cached)}: {cached}); "
                     "use search_shots to explore the full catalog instead.",
                     {"shot_id": str(shot_id), "cached_shot_ids": cached})

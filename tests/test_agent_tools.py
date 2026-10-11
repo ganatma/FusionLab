@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from fusionlab import agent_tools, api_replay, mast
 from fusionlab.api import app
 from fusionlab.api_virtual import EditIn
+from fusionlab.data import sources
 
 client = TestClient(app)
 
@@ -106,7 +107,7 @@ def test_load_shot_reports_the_cache_boundary_and_suggests_search():
     r = agent_tools.run_tool("load_shot", shot_id=1)
     assert r.error is not None and route.json()["detail"] in r.error   # the route's own 404, verbatim
     assert "search_shots" in r.error
-    assert r.data["cached_shot_ids"] == mast.cached_shots()
+    assert r.data["cached_shot_ids"] == sources.get_source(None).cached_shots()
 
 
 def test_load_shot_returns_a_compact_summary_without_the_time_arrays():
@@ -146,7 +147,7 @@ def test_limit_distances_uncached_is_the_cache_boundary():
     r = agent_tools.run_tool("limit_distances", shot_id=1)
     assert r.error is not None and route.json()["detail"] in r.error
     assert "search_shots" in r.error
-    assert r.data["cached_shot_ids"] == mast.cached_shots()
+    assert r.data["cached_shot_ids"] == sources.get_source(None).cached_shots()
 
 
 def test_limit_distances_carries_the_catalog_abort_flag(monkeypatch):
@@ -255,7 +256,7 @@ def test_export_usd_uncached_is_the_verbatim_404():
 # ---- the plain read-only trio and the 0D point
 def test_read_only_tools_execute():
     r = agent_tools.run_tool("list_cached_shots")
-    assert r.error is None and len(r.data["shots"]) == len(mast.cached_shots())
+    assert r.error is None and len(r.data["shots"]) == len(sources.get_source(None).cached_shots())
     r = agent_tools.run_tool("get_whatif_gate")
     assert r.error is None and set(r.data["sliders"]) == {"Ip", "B", "n", "P_nbi", "nbi_shift_s"}
     r = agent_tools.run_tool("list_devices")

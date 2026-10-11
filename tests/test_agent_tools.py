@@ -32,6 +32,8 @@ FILTER_CASES = [
     ({"campaign": "M9", "useful": True}, {"campaign": "M9", "useful": True}),
     ({"q": "30400-30500"}, {"q": "30400-30500"}),
     ({"abort": False}, {"abort": False}),
+    ({"mode": "H"}, {"mode": "H"}),
+    ({"mode": "l"}, {"mode": "l"}),   # the case is the route's business; the tool passes it verbatim
 ]
 
 

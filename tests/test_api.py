@@ -531,7 +531,7 @@ def test_equilibrium_surrogate_overlay_is_labelled_held_out_or_not():
 # ---- catalog search (A1): /db/search against direct numpy masks over the same table
 DB_SEARCH_FIELDS = {"shot_id", "campaign", "Ip_MA", "B_T", "n_e20", "P_nbi_MW", "P_ohm_MW", "P_rad_MW", "W_MJ",
                     "Te0_keV", "q95", "kappa", "beta_t_pct", "a_m", "R_m", "V_m3", "tau_E_s", "dWdt_MW",
-                    "t_ipmax_s", "useful", "abort"}
+                    "t_ipmax_s", "useful", "abort", "mode_derived"}
 
 
 def test_db_search_rows_match_direct_numpy_masks():
@@ -562,8 +562,12 @@ def test_db_search_rows_match_direct_numpy_masks():
         ({"useful": False}, db["useful"] != 1),                # shots the archive never marked useful
         ({"abort": True}, db["abort"] == 1),
         ({"abort": False}, db["abort"] != 1),
+        ({"mode": "H"}, db["mode_derived"] == 1),
+        ({"mode": "L"}, db["mode_derived"] == 0),   # unknown rows (NaN) match neither H nor L
         ({"ip_min": 0.8, "campaign": label, "useful": True},    # filters AND together
          (db["Ip_MA"] >= 0.8) & (db["campaign"] == c_last) & (db["useful"] == 1)),
+        ({"mode": "H", "campaign": label},                      # mode composes with the existing filters
+         (db["mode_derived"] == 1) & (db["campaign"] == c_last)),
     ]
     for params, mask in cases:
         j = client.get("/db/search", params=params).json()
@@ -601,7 +605,8 @@ def test_db_search_rejects_malformed_params():
     for params in ({"offset": -1}, {"limit": 0}, {"limit": 1001},                        # paging bounds
                    {"ip_min": "abc"}, {"w_max": "lots"},                                 # malformed numbers
                    {"q": "30400-30500-99999"}, {"q": "nope"}, {"q": "30500-30400"},      # malformed / inverted q
-                   {"campaign": "MX"}, {"useful": "maybe"}):                             # malformed campaign / bool
+                   {"campaign": "MX"}, {"useful": "maybe"},                                # malformed campaign / bool
+                   {"mode": "X"}):                                                          # malformed mode
         assert client.get("/db/search", params=params).status_code == 422, params
 
 

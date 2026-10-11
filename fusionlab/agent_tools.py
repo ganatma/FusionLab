@@ -84,10 +84,11 @@ def search_shots(q: str | None = None, campaign: str | None = None,
                  ip_MA: list[float | None] | None = None, bt_T: list[float | None] | None = None,
                  pnbi_MW: list[float | None] | None = None, ne_20: list[float | None] | None = None,
                  W_MJ: list[float | None] | None = None, q95: list[float | None] | None = None,
-                 useful: bool | None = None, abort: bool | None = None, limit: int = SEARCH_LIMIT) -> ToolResult:
+                 useful: bool | None = None, abort: bool | None = None, mode: str | None = None,
+                 limit: int = SEARCH_LIMIT) -> ToolResult:
     """Filter the full FAIR-MAST catalog — the /db/search route function itself, so the mapping is 1:1 by construction."""
     range_args = {"ip_MA": ip_MA, "bt_T": bt_T, "pnbi_MW": pnbi_MW, "ne_20": ne_20, "W_MJ": W_MJ, "q95": q95}
-    kw: dict[str, Any] = {"q": q, "campaign": campaign, "useful": useful, "abort": abort}
+    kw: dict[str, Any] = {"q": q, "campaign": campaign, "useful": useful, "abort": abort, "mode": mode}
     for arg, pair in range_args.items():
         if pair is None:
             continue
@@ -358,10 +359,11 @@ TOOLS: dict[str, Tool] = {
             "name": "search_shots",
             "description": (
                 "Filter the full FAIR-MAST shot catalog (~16k rows) by numbers, not names: shot number/range, "
-                "campaign, plasma current, toroidal field, beam power, density, stored energy, q95, and the "
-                "archive's useful/abort flags. Filters combine (AND). Results are always in ascending shot_id "
-                "order — there is no sort control — and the archive has no H-mode flag, so shots cannot be "
-                "filtered or found by confinement mode."
+                "campaign, plasma current, toroidal field, beam power, density, stored energy, q95, the "
+                "archive's useful/abort flags, and mode. Filters combine (AND). Results are always in ascending "
+                "shot_id order — there is no sort control. mode filters on FusionLab's derived confinement-regime "
+                "flag ('H' or 'L'): derived from the measured tau_E against the twin's L-mode law at peak current — "
+                "a filter aid with documented failure modes (docs/PHYSICS.md), never an archive field, never measured."
             ),
             "input_schema": {
                 "type": "object",
@@ -370,6 +372,9 @@ TOOLS: dict[str, Tool] = {
                                "campaign": {"type": "string", "description": "campaign as the archive names it ('M9'; bare digits work: '9')"},
                                "useful": {"type": "boolean", "description": "true keeps shots the archive marked useful; false the rest"},
                                "abort": {"type": "boolean", "description": "true keeps shots the archive marked aborted; false the rest"},
+                               "mode": {"type": "string", "enum": ["H", "L"],
+                                        "description": "FusionLab's DERIVED confinement-regime flag — 'H' keeps H-regime shots, 'L' the rest; "
+                                                       "shots the catalog scalars cannot flag match neither. Derived, never measured (docs/PHYSICS.md)"},
                                "limit": {"type": "integer", "minimum": 1, "maximum": SEARCH_LIMIT, "default": SEARCH_LIMIT,
                                          "description": f"page size, at most {SEARCH_LIMIT}; narrow the filters instead of paging blindly"}},
             },

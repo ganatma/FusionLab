@@ -175,6 +175,20 @@ def test_cancel_affordance_is_wired_into_the_served_js():
     assert "if (!r.ok)" in click
 
 
+def test_mode_filter_is_wired_into_the_served_js():
+    """FEAT-4: the catalog search panel carries the derived-mode select — labelled derived, sent as the
+    /db/search mode param, restored only from valid deep-link values, and rendered per row as H, L or –
+    (unknown rows are shown as such, never silently as L)."""
+    replay = _served("replay.js")
+    assert 'id="rp-srch-mode"' in replay                          # the filter control
+    assert ">derived<" in replay                                  # labelled derived, never measured
+    assert "derived confinement regime, not measured" in replay   # the table header says it too
+    assert "p.set('mode', mode)" in replay                        # sent as the /db/search mode param
+    assert "['H', 'L'].includes(val('mode'))" in replay           # deep links restore only valid values
+    assert "r.mode_derived == null ? '<td class=\"muted\">–</td>'" in replay   # unknown rows render as –
+    assert 'colspan="12"' in replay                               # the empty row spans the grown table
+
+
 def test_replay_domain_shading_is_the_served_bands_with_a_legend_label():
     """FEAT-2: the W strip shades the server's own domain bands (never recomputed client-side) and
     labels them in its legend, present only when the flags mark something out of domain. The what-if

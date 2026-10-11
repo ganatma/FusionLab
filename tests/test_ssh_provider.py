@@ -145,6 +145,29 @@ def test_submit_uploads_weights_the_worker_lacks(tmp_path, monkeypatch):
     assert uploads == [hashlib.sha256(fake.read_bytes()).hexdigest()]
 
 
+def test_submit_weight_hashes_are_cached_between_submits(monkeypatch):
+    """HARN-3: weights are immutable once trained — the second submit re-reads no file (the busy
+    worker's 409 bounds the submit to the handshake; no job ever runs)."""
+    worker._SHA256_CACHE.clear()
+    reads = {"n": 0}
+    real = worker._sha256_file
+
+    def counting(path):
+        reads["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(worker, "_sha256_file", counting)
+    p = make_provider(json_handler({"GET /v1/capabilities": handshake_response(),
+                                    "POST /v1/jobs": httpx.Response(409, json={"detail": "worker busy"})}))
+    with pytest.raises(RemoteComputeError, match="worker busy"):
+        p.submit("run_surrogate_shot", {"shot": {}, "P_loss_MW": 1.0})
+    first = reads["n"]
+    assert first >= 1                             # at least the one weight this task reads
+    with pytest.raises(RemoteComputeError, match="worker busy"):
+        p.submit("run_surrogate_shot", {"shot": {}, "P_loss_MW": 1.0})
+    assert reads["n"] == first                    # zero file reads on the second submit
+
+
 def test_submit_of_a_weight_task_with_missing_local_weights_is_a_clean_error(tmp_path, monkeypatch):
     missing = tmp_path / "surrogate.pt"        # never created
     monkeypatch.setattr(ssh_mod, "local_weight_paths", lambda: {"surrogate.pt": missing})

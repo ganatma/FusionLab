@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import importlib.metadata
 import json
 import logging
@@ -45,6 +44,7 @@ import httpx
 
 from fusionlab import frames
 from fusionlab.compute.provider import JobHandle
+from fusionlab.worker import sha256_file
 
 logger = logging.getLogger("fusionlab.compute")
 
@@ -225,14 +225,6 @@ def local_weight_paths() -> dict[str, Path]:
     )
 
     return {"surrogate.pt": Path(surrogate.MODEL_FILE), "eq_surrogate.pt": Path(eq_surrogate.MODEL_FILE)}
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(2**20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _local_version() -> str:

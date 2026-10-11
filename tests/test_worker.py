@@ -85,6 +85,24 @@ def test_capabilities_models_carry_real_hashes(client):
     assert caps["models"]["eq_surrogate.pt"]["bytes"] == eq_surrogate.MODEL_FILE.stat().st_size
 
 
+@needs_surrogate
+def test_handshake_weight_hashes_are_cached(monkeypatch, client):
+    """HARN-3: weights are immutable once trained — the second handshake re-reads no file."""
+    worker._SHA256_CACHE.clear()
+    reads = {"n": 0}
+    real = worker._sha256_file
+
+    def counting(path):
+        reads["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(worker, "_sha256_file", counting)
+    first = client.get("/v1/capabilities").json()["models"]
+    assert reads["n"] == 2                                # both shipped weights, hashed exactly once
+    assert client.get("/v1/capabilities").json()["models"] == first
+    assert reads["n"] == 2                                # zero file reads on the second handshake
+
+
 # ---------------------------------------------------------------- registry and validation
 def test_unknown_task_is_rejected_with_clear_error(client):
     r = client.post("/v1/jobs", json={"task": "rm -rf /", "inputs": {}})

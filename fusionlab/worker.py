@@ -170,12 +170,30 @@ def cached_artifacts() -> dict[str, int]:
     return {p.name: p.stat().st_size for p in root.iterdir() if _SHA256_RE.fullmatch(p.name)}
 
 
-def sha256_file(path: Path) -> str:
+def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(2**20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+_SHA256_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def sha256_file(path: Path) -> str:
+    """sha256 of a weight file, cached by (path, mtime_ns, size).
+
+    Every handshake and every submit re-hashed the shipped ~4.6 MB weights; weights are immutable
+    once trained, so the (path, mtime, size) key is exact — a retrained file changes both and
+    re-hashes. The SshProvider hashes its side of the same contract through this same function.
+    """
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    hit = _SHA256_CACHE.get(key)
+    if hit is None:
+        hit = _SHA256_CACHE[key] = _sha256_file(path)
+    return hit
 
 
 def shipped_models() -> dict[str, dict[str, Any]]:

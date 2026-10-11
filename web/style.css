@@ -59,7 +59,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 /* the anchored edit drawer (spec L2): a modal layer over the Replay room — the state cell, gauges and
    logbook underneath stay live while the programme is edited. Anchored to the room itself, right side. */
 #tab-replay { position:relative; }   /* the drawer anchors below the header, not to the page */
-#rp-wi { position:absolute; top:0; right:0; bottom:0; width:min(var(--drawer), 100%); max-height:none; margin:0; padding:12px 16px;
+#rp-wi { position:absolute; top:0; right:0; bottom:0; left:auto; height:auto; width:min(var(--drawer), 100%); max-height:none; margin:0; padding:12px 16px;
          background:var(--panel); border:0; border-left:1px solid var(--line); box-shadow:-12px 0 48px rgba(0,0,0,.55); }
 #rp-wi[open] { display:flex; flex-direction:column; }
 #rp-wi::backdrop { background:rgba(8,10,13,.45); }

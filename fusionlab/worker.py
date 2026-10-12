@@ -96,6 +96,16 @@ class RunSurrogateShotInputs(BaseModel):
     P_loss_MW: float | np.ndarray   # the replayed loss trace is per-slice (physics.replay)
 
 
+class RunQlknnInputs(BaseModel):
+    """Programme arrays + the replayed loss power for qlknn.confinement_coeff (the QLKNN7_11
+    virtual-shot closure's per-slice (K, alpha) solve)."""
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    shot: dict[str, Any]
+    P_loss_MW: float | np.ndarray
+
+
 class RunEqSurrogateInputs(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
@@ -122,7 +132,7 @@ class ArtifactRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sha256: str
-    role: Literal["surrogate.pt", "eq_surrogate.pt"]
+    role: Literal["surrogate.pt", "eq_surrogate.pt", "qlknn.pt"]
 
 
 class JobRequest(BaseModel):
@@ -165,6 +175,7 @@ TASKS: dict[str, Task] = {
     "run_surrogate": Task(RunSurrogateInputs, _local_task("run_surrogate")),
     "run_surrogate_shot": Task(RunSurrogateShotInputs, _local_task("run_surrogate_shot")),
     "run_eq_surrogate": Task(RunEqSurrogateInputs, _local_task("run_eq_surrogate")),
+    "run_qlknn": Task(RunQlknnInputs, _local_task("run_qlknn")),
     "model_metrics": Task(ModelMetricsInputs, _local_task("model_metrics")),
     "benchmark": Task(BenchmarkInputs, _run_benchmark),
 }
@@ -215,11 +226,12 @@ def shipped_models() -> dict[str, dict[str, Any]]:
     """The trained weights this checkout ships (models/*.pt), by content hash — the drift signal."""
     from fusionlab import (  # module attrs; no torch import needed yet
         eq_surrogate,
+        qlknn,
         surrogate,
     )
 
     out: dict[str, dict[str, Any]] = {}
-    for module in (surrogate, eq_surrogate):
+    for module in (surrogate, eq_surrogate, qlknn):
         model_file: Path = module.MODEL_FILE
         if model_file.exists():
             out[model_file.name] = {"sha256": sha256_file(model_file), "bytes": model_file.stat().st_size}
@@ -237,9 +249,10 @@ def resolve_artifacts(refs: list[ArtifactRef]) -> dict[str, Path]:
         if cached.is_file():
             resolved[ref.role] = cached
         elif by_hash.get(ref.sha256) == ref.role:
-            from fusionlab import eq_surrogate, surrogate
+            from fusionlab import eq_surrogate, qlknn, surrogate
 
-            resolved[ref.role] = (surrogate if ref.role == "surrogate.pt" else eq_surrogate).MODEL_FILE
+            modules = {"surrogate.pt": surrogate, "eq_surrogate.pt": eq_surrogate, "qlknn.pt": qlknn}
+            resolved[ref.role] = modules[ref.role].MODEL_FILE
         else:
             raise HTTPException(
                 422, f"artifact ref not satisfied: {ref.role} @ {ref.sha256[:12]}... is neither cached on this "
@@ -254,21 +267,24 @@ def _weights_for_job(resolved: dict[str, Path]):
     Safe because the depth-1 queue runs one job at a time; paths (and the surrogate's loaded-net
     cache) are restored on exit, so a later job without refs reads its own checkout again.
     """
-    from fusionlab import eq_surrogate, surrogate
+    from fusionlab import eq_surrogate, qlknn, surrogate
 
-    target = {"surrogate.pt": (surrogate, "MODEL_FILE"), "eq_surrogate.pt": (eq_surrogate, "MODEL_FILE")}
+    target = {"surrogate.pt": (surrogate, "MODEL_FILE"), "eq_surrogate.pt": (eq_surrogate, "MODEL_FILE"),
+              "qlknn.pt": (qlknn, "MODEL_FILE")}
     saved = [(module, attr, getattr(module, attr)) for role, path in resolved.items()
              for module, attr in [target[role]]]
     for role, path in resolved.items():
         module, attr = target[role]
         setattr(module, attr, path)
     surrogate._loaded = None   # a net cached from a redirected weight must not leak into the next job
+    qlknn._loaded = None
     try:
         yield
     finally:
         for module, attr, old in saved:
             setattr(module, attr, old)
         surrogate._loaded = None
+        qlknn._loaded = None
 
 
 # ---------------------------------------------------------------- job book (in-memory, depth-1)

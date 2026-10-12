@@ -9,13 +9,20 @@ opens, never over the network. Its whole surface is the fixed, versioned task re
 an artifact cache for trained weights: no shell, no eval, no filesystem passthrough. Worst case if
 an exposed worker were found by a stranger is compute theft, not host compromise (design §8).
 
+For a worker that is not loopback-only, an optional shared token locks the whole /v1 surface: set
+FUSIONLAB_WORKER_TOKEN to the same value on both ends (the worker's environment and the backend's)
+and every /v1 route demands `Authorization: Bearer` — constant-time compare, 401 before any body
+parsing or queue interaction — while /health stays open, because a token-gated probe would be
+misread as "worker absent" and trigger a doomed autostart. Unset (the default) nothing changes.
+
     POST /v1/jobs               {task, inputs, artifact_refs} -> {job_id, state}; 409 when busy
     GET  /v1/jobs/{id}/events   SSE: queued / running / progress / completed / error / cancelled
+    GET  /v1/jobs/{id}          state without the payload — the poll target while a job runs
     GET  /v1/jobs/{id}/result   application/x-fusionlab-frames (fusionlab.frames), consumed once
     POST /v1/jobs/{id}/cancel   cooperative: immediate while queued; benchmark tasks check between sections
     POST /v1/artifacts/{sha256} upload one trained weight into the cache (hash-verified, capped)
-    GET  /v1/capabilities       handshake: worker/torch/warp versions, CUDA, tasks, weight hashes
-    GET  /health                {ok: true} — the tunnel/autostart probe
+    GET  /v1/capabilities       handshake: worker/torch/warp versions, CUDA, tasks, weight hashes, auth mode
+    GET  /health                {ok: true} — the tunnel/autostart probe, always open
 
 One job at a time (a single-user GPU box is honest about itself); a second submission gets a clean
 409 instead of a hidden queue. Jobs live in memory only — a worker restart forgets them, and the
@@ -28,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import importlib.metadata
 import json
 import os
@@ -35,7 +43,7 @@ import platform
 import re
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -369,6 +377,19 @@ async def _run_job(job: _Job, task: Task, inputs: BaseModel, resolved: dict[str,
         _JOBS.append(job, {"event": "error", "error": str(e), "error_type": type(e).__name__})
 
 
+# ---------------------------------------------------------------- auth (opt-in shared token)
+def worker_token() -> str:
+    """The shared bearer token, read per request (env-only by design — config files never hold one;
+    tests monkeypatch the environment). Empty means the worker is open: every route behaves exactly
+    as before the token existed."""
+    return os.environ.get("FUSIONLAB_WORKER_TOKEN", "")
+
+
+def auth_mode() -> str:
+    """What the handshake advertises: 'token' when a shared token is set, else 'open'."""
+    return "token" if worker_token() else "open"
+
+
 # ---------------------------------------------------------------- handshake
 def worker_version() -> str:
     try:
@@ -383,7 +404,8 @@ _HANDSHAKE_LOCK = threading.Lock()
 
 def handshake() -> dict[str, Any]:
     """Version/device identity (computed once — a running box does not change its GPU), then the
-    per-call parts: tasks, shipped weight hashes, and what the artifact cache already holds."""
+    per-call parts: tasks, shipped weight hashes, what the artifact cache already holds, and the
+    auth mode."""
     global _HANDSHAKE
     with _HANDSHAKE_LOCK:
         if _HANDSHAKE is None:
@@ -397,11 +419,32 @@ def handshake() -> dict[str, Any]:
             _HANDSHAKE = {"worker_protocol_version": WORKER_PROTOCOL_VERSION, "worker_version": worker_version(),
                           "torch": torch.__version__, "warp": warp_version, "cuda_available": cuda,
                           "device_name": torch.cuda.get_device_name(0) if cuda else (platform.processor() or "CPU")}
-    return {**_HANDSHAKE, "tasks": sorted(TASKS), "models": shipped_models(), "artifacts": cached_artifacts()}
+    return {**_HANDSHAKE, "tasks": sorted(TASKS), "models": shipped_models(),
+            "artifacts": cached_artifacts(), "auth": auth_mode()}
 
 
 # ---------------------------------------------------------------- the app
 app = FastAPI(title="fusionlab worker", version=worker_version(), docs_url=None, redoc_url=None)
+
+
+@app.middleware("http")
+async def require_bearer_token(request: Request,
+                               call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """Opt-in shared-token gate (issue #45): with FUSIONLAB_WORKER_TOKEN set, every /v1 route demands
+    `Authorization: Bearer <token>` (constant-time compare) and rejects anything else with 401 +
+    WWW-Authenticate BEFORE any body parsing or queue interaction. /health stays outside the check:
+    a token-gated probe would be misread as "worker absent" and trigger a doomed autostart."""
+    token = worker_token()
+    if token and request.url.path.startswith("/v1/"):
+        supplied = request.headers.get("authorization", "")
+        if not hmac.compare_digest(supplied, f"Bearer {token}"):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "missing or mismatched bearer token — set FUSIONLAB_WORKER_TOKEN, "
+                                   "the same value on both ends of the tunnel"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
 
 
 @app.get("/health")

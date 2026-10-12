@@ -36,6 +36,7 @@ import contextlib
 import importlib.metadata
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -58,6 +59,14 @@ _POLL_S = 0.25
 _TERMINAL_EVENTS = ("completed", "error", "cancelled")
 
 
+def _worker_auth_headers() -> dict[str, str]:
+    """Authorization headers for every worker HTTP call, from FUSIONLAB_WORKER_TOKEN — empty when no
+    token is configured (opt-in by absence: a tokenless backend against an open worker is today's
+    behavior, byte for byte; a token the worker doesn't expect is a plain header it ignores)."""
+    token = os.environ.get("FUSIONLAB_WORKER_TOKEN", "")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 class RemoteComputeError(RuntimeError):
     """Any SshProvider failure the caller should handle by falling back to LocalProvider.
 
@@ -69,6 +78,20 @@ class RemoteComputeError(RuntimeError):
         super().__init__(f"remote compute unavailable ({phase}): {message}")
         self.phase = phase
         self.message = message
+
+
+def _raise_for_auth(r: httpx.Response) -> None:
+    """Map a worker 401 to the one actionable auth error, at every HTTP call site.
+
+    A 401 means the two ends disagree about FUSIONLAB_WORKER_TOKEN — say exactly that, so the
+    fallback banner reads "token differs" instead of a generic unreachable (run_task records this
+    message and GET /compute renders it verbatim)."""
+    if r.status_code == 401:
+        raise RemoteComputeError(
+            "auth",
+            "worker rejected the token — FUSIONLAB_WORKER_TOKEN differs between this machine and "
+            "the worker host (or is set on one side only)",
+        )
 
 
 class WorkerSession(Protocol):
@@ -174,7 +197,7 @@ class _SshSession:
         started = False
         while True:
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(headers=_worker_auth_headers()) as client:
                     r = await client.get(f"{self.base_url}/health", timeout=2.0)
                 if r.status_code == 200 and r.json().get("ok"):
                     return
@@ -255,7 +278,8 @@ class SshProvider:
             self._session = _SshSession(host, **session_kw)
         self._result_timeout_s = result_timeout_s
         self._remote: dict[str, Any] | None = None   # the worker's last handshake
-        self._http = httpx.Client(base_url=self._session.base_url, timeout=30.0)
+        self._http = httpx.Client(base_url=self._session.base_url, timeout=30.0,
+                                  headers=_worker_auth_headers())
 
     # -- ComputeProvider protocol
     def capabilities(self) -> dict:
@@ -281,6 +305,7 @@ class SshProvider:
             payload = {"task": task, "inputs": frames.encode_inputs(inputs),
                        "artifact_refs": self._ensure_artifacts(task)}
             r = self._http.post("/v1/jobs", json=payload)
+            _raise_for_auth(r)
             if r.status_code == 409:
                 raise RemoteComputeError("submit", r.json().get("detail", "worker busy"))
             if r.status_code == 422:
@@ -301,10 +326,12 @@ class SshProvider:
         """
         sse_timeouts = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
         try:
-            async with httpx.AsyncClient(base_url=self._session.base_url, timeout=sse_timeouts) as client, \
+            async with httpx.AsyncClient(base_url=self._session.base_url, timeout=sse_timeouts,
+                                         headers=_worker_auth_headers()) as client, \
                     client.stream("GET", f"/v1/jobs/{job.job_id}/events") as resp:
                 if resp.status_code == 404:
                     raise RemoteComputeError("job", f"unknown job {job.job_id} (worker restarted?)")
+                _raise_for_auth(resp)
                 resp.raise_for_status()
                 event: dict = {}
                 async for line in resp.aiter_lines():
@@ -329,6 +356,7 @@ class SshProvider:
             r = self._http.post(f"/v1/jobs/{job.job_id}/cancel")
         except httpx.HTTPError as e:
             raise RemoteComputeError("job", f"cancel failed: {type(e).__name__}: {e}") from None
+        _raise_for_auth(r)
         if r.status_code == 409:
             return
         if r.status_code >= 400:
@@ -343,6 +371,7 @@ class SshProvider:
                 r = self._http.get(f"/v1/jobs/{job.job_id}")
             except httpx.HTTPError as e:
                 raise RemoteComputeError("collect", f"{type(e).__name__}: {e}") from None
+            _raise_for_auth(r)
             if r.status_code == 404:
                 raise RemoteComputeError("collect", f"unknown job {job.job_id} (worker restarted?)")
             r.raise_for_status()
@@ -361,6 +390,7 @@ class SshProvider:
             rr = self._http.get(f"/v1/jobs/{job.job_id}/result")
         except httpx.HTTPError as e:
             raise RemoteComputeError("collect", f"{type(e).__name__}: {e}") from None
+        _raise_for_auth(rr)
         if rr.status_code != 200:
             raise RemoteComputeError("collect", f"result fetch failed: HTTP {rr.status_code}")
         try:
@@ -380,6 +410,7 @@ class SshProvider:
         RemoteComputeError, the one typed signal GET /compute renders as "unreachable"."""
         try:
             r = self._http.get("/health", timeout=2.0)
+            _raise_for_auth(r)   # /health is open today; if a future worker ever gates it, say "auth"
             r.raise_for_status()
         except httpx.HTTPError as e:
             try:
@@ -394,6 +425,7 @@ class SshProvider:
             try:
                 self._session.ensure()
                 r = self._http.get("/v1/capabilities")
+                _raise_for_auth(r)
                 r.raise_for_status()
                 self._remote = r.json()
             except httpx.HTTPError as e:
@@ -422,6 +454,7 @@ class SshProvider:
     def _upload(self, path: Path, digest: str) -> None:
         try:
             r = self._http.post(f"/v1/artifacts/{digest}", content=path.read_bytes())
+            _raise_for_auth(r)
             if r.status_code != 201:
                 raise RemoteComputeError("submit", f"weight upload failed: HTTP {r.status_code} {r.text[:200]}")
             logger.info("uploaded models/%s (%d bytes) to the worker cache — one-time per hash",

@@ -20,7 +20,7 @@ time-sampled OpenUSD stages. FastAPI backend serves a static, no-build web UI.
 ```bash
 make setup   # uv sync + git core.hooksPath=.githooks + cp .env.example .env  (install uv first if missing)
 make dev     # uvicorn fusionlab.api:app --reload --port 8000 -> http://localhost:8000
-make test    # uv run pytest -q  (274 passed, 1 skipped, ~37 s on feat/nl-agent; pristine main is 167+1)
+make test    # uv run pytest -q  (543 passed, 1 skipped, ~74 s on feat/qlknn-closure, 2026-10-12)
 make train   # retrain IPB98 correction -> models/surrogate*
 make bench   # timings
 make usd     # OpenUSD export of shot 30166 -> out/
@@ -60,8 +60,8 @@ Optional agent (off unless `FUSIONLAB_AGENT_ENABLED` + `ANTHROPIC_API_KEY`): `fu
 - Primary flow exercised end-to-end over HTTP: `/shots` → `/replay/30166` (200, full measured+model+EFIT bundle),
   `/simulate?device=iter` (Q ≈ 9.2), `/map`, `/devices`, and `/` (UI renders; all 7 expected UI tokens found
   on the live page; screenshots in the skill record; console clean apart from WebGL performance warnings).
-- `make test`: **274 passed, 1 skipped** (37.3 s on `feat/nl-agent`; pristine `main` re-measured at 167 passed +
-  1 skipped — the previously documented 88 was stale). `uv run ruff check` and `uv run mypy fusionlab` are clean;
+- `make test`: **543 passed, 1 skipped** (74.0 s on `feat/qlknn-closure`, 2026-10-12; 13 warnings — the benign
+  RuntimeWarning family this suite already carries). `uv run ruff check` and `uv run mypy fusionlab` are clean;
   ruff + mypy are configured in `pyproject.toml` ([tool.ruff.lint], [tool.mypy]). pytest remains the merge gate
   (also run by the `.githooks/pre-push` hook).
 - Known-benign on GPU-less machines: `Warp CUDA warning: Could not find or load the NVIDIA CUDA driver.`

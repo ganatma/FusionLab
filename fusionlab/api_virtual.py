@@ -15,7 +15,8 @@ from fusionlab.compute.status import run_compute_async
 router = APIRouter()
 
 LAW_NAMES = {"ipb98": "IPB98(y,2)", "valovic": "Valovič 2009 (MAST)", "refit": "Refit power law (this project)"}
-CLOSURE_NAMES = {"learned": "IPB98(y,2) × PhysicsNeMo correction", "ipb98": "IPB98(y,2)", "iter89": "ITER89-P"}
+CLOSURE_NAMES = {"learned": "IPB98(y,2) × PhysicsNeMo correction", "ipb98": "IPB98(y,2)", "iter89": "ITER89-P",
+                 "qlknn": "QLKNN7_11 power balance"}
 # which sliders stand on which matched-pairs test (scripts/validate_virtual.py); beam power and timing act through P
 SLIDER_GATE = {"Ip": "Ip", "B": "B", "n": "n", "P_nbi": "P", "nbi_shift_s": "P"}
 CAVEATS = [
@@ -23,6 +24,9 @@ CAVEATS = [
     "Not modelled: L–H transitions, fast-ion slowing down, the 30 ms after a beam edge (the beam is a logged box), the equilibrium's response to pressure.",
     "Limits are scaled from the measured values (β_N ∝ W/(B·Ip), q95 ∝ B/Ip, n_GW ∝ Ip). 'Would cross a limit' is a distance, never a forecast of a disruption.",
 ]
+QLKNN_CAVEAT = ("The QLKNN7_11 closure's level and power response come from a vendored turbulent-flux net through a "
+                "documented power-balance reduction (fixed profile shapes — assumptions, not measurements; "
+                "fusionlab/qlknn.py). Compared with MAST data by the re-fly gate, never predictive.")
 
 
 class EditIn(BaseModel):
@@ -48,6 +52,7 @@ def virtual_gate():
     """What the UI may offer: one entry per slider with the matched-pairs evidence behind it, the closures' re-fly
     errors on held-out shots, and the response laws as the engine will apply them."""
     g, v = virtual.gate(), _validation()
+    closures = {k: n for k, n in CLOSURE_NAMES.items() if k in virtual.available_closures()}
     sliders = {}
     for slider, act in SLIDER_GATE.items():
         row = g.get(act)
@@ -55,9 +60,9 @@ def virtual_gate():
                            "admissible": [LAW_NAMES.get(k, k) for k in (row or {}).get("admissible", [])],
                            "measured_exponent": (row or {}).get("measured_exponent")}
     return {"validated": v["validated"], "sliders": sliders, "refly": v["refly"], "matched_pairs": v["matched_pairs"],
-            "closures": CLOSURE_NAMES, "default_closure": (v["refly"] or {}).get("default_closure") or "learned",
+            "closures": closures, "default_closure": (v["refly"] or {}).get("default_closure") or "learned",
             "laws": {LAW_NAMES.get(k, k): dict(zip(("Ip", "B", "n", "alpha"), e, strict=True)) for k, e in virtual.gated_laws().items()},
-            "caveats": CAVEATS}
+            "caveats": CAVEATS + ([QLKNN_CAVEAT] if "qlknn" in closures else [])}
 
 
 @router.post("/virtual/{shot_id}")
@@ -78,8 +83,8 @@ def _virtual_shot_body(shot_id: str, body: VirtualIn) -> dict:
             raise HTTPException(422, f"'{slider}' cannot be edited: the archive has {g[act]['n_pairs']} matched pairs for it, "
                                      "too few to test any response law (scripts/validate_virtual.py)")
     closure = body.closure or (_validation()["refly"] or {}).get("default_closure") or "learned"
-    if closure not in virtual.CLOSURES:
-        raise HTTPException(422, f"closure must be one of {virtual.CLOSURES}")
+    if closure not in virtual.available_closures():
+        raise HTTPException(422, f"closure must be one of {virtual.available_closures()}")
     r = virtual.run(s, edit, closure)
 
     Wa, Wb, t = r["W_anchored_MJ"][0], r["W_blind_MJ"][0], r["t_s"]          # (laws, slices)
@@ -100,5 +105,6 @@ def _virtual_shot_body(shot_id: str, body: VirtualIn) -> dict:
         "dW_flat_pct": {"anchored": pct(r["dW_flat_anchored"][0]), "blind": pct(r["dW_flat_blind"][0])},
         "limits": {k: _j(v) for k, v in limits.items()}, "would_cross_at_s": crossing,
         "in_distribution": _j(r["in_distribution"][0]), "refly_error": r["refly_error"],
-        "validated": _validation()["validated"], "caveats": CAVEATS,
+        "validated": _validation()["validated"],
+        "caveats": CAVEATS + ([QLKNN_CAVEAT] if closure == "qlknn" else []),
     }

@@ -629,3 +629,29 @@ def test_loopback_token_mismatch_is_an_actionable_auth_error(worker_url, monkeyp
     assert ei.value.phase == "auth"
     assert "FUSIONLAB_WORKER_TOKEN" in ei.value.message and "differs" in ei.value.message
     p.close()
+
+
+needs_qlknn = pytest.mark.skipif(not worker.shipped_models().get("qlknn.pt"),
+                                 reason="models/qlknn.pt missing: run scripts/convert_qlknn_weights.py")
+
+
+@needs_qlknn
+def test_loopback_qlknn_upload_then_run_matches_the_local_answer(worker_url):
+    """The QLKNN increment's strongest evidence: same checkout both ends, so the worker resolves
+    the shipped qlknn.pt from models/ and the remote run equals the in-process run — dict for
+    dict (the loopback composite pattern; the upload path is pinned in test_worker.py)."""
+    import numpy as np
+
+    from fusionlab import mast, physics
+    from fusionlab.compute.local import LocalProvider
+
+    shot = mast.load_shot(30166)
+    inputs = {"shot": shot, "P_loss_MW": physics.replay(shot)["P_loss_MW"]}
+    remote_p = SshProvider(session=FakeSession(worker_url))
+    caps = remote_p.capabilities()
+    assert caps["qlknn_available"] is True    # the handshake advertised the uploaded weight
+    remote = remote_p.result(remote_p.submit("run_qlknn", inputs))
+    remote_p.close()
+    local_p = LocalProvider()
+    local = local_p.result(local_p.submit("run_qlknn", inputs))
+    assert np.array_equal(remote["K"], local["K"]) and np.array_equal(remote["alpha"], local["alpha"])

@@ -9,8 +9,10 @@ logged beam box, measured ohmic power, B_T, EFIT geometry), edits it, and integr
 so the equation is explicit in W. It is an educational what-if, not a predictive code:
 
 * The **level** of confinement comes from the shot. Two baselines are run and both are reported:
-  `blind`    K = IPB98(y,2) x the learned correction, evaluated once on the *measured* inputs. Nothing about W is used,
-             so its error against the measured W(t) is a fair test (scripts/validate_virtual.py).
+  `blind`    K = IPB98(y,2) x the learned correction — or, for the `qlknn` closure, the QLKNN7_11
+             power-balance reduction (fusionlab/qlknn.py) — evaluated once on the *measured* inputs.
+             Nothing about W is used, so its error against the measured W(t) is a fair test
+             (scripts/validate_virtual.py).
   `anchored` K is set so that the unedited programme reproduces the measured W(t).
 * The **response** to an edit comes from a published law's exponents (IPB98(y,2), and Valovic 2009 for MAST as a second
   opinion), never from the network's own derivatives: its training range in B_T is 0.40-0.50 T and its local B_T
@@ -49,7 +51,8 @@ RESPONSE = {
     "ipb98": (0.93, 0.15, 0.41, 0.69),      # ITER Physics Basis, Nucl. Fusion 39 (1999) 2175
     "valovic": (0.59, 1.4, 0.00, 0.73),     # Valovic et al., Nucl. Fusion 49 (2009) 075016, MAST H-modes, W -> tau = W / P
 }
-CLOSURES = ("learned", "ipb98", "iter89")   # blind baselines: IPB98 x learned correction, IPB98 alone, ITER89-P alone
+CLOSURES = ("learned", "ipb98", "iter89", "qlknn")   # blind baselines: IPB98 x learned correction, IPB98 alone,
+# ITER89-P alone, QLKNN7_11 power balance (fusionlab/qlknn.py — the vendored turbulent-flux net)
 ACTUATOR_EXPONENT = {"Ip": 0, "B": 1, "n": 2, "P": 3}   # position of each actuator's exponent in a RESPONSE tuple
 
 
@@ -65,6 +68,15 @@ def response_laws() -> dict:
     if e:
         laws["refit"] = (e["Ip_MA"]["value"], e["B_T"]["value"], e["n_e20"]["value"], -e["P_loss_MW"]["value"])
     return laws
+
+
+def available_closures() -> tuple[str, ...]:
+    """CLOSURES whose weights exist on this host. Importing fusionlab.qlknn is torch-free (its
+    torch import is lazy), so the gate route can call this at request time; a checkout without
+    models/qlknn.pt never advertises or accepts the qlknn closure."""
+    from fusionlab.qlknn import MODEL_FILE
+
+    return CLOSURES if MODEL_FILE.exists() else tuple(c for c in CLOSURES if c != "qlknn")
 
 
 def gate() -> dict:
@@ -141,16 +153,16 @@ def integrate(P_heat, K, alpha: float, W0, dt: float = DT_S, heat_of_W=None):
     P_heat, K = np.atleast_2d(np.asarray(P_heat, float)), np.atleast_2d(np.asarray(K, float))
     S, nt = np.broadcast_shapes(P_heat.shape, K.shape)
     P_heat, K = np.broadcast_to(P_heat, (S, nt)), np.broadcast_to(K, (S, nt))
-    m = 1.0 / (1.0 - alpha)
+    m = 1.0 / (1.0 - np.broadcast_to(alpha, (S, nt)))   # alpha may be per-slice (the qlknn closure); a scalar for the laws
     W = np.empty((S, nt))
     W[:, 0] = W0
     for k in range(1, nt):                                     # time is sequential; scenarios advance together
-        Wk, Kk = W[:, k - 1], K[:, k]
+        Wk, Kk, mk = W[:, k - 1], K[:, k], m[:, k]
         P = P_heat[:, k] if heat_of_W is None else heat_of_W(k, Wk)
         w = np.maximum(Wk, 1e-9)
         for _ in range(NEWTON_STEPS):
-            loss = (w / Kk) ** m
-            w = np.maximum(w - (w - Wk - dt * (P - loss)) / (1.0 + dt * m * loss / w), 1e-9)
+            loss = (w / Kk) ** mk
+            w = np.maximum(w - (w - Wk - dt * (P - loss)) / (1.0 + dt * mk * loss / w), 1e-9)
         W[:, k] = w
     return W
 
@@ -176,7 +188,16 @@ def baseline(shot: dict, closure: str = "learned", dt: float = DT_S) -> dict:
     P_loss_meas = np.maximum(P_in - p["dWdt_MW"], P_LOSS_FLOOR * np.maximum(P_in, 1e-6))
 
     g = {"R": p["R_m"], "a": p["a_m"], "kappa": p["kappa_a"]}
-    if closure == "iter89":
+    if closure == "qlknn":
+        from fusionlab import qlknn  # lazy: torch rides first model use
+
+        if not qlknn.available():
+            raise RuntimeError("closure 'qlknn' needs the QLKNN7_11 weights — run "
+                               "scripts/convert_qlknn_weights.py (see models/qlknn7_11_ATTRIBUTION.md)")
+        q95 = np.interp(p["t_s"], np.asarray(shot["t_s"], dtype=float), _fill(shot["q95"]))
+        out = run_task("run_qlknn", {"shot": {**p, "q95": q95}, "P_loss_MW": P_loss_meas})
+        K, alpha = out["K"], out["alpha"]
+    elif closure == "iter89":
         K, alpha = tau_coeff_L(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, mast.CONFIG.isotope_md)
     else:
         K, alpha = tau_coeff_H(g, p["Ip_MA"], p["B_T"], p["n_e20"], 1.0, mast.CONFIG.isotope_md)

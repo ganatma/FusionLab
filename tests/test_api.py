@@ -830,3 +830,46 @@ def test_replay_of_a_catalog_shot_without_published_data_answers_404(monkeypatch
     assert r.status_code == 404
     assert "not published" in r.json()["detail"]
     assert uncached not in mast.cached_shots()
+
+
+# ---------------------------------------------------------------- the QLKNN7_11 closure (issue #48)
+def test_virtual_gate_advertises_the_qlknn_closure_when_the_weights_exist():
+    """No hardcoded UI list: the gate payload filters CLOSURE_NAMES by weight availability and
+    carries the closure's honesty caveat only while it is advertised."""
+    g = client.get("/virtual/gate").json()
+    assert "qlknn" in g["closures"]
+    assert g["closures"]["qlknn"] == "QLKNN7_11 power balance"
+    assert any("QLKNN7_11" in c for c in g["caveats"])
+
+
+def test_virtual_shot_runs_the_qlknn_closure_and_carries_its_caveat():
+    """The panel's payload for closure='qlknn': the honest name, the QLKNN caveat line, and the
+    same shape as every other closure's run (laws, limits, refly error)."""
+    r = client.post("/virtual/30166", json={"edit": {}, "closure": "qlknn"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["closure"] == "qlknn" and body["closure_name"] == "QLKNN7_11 power balance"
+    assert any("QLKNN7_11" in c for c in body["caveats"])
+    assert set(body["laws"]) == set(client.get("/virtual/gate").json()["laws"])
+    assert body["refly_error"] is not None
+
+
+def test_virtual_shot_rejects_an_unknown_closure():
+    r = client.post("/virtual/30166", json={"edit": {}, "closure": "nope"})
+    assert r.status_code == 422 and "closure must be one of" in r.json()["detail"]
+
+
+def test_without_qlknn_weights_the_gate_hides_it_and_the_default_still_answers(monkeypatch):
+    """The fallback story at the route level: with models/qlknn.pt absent the closure is neither
+    advertised nor accepted (a clean 422, never a 500), and the default closure's run is
+    untouched — the answer arrives either way."""
+    from fusionlab import qlknn as q
+
+    monkeypatch.setattr(q, "MODEL_FILE", q.MODELS / "definitely-absent.pt")
+    g = client.get("/virtual/gate").json()
+    assert "qlknn" not in g["closures"]
+    assert not any("QLKNN7_11" in c for c in g["caveats"])
+    r = client.post("/virtual/30166", json={"edit": {}, "closure": "qlknn"})
+    assert r.status_code == 422
+    ok = client.post("/virtual/30166", json={"edit": {}})
+    assert ok.status_code == 200 and ok.json()["closure"] != "qlknn"

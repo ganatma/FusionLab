@@ -73,7 +73,7 @@ def test_capabilities_handshake(client):
     assert set(worker.TASKS) >= {"trace_fieldlines", "run_surrogate", "run_eq_surrogate", "benchmark"}
     assert isinstance(caps["cuda_available"], bool)
     assert caps["torch"] and caps["warp"]                     # versions of the install that runs the jobs
-    assert set(caps["models"]) == {"surrogate.pt", "eq_surrogate.pt"}
+    assert set(caps["models"]) == {"surrogate.pt", "eq_surrogate.pt", "qlknn.pt"}
     assert caps["artifacts"] == {}                            # fresh cache: nothing fetched yet
 
 
@@ -98,9 +98,9 @@ def test_handshake_weight_hashes_are_cached(monkeypatch, client):
 
     monkeypatch.setattr(worker, "_sha256_file", counting)
     first = client.get("/v1/capabilities").json()["models"]
-    assert reads["n"] == 2                                # both shipped weights, hashed exactly once
+    assert reads["n"] == 3                                # all three shipped weights, hashed exactly once
     assert client.get("/v1/capabilities").json()["models"] == first
-    assert reads["n"] == 2                                # zero file reads on the second handshake
+    assert reads["n"] == 3                                # zero file reads on the second handshake
 
 
 # ---------------------------------------------------------------- registry and validation
@@ -422,3 +422,45 @@ def test_the_correct_token_passes_end_to_end(client, monkeypatch):
     rr = _wait_result(client, job_id, headers=headers)
     assert rr.status_code == 200
     assert "block_size" in frames.unpack_result(rr.content)
+
+
+needs_qlknn = pytest.mark.skipif(not worker.shipped_models().get("qlknn.pt"),
+                                 reason="models/qlknn.pt missing: run scripts/convert_qlknn_weights.py")
+
+
+@needs_qlknn
+def test_qlknn_task_roundtrips_and_the_handshake_carries_its_weight(client):
+    """The QLKNN rails remotely: the shipped qlknn.pt is advertised in the handshake's models and a
+    bare job resolves against it — the per-slice (K, alpha) dict comes back through the FLF1 frames
+    equal to the in-process module call."""
+    from fusionlab import mast, physics, qlknn
+
+    assert "qlknn.pt" in client.get("/v1/capabilities").json()["models"]
+    shot = mast.load_shot(30166)
+    p_loss = physics.replay(shot)["P_loss_MW"]
+    inputs = frames.encode_inputs({"shot": shot, "P_loss_MW": p_loss})
+    r = client.post("/v1/jobs", json={"task": "run_qlknn", "inputs": inputs})
+    assert r.status_code == 201, r.text
+    out = frames.unpack_result(_wait_result(client, r.json()["job_id"]).content)
+    direct = qlknn.confinement_coeff(shot, p_loss)
+    assert np.array_equal(out["K"], direct["K"]) and np.array_equal(out["alpha"], direct["alpha"])
+
+
+@needs_qlknn
+def test_qlknn_job_resolves_uploaded_artifact_over_shipped_weights(client, tmp_path):
+    """The drift contract for the third weight: a ref whose hash matches nothing shipped or cached is
+    uploaded first, and the job resolves against the uploaded bytes — the fake weight cannot load, so
+    the failure is the loader's, proving those bytes were used."""
+    fake = tmp_path / "qlknn.pt"
+    fake.write_bytes(b"not-a-real-weight-dict")
+    digest = hashlib.sha256(fake.read_bytes()).hexdigest()
+    assert client.post(f"/v1/artifacts/{digest}", content=fake.read_bytes()).status_code == 201
+    from fusionlab import mast, physics
+
+    shot = mast.load_shot(30166)
+    inputs = frames.encode_inputs({"shot": shot, "P_loss_MW": physics.replay(shot)["P_loss_MW"]})
+    r = client.post("/v1/jobs", json={"task": "run_qlknn", "inputs": inputs,
+                                      "artifact_refs": [{"role": "qlknn.pt", "sha256": digest}]})
+    assert r.status_code == 201, r.text
+    rr = _wait_result(client, r.json()["job_id"])
+    assert rr.status_code == 500 and rr.json()["error_type"] is not None

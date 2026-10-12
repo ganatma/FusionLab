@@ -168,7 +168,8 @@ def matched_pairs() -> dict:
 # ---------------------------------------------------------------- report
 def report(m: dict) -> str:
     r, p = m["refly"], m["matched_pairs"]
-    NAMES = {"learned": "IPB98(y,2) × PhysicsNeMo correction", "ipb98": "IPB98(y,2)", "iter89": "ITER89-P"}
+    NAMES = {"learned": "IPB98(y,2) × PhysicsNeMo correction", "ipb98": "IPB98(y,2)", "iter89": "ITER89-P",
+             "qlknn": "QLKNN7_11 power balance"}
     def f(v):
         return "–" if v is None else f"{v:.3f}"
     lines = [f"Blind re-fly of {r['n_shots']} held-out shots, median |ln(W_refly / W_measured)| (0.10 ≈ 10%):", "",

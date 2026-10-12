@@ -54,6 +54,14 @@ def _run_eq_surrogate(inputs: dict) -> np.ndarray:
     return eq_surrogate.predict_psi(inputs["eq_inputs"])
 
 
+def _run_qlknn(inputs: dict) -> dict:
+    """qlknn.confinement_coeff: the QLKNN7_11 virtual-shot closure's per-slice (K, alpha)
+    solve — the vendored net rides the artifact rails as qlknn.pt."""
+    from fusionlab import qlknn  # lazy: torch rides first model use
+
+    return qlknn.confinement_coeff(inputs["shot"], inputs["P_loss_MW"])
+
+
 def _model_metrics(inputs: dict) -> dict:
     """Holdout metrics JSON for one trained model ("surrogate" | "eq_surrogate"), read beside its checkpoint."""
     from fusionlab import eq_surrogate, surrogate  # import torch
@@ -84,6 +92,7 @@ TASKS: dict[str, Callable[..., Any]] = {
     "run_surrogate": _run_surrogate,
     "run_surrogate_shot": _run_surrogate_shot,
     "run_eq_surrogate": _run_eq_surrogate,
+    "run_qlknn": _run_qlknn,
     "model_metrics": _model_metrics,
     "benchmark": _benchmark,
 }
@@ -106,11 +115,16 @@ class LocalProvider:
     def capabilities(self) -> dict:
         """Tasks and trained-model availability. The lazy imports are the torch cost the routers used to pay
         at first use; nothing here touches Warp (tracing imports stay inside the trace task)."""
-        from fusionlab import eq_surrogate, surrogate  # import torch
+        from fusionlab import (  # lazy: torch rides first model use
+            eq_surrogate,
+            qlknn,
+            surrogate,
+        )
 
         return {"provider": self.name, "tasks": sorted(TASKS),
                 "surrogate_available": surrogate.available(),
-                "eq_surrogate_available": eq_surrogate.MODEL_FILE.exists()}
+                "eq_surrogate_available": eq_surrogate.MODEL_FILE.exists(),
+                "qlknn_available": qlknn.available()}
 
     def active_job(self, task: str) -> JobHandle | None:
         """The job of `task` this provider is running right now, or None. submit() runs synchronously,

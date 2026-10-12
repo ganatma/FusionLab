@@ -239,17 +239,20 @@ _TASK_WEIGHTS: dict[str, tuple[str, ...]] = {
     "run_surrogate": ("surrogate.pt",),
     "run_surrogate_shot": ("surrogate.pt",),
     "run_eq_surrogate": ("eq_surrogate.pt",),
+    "run_qlknn": ("qlknn.pt",),
 }
 
 
 def local_weight_paths() -> dict[str, Path]:
     """The trained weights of THIS install, by filename — the hashes the worker must match or receive."""
-    from fusionlab import (  # module attrs; no torch import needed
+    from fusionlab import (  # module attrs; qlknn's torch import is lazy
         eq_surrogate,
+        qlknn,
         surrogate,
     )
 
-    return {"surrogate.pt": Path(surrogate.MODEL_FILE), "eq_surrogate.pt": Path(eq_surrogate.MODEL_FILE)}
+    return {"surrogate.pt": Path(surrogate.MODEL_FILE), "eq_surrogate.pt": Path(eq_surrogate.MODEL_FILE),
+            "qlknn.pt": Path(qlknn.MODEL_FILE)}
 
 
 def _local_version() -> str:
@@ -296,7 +299,8 @@ class SshProvider:
         return {"provider": self.name, "host": getattr(self._session, "host", "127.0.0.1"),
                 "remote": remote, "version_mismatch": mismatch, "tasks": remote.get("tasks", []),
                 "surrogate_available": "surrogate.pt" in names,
-                "eq_surrogate_available": "eq_surrogate.pt" in names}
+                "eq_surrogate_available": "eq_surrogate.pt" in names,
+                "qlknn_available": "qlknn.pt" in names}
 
     def submit(self, task: str, inputs: dict) -> JobHandle:
         """Encode the inputs, satisfy the artifact refs, queue the job remotely. Returns at once;

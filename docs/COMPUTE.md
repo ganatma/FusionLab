@@ -114,7 +114,8 @@ checklist is the real-host path that remains.
 ## What it costs, and what it does not do
 
 - **First job on a fresh worker** uploads model weights by content hash (sha256): 9.0 KB for the
-  confinement-correction surrogate, 4.6 MB for the equilibrium surrogate. One time per weight
+  confinement-correction surrogate, 4.6 MB for the equilibrium surrogate, 0.30 MB for the QLKNN7_11
+  net. One time per weight
   version; after that the worker's cache answers and weight traffic is zero.
 - **One job at a time** per worker — it is a single-user GPU box, not a cluster, and a queue of
   depth 1 is honest about that. Jobs can be cancelled.

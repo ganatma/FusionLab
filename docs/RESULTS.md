@@ -104,12 +104,15 @@ Blind re-fly of 117 shots from sessions the τ_E correction never saw, median |l
 
 | Closure | Flat top, all | beam-heated | ohmic | 50 ms after beam-on |
 |---|---|---|---|---|
-| IPB98(y,2) × PhysicsNeMo correction **(default)** | 0.175 (114) | 0.138 (80) | 0.237 (34) | 0.332 (80) |
+| IPB98(y,2) × PhysicsNeMo correction **(default)** | 0.174 (114) | 0.139 (80) | 0.237 (34) | 0.332 (80) |
 | IPB98(y,2) | 0.270 (114) | 0.229 (80) | 0.713 (34) | 0.697 (80) |
-| ITER89-P | 0.351 (114) | 0.349 (80) | 0.366 (34) | 0.623 (80) |
+| ITER89-P | 0.349 (114) | 0.349 (80) | 0.363 (34) | 0.622 (80) |
+| QLKNN7_11 power balance | 0.590 (117) | 0.630 (83) | 0.492 (34) | 0.869 (83) |
 
 The learned correction cuts the flat-top error by a third against IPB98 alone. The rise after beam-on is about twice as
-wrong as the flat top for every closure: the beam is a logged box and fast ions are not modelled.
+wrong as the flat top for every closure: the beam is a logged box and fast ions are not modelled. The QLKNN7_11 closure
+(a flux model reduced through a documented power-balance fixed point, see its module docstring) is the widest of the
+four — its evidence row is published, not hidden, and the learned correction stays the default.
 
 Matched pairs (two shots of the same 100-shot block, one input changed by > 20%, the other six within 5%), RMSE of the
 change in ln τ_E between the two shots (each law's exponent in brackets):

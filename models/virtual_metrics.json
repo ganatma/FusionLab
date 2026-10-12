@@ -123,9 +123,9 @@
   ],
   "closures": {
    "learned": {
-    "flat": 0.175,
+    "flat": 0.174,
     "rise": 0.332,
-    "flat_beam": 0.138,
+    "flat_beam": 0.139,
     "flat_ohmic": 0.237,
     "n_flat": 114,
     "n_rise": 80,
@@ -143,13 +143,23 @@
     "n_ohmic": 34
    },
    "iter89": {
-    "flat": 0.351,
-    "rise": 0.623,
+    "flat": 0.349,
+    "rise": 0.622,
     "flat_beam": 0.349,
-    "flat_ohmic": 0.366,
+    "flat_ohmic": 0.363,
     "n_flat": 114,
     "n_rise": 80,
     "n_beam": 80,
+    "n_ohmic": 34
+   },
+   "qlknn": {
+    "flat": 0.59,
+    "rise": 0.869,
+    "flat_beam": 0.63,
+    "flat_ohmic": 0.492,
+    "n_flat": 117,
+    "n_rise": 83,
+    "n_beam": 83,
     "n_ohmic": 34
    }
   },

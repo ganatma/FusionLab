@@ -173,9 +173,11 @@ Example `machine.json`, for an imaginary AUG-like machine:
 
 The bundle schema is versioned (`ShotBundle v1`, `fusionlab/data/bundle.py` — the field table in
 code is authoritative and drives both validation and this page). Later versions add fields and
-degrade old readers gracefully; the `omas`/IMAS path is a future *adapter* that produces bundles,
-not a new internal format. If your archive can emit these ~45 arrays per shot, FusionLab is
-yours.
+degrade old readers gracefully. IMAS is an *export* direction only: `GET /replay/{id}/imas`
+(`fusionlab/imas_export.py`) emits the bundle's own values at IMAS dictionary paths — units
+converted once at that edge — with an annotations sidecar for what the dictionary has no home
+for. IMAS is never an internal format and never an import spine; the bundle stays the
+interchange format. If your archive can emit these ~45 arrays per shot, FusionLab is yours.
 
 One last restatement of the no-validation rule, because it is the contract's soul: numbers from
 your bundles are replayed, compared with the 0D model and the learned corrections, and exported

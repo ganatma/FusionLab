@@ -22,12 +22,12 @@
     { "id": "0.2", "ch": 0, "title": "What fusion is", "stage": "reaction", "focus": [],
       "body": "Squeeze two light nuclei together and they fuse into a heavier one, releasing energy. The easiest pair is deuterium and tritium ([[D-T|dt]]). The catch: nuclei are positively charged and repel each other. Only when the fuel is extremely hot do enough of them collide hard enough to fuse. Temperature here is measured in [[keV|kev]]: 1 keV is about 11.6 million °C.",
       "task": { "text": "Drag the temperature up until the fuel reaches 10 keV.", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "reaction" }, { "path": "T_keV", "op": ">=", "value": 10 }] } },
-      "deeper": "D + T → ⁴He (3.5 MeV) + n (14.1 MeV). The curve is the D-T [[reactivity]] ⟨σv⟩ from the Bosch–Hale fit, the same function the sandbox uses (<code>physics.sigmav_dt</code>). It peaks near 65 keV, but a reactor runs around 10–20 keV, where fusion power for a given plasma pressure is highest." },
+      "deeper": "D + T → ⁴He (3.5 MeV) + n (14.1 MeV). The curve is the D-T [[reactivity]] ⟨σv⟩ from the Bosch–Hale fit, the same function behind the Explore readouts (<code>physics.sigmav_dt</code>). It peaks near 65 keV, but a reactor runs around 10–20 keV, where fusion power for a given plasma pressure is highest." },
 
     { "id": "0.3", "ch": 0, "title": "Three things at once", "stage": "triple", "focus": [],
       "body": "Hot is not enough. The fuel must be <b>hot</b> (temperature T), <b>dense</b> enough for collisions to be frequent (density n), and it must <b>hold its heat</b> long enough (the [[energy confinement time|tau-e]] τ<sub>E</sub>). Multiply the three and you get the [[triple product]], the single number that says how close a plasma is to sustaining itself.",
       "task": { "text": "Load the ITER preset, then the MAST one, and compare.", "check": { "event": "fusionlab:figure", "all": [{ "path": "name", "op": "==", "value": "triple" }, { "path": "preset", "op": "==", "value": "mast" }] } },
-      "deeper": "Ignition needs roughly n·T·τ<sub>E</sub> ≳ 3 × 10²¹ m⁻³·keV·s (Wesson, <i>Tokamaks</i>). The ITER preset is this app's sandbox baseline; the MAST preset is the peak of shot #30166. The gap of about a thousand is mostly confinement time, and confinement time is mostly size." },
+      "deeper": "Ignition needs roughly n·T·τ<sub>E</sub> ≳ 3 × 10²¹ m⁻³·keV·s (Wesson, <i>Tokamaks</i>). The ITER preset is this app's Explore baseline; the MAST preset is the peak of shot #30166. The gap of about a thousand is mostly confinement time, and confinement time is mostly size." },
 
     { "id": "0.4", "ch": 0, "title": "The score, and an honest note", "stage": "triple", "focus": [],
       "body": "The score of a fusion machine is its [[gain Q|q-gain]]: fusion power out divided by heating power in. Q = 1 is breakeven. JET reached about two thirds in 1997. ITER is built for Q = 10. <b>MAST never tried.</b> It ran on deuterium only and made no fusion power to speak of. Its job was to study the bottle, not the fire: how well a compact, [[spherical tokamak|spherical-tokamak]] holds heat and where it goes unstable. That is what its data can teach you." },
@@ -161,7 +161,7 @@
 
     { "id": "4.8", "ch": 4, "title": "Distance to the three walls",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["gauge-greenwald", "gauge-troyon", "gauge-kink", "strip-lim"],
-      "body": "The same three limits as in the sandbox, now [[computed|provenance]] from measured quantities: density against the [[Greenwald|greenwald]] ceiling, EFIT's β<sub>N</sub> against the [[Troyon|troyon]] limit, and q95 against the [[kink]] limit. The bottom strip shows all three through time. On this shot the Troyon gauge climbs into amber and peaks at 0.92: MAST routinely ran close to the pressure limit, because high pressure for a given field is the point of a spherical tokamak." },
+      "body": "The same three limits as in Explore, now [[computed|provenance]] from measured quantities: density against the [[Greenwald|greenwald]] ceiling, EFIT's β<sub>N</sub> against the [[Troyon|troyon]] limit, and q95 against the [[kink]] limit. The bottom strip shows all three through time. On this shot the Troyon gauge climbs into amber and peaks at 0.92: MAST routinely ran close to the pressure limit, because high pressure for a given field is the point of a spherical tokamak." },
 
     { "id": "5.1", "ch": 5, "title": "Ramp-up",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.06 }, "view": "cutaway", "highlight": null, "focus": ["xs", "strip-ip", "params", "bar"],
@@ -170,7 +170,7 @@
 
     { "id": "5.2", "ch": 5, "title": "Beams on",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.1 }, "focus": ["strip-p", "strip-w", "bar"],
-      "body": "So far the only heating is ohmic, under 1 MW, and the stored energy is about 10 kJ. Find the moment the [[neutral beam|nbi]] switches on.",
+      "body": "So far the only heating is ohmic, under 1 MW, and the stored energy is about 0.01 MJ. Find the moment the [[neutral beam|nbi]] switches on.",
       "task": { "text": "Scrub forward to the first slice with the beam on.", "check": { "event": "fusionlab:slice", "all": [{ "path": "nbi_on", "op": "==", "value": true }, { "path": "t_s", "op": "<=", "value": 0.135 }] } },
       "deeper": "From 0.12 s about 2 MW of beam power arrives and the stored energy triples within 30 ms. Part of that early rise is the beam's own fast ions, which EFIT counts as stored energy." },
 
@@ -181,11 +181,11 @@
 
     { "id": "5.4", "ch": 5, "title": "The peak",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["params", "gauge-troyon", "strip-w"],
-      "body": "At 0.27 s the stored energy peaks at 127 kJ and the Troyon gauge reaches 0.92. H<sub>98</sub> reads 1.3, which would be excellent confinement. Be careful. The measured energy includes fast beam ions that the scaling law knows nothing about, so H<sub>98</sub> reads high whenever beams are on. A number is only as good as your knowledge of what went into it, and the panel says so." },
+      "body": "At 0.27 s the stored energy peaks at 0.13 MJ and the Troyon gauge reaches 0.92. H<sub>98</sub> reads 1.3, which would be excellent confinement. Be careful. The measured energy includes fast beam ions that the scaling law knows nothing about, so H<sub>98</sub> reads high whenever beams are on. A number is only as good as your knowledge of what went into it, and the panel says so." },
 
     { "id": "5.5", "ch": 5, "title": "What the comparison shows",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["insight", "logbook"],
-      "body": "Two readings of the same shot, side by side. On the left, what the twin works out from the data: confinement relative to each law, the closest approach to a limit and when, and how the learned correction did on this shot. On the right, what the physicist in the control room wrote. When they agree, you can trust both a little more. When they differ, you have found something worth a closer look." },
+      "body": "Two readings of the same shot, side by side. On the left, what the twin works out from the data: confinement relative to each law, which limit the shot came closest to, and how the learned correction did on this shot. On the right, what the physicist in the control room wrote. When they agree, you can trust both a little more. When they differ, you have found something worth a closer look." },
 
     { "id": "6.1", "ch": 6, "title": "Same recipe, more power",
       "tab": "replay", "shot": 30192, "slice": 0, "view": "cutaway", "highlight": null, "focus": ["bar", "strip-p", "strip-w", "strip-lim"],
@@ -204,7 +204,7 @@
 
     { "id": "7.1", "ch": 7, "title": "A law is a fit",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "focus": ["strip-w"],
-      "body": "The warm curves come from [[scaling laws|scaling-law]]: power-law fits of confinement time across thousands of shots on many machines. They are how ITER was sized. But the machines in that database were conventional, doughnut-shaped tokamaks. MAST is a cored apple, and published studies found it scales differently, with a weaker dependence on current and a much stronger one on field. So on MAST the law is a reference line, not the truth.",
+      "body": "The warm curves come from [[scaling laws|scaling-law]]: power-law fits of confinement time across thousands of shots on many machines. They are how ITER was sized. But the machines in those fits were conventional, doughnut-shaped tokamaks. MAST is a cored apple, and published studies found it scales differently, with a weaker dependence on current and a much stronger one on field. So on MAST the law is a reference line, not the truth.",
       "deeper": "Valovič et al., <i>Nucl. Fusion</i> 49 (2009) 075016 fitted MAST H-modes as W ∝ I<sub>p</sub><sup>0.59</sup> B<sub>T</sub><sup>1.4</sup>, against [[IPB98(y,2)|ipb98]]'s I<sub>p</sub><sup>0.93</sup> B<sub>T</sub><sup>0.15</sup>. The same paper notes the magnitudes broadly agree." },
 
     { "id": "7.2", "ch": 7, "title": "One shot among thousands",
@@ -222,6 +222,6 @@
 
     { "id": "8.1", "ch": 8, "title": "Into the lab",
       "tab": "replay", "shot": 30166, "slice": { "t": 0.27 }, "overlay": true, "highlight": null, "view": "cutaway", "focus": [], "last": true,
-      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>What-if</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
+      "body": "Look at the screen again. Flux surfaces from magnetics. A Thomson profile. Stored energy beside two laws and a learned correction. Three limit gauges. A logbook. Field lines with q counted along them. None of it is jargon now. Three things to try: replay the ohmic shot #30420 and find which limit it came closest to; press <b>Edit this shot</b> on #30192 and give its beams 30 % more power; pick any shot and check the twin's reading against the logbook. The <b>?</b> on any panel brings you back to its lesson." }
   ]
 }

@@ -6,9 +6,12 @@
   --panel:#10141b; --line:#1f2733; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
   --mono:ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --head:46px;
+  --drawer:420px;
+  --focus-ring:2px solid var(--accent);
 }
 * { box-sizing:border-box; }
 body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+:focus-visible { outline:var(--focus-ring); outline-offset:1px; }   /* keyboard focus everywhere (.term swaps in its own underline) */
 h1 { margin:0; font:600 13px/1 var(--mono); letter-spacing:.18em; }
 h2 { margin:0 0 8px; font:600 11px/1.4 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
 h2 .dim { text-transform:none; letter-spacing:.02em; font-weight:400; }
@@ -29,8 +32,9 @@ h1 .dim { font-weight:400; letter-spacing:.06em; }
 .tabs button:hover { color:var(--fg); }
 .tabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
 section[id^="tab-"]:not(#tab-replay) { padding:16px; }
+#cmdk { flex:none; padding:4px 8px; }
 
-/* layout (sandbox + database tabs) */
+/* layout (Explore + Compare workspaces) */
 .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); align-items:start; }
 .grid.tight { gap:8px; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); }
 .panel { background:var(--panel); border:1px solid var(--line); padding:14px 16px; }
@@ -43,12 +47,36 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .cr { display:grid; height:calc(100vh - var(--head) - var(--dock, 0px)); min-height:600px; gap:1px; background:var(--line);
       grid-template-columns:minmax(250px, .85fr) 1.7fr 1.55fr; grid-template-rows:auto auto 1.1fr 1fr;
       grid-template-areas:"bar bar bar" "hint hint hint" "eq tr v3" "eq st v3"; }
-.cr-hint { grid-area:hint; display:flex; align-items:center; gap:16px; padding:7px 12px; background:#17120c; border-left:2px solid var(--accent); }
+.cr-hint { grid-area:hint; display:flex; flex-wrap:wrap; align-items:center; gap:16px; padding:7px 12px; background:#17120c; border-left:2px solid var(--accent); }
 .cr-hint.fallback { border-left-color:var(--warn); background:#1c150a; }
+.cr-hint.error { border-left-color:var(--bad); background:#1c0f0c; }
 .cr-hint span { flex:1; }
-.cr-bar { grid-area:bar; display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--bg); }
+.cr-bar { grid-area:bar; display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--bg); flex-wrap:wrap; }   /* clusters wrap as whole units when tight — a cluster's children never overflow into its neighbour */
 .cr-bar select { width:auto; max-width:300px; }
 .cr-bar input[type=range] { flex:1 1 200px; }
+#rp-tlabel { white-space:nowrap; }
+
+/* the anchored edit drawer (spec L2): a modal layer over the Replay room — the state cell, gauges and
+   logbook underneath stay live while the programme is edited. Anchored to the room itself, right side. */
+#tab-replay { position:relative; }   /* the drawer anchors below the header, not to the page */
+#rp-wi { position:absolute; top:0; right:0; bottom:0; left:auto; height:auto; width:min(var(--drawer), 100%); max-height:none; margin:0; padding:12px 16px;
+         background:var(--panel); border:0; border-left:1px solid var(--line); box-shadow:-12px 0 48px rgba(0,0,0,.55); }
+#rp-wi[open] { display:flex; flex-direction:column; }
+#rp-wi::backdrop { background:rgba(8,10,13,.45); }
+.wi-head { display:flex; align-items:flex-start; gap:10px; }
+.wi-head-title { flex:1; min-width:0; }
+.wi-head h2 { margin:0; }
+.wi-head p { margin:2px 0 8px; }
+.wi-scroll { flex:1 1 0; min-height:0; overflow:auto; }
+#rp-wi .wi-grid { grid-template-columns:1fr; }   /* the two-up layout is a wide-panel pattern; the drawer reads top to bottom */
+
+/* the toolbar reads in three labelled clusters (spec §Replay): transport · shot actions · status */
+.cr-cluster { display:flex; align-items:center; gap:8px; min-width:0; }
+.cluster-label { flex:none; font:600 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
+.cluster-body { display:flex; align-items:center; gap:10px; min-width:0; flex-wrap:wrap; }
+.cr-cluster-transport { flex:1 1 auto; }
+.cr-cluster-status { flex:none; margin-left:auto; }
+.cr-note { margin:6px 0 2px; }
 .cr-cell { background:var(--panel); padding:10px 12px; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .cr-cell.scroll { overflow:auto; }
 #cell-eq { grid-area:eq; } #cell-tr { grid-area:tr; } #cell-st { grid-area:st; } #rp-3d-panel { grid-area:v3; }
@@ -59,14 +87,15 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
   .cr { height:auto; grid-template-columns:1fr; grid-template-rows:none;
         grid-template-areas:"bar" "hint" "v3" "tr" "st" "eq"; }
   .cr-bar { flex-wrap:wrap; }
+  .cr-cluster { flex-wrap:wrap; } .cluster-body { flex-wrap:wrap; }   /* clusters wrap as units, then within themselves */
   #rp-3d-panel, #cell-eq { height:520px; } #cell-tr { height:460px; }
 }
 
 /* strip charts: shared time axis, label left, live value right */
 .strips { flex:1 1 0; min-height:0; display:grid; grid-template-rows:1.6fr 1fr 1fr 1.25fr; }
-.strips.cmp-on { grid-template-rows:1.6fr 1fr 1fr 1.25fr 1.1fr; }   /* + the ΔW difference strip (A2) */
 .strip { position:relative; min-height:0; border-top:1px solid var(--line); }
 .strip:first-child { border-top:0; }
+#cp-strips .strip { height:210px; }   /* the Compare workspace's read strips: fixed height, the panel scrolls */
 .strip-label, .strip-val { position:absolute; top:2px; z-index:2; font:600 11px/1.3 var(--mono); pointer-events:none; }
 .strip-label { left:44px; color:var(--muted); }
 .strip-val { right:4px; width:58px; text-align:right; color:var(--fg); font-variant-numeric:tabular-nums; }
@@ -82,7 +111,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .cmp-chip.ref, .cmp-chip.ok { border-color:#2a4f80; }
 .cmp-chip.ok { color:var(--fg); }
 .cmp-chip.bad { border-color:var(--bad); color:var(--bad); }
-.cmp-actions { display:flex; gap:6px; margin-left:auto; }
+.cmp-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
 .cmp-note { color:var(--muted); }
 .cmp-errs { display:flex; flex-direction:column; gap:4px; }
 .cmp-err { display:flex; align-items:center; gap:8px; color:var(--bad); font-family:var(--mono); font-size:12px; }
@@ -148,6 +177,8 @@ select { background:var(--bg); color:var(--fg); border:1px solid var(--line); pa
 .status.ok { color:var(--ok); border-color:var(--ok); }
 .status.warn { color:var(--warn); border-color:var(--warn); }
 .status.bad { color:var(--bad); border-color:var(--bad); }
+.status.wait { color:var(--muted); }
+.status .tool { color:inherit; }   /* Retry/Drop inside an error chip inherit its severity color, as in .cmp-err */
 
 .plot { width:100%; height:420px; }
 footer { padding:10px 16px 16px; font-size:12px; color:var(--muted); border-top:1px solid var(--line); }
@@ -236,6 +267,9 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
 .welcome-pick button:hover { border-color:var(--accent); }
 .welcome-pick button > b { font-size:18px; } .welcome-pick span { color:var(--muted); flex:1; }
 .welcome-pick i { font:600 11px/1 var(--mono); font-style:normal; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); }
+.welcome-alt { margin:14px 0 0; }
+.welcome-alt button { background:none; border:0; padding:0; color:var(--accent); font:600 13px/1.4 system-ui, sans-serif; cursor:pointer; text-decoration:underline; }
+.welcome-alt button:hover { color:var(--fg); }
 @media (max-width:1460px) {
   body.guided { --dock:250px; padding-left:0; padding-bottom:var(--dock); }
   body.guided header { margin-left:0; }
@@ -263,3 +297,43 @@ body.guided header { margin-left:calc(-1 * var(--rail)); }
 .srch-rows { max-height:480px; overflow:auto; }
 .srch-rows td { white-space:nowrap; }
 .bad { color:var(--bad); }
+
+/* Explore workspace: the visible path into the anchored editor (Replay, edit intent in the URL) */
+.entry-action { margin:14px 0 0; }
+.entry-action a { color:var(--accent); font:600 13px/1.4 system-ui, sans-serif; text-decoration:underline; }
+.entry-action a:hover { color:var(--fg); }
+
+/* command palette (web/palette.js): native <dialog> in the top layer — no z-index, no overlay div.
+   Shares the control-room look: panel surface, hairlines, mono hints. */
+dialog.palette { background:var(--panel); color:var(--fg); border:1px solid var(--line); width:min(640px, calc(100vw - 24px));
+                 margin:12vh auto auto; padding:10px; }
+dialog.palette::backdrop { background:rgba(8,10,13,.72); backdrop-filter:blur(2px); }
+#pal-q { width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); padding:10px 12px;
+         font:13px/1.4 var(--mono); }
+#pal-list { list-style:none; margin:8px 0 0; padding:0; max-height:52vh; overflow:auto; }
+#pal-list li { display:flex; align-items:baseline; gap:12px; padding:8px 10px; cursor:pointer; border-bottom:1px solid var(--line); }
+#pal-list li:last-child { border-bottom:0; }
+#pal-list li b { font-weight:400; font-size:13.5px; color:var(--fg); }
+#pal-list li .pal-hint { margin-left:auto; flex:none; font:600 9.5px/1.5 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--dim); }
+#pal-list li.on { background:var(--line); }
+#pal-list li.on b { color:var(--accent); }
+#pal-list li.pal-none { cursor:default; color:var(--muted); font-size:12.5px; }
+.pal-status { margin:6px 2px 0; min-height:1em; color:var(--accent); font:12px/1.5 var(--mono); }
+@media (max-width:760px) { dialog.palette { margin-top:6vh; } #pal-list { max-height:60vh; } }
+
+/* Reduced motion: the gauge bars' width tween and the guided-study spotlight dim are orientation
+   aids only — under the user's preference they apply instantly. The two JS smooth scrolls
+   (guide.js spotlight, the catalog panel jump) gate on the same query at their call sites. */
+@media (prefers-reduced-motion: reduce) {
+  .gauge > .bar, .g-dim { transition: none; }
+}
+
+/* Mobile header: the legend (its tags repeat on every panel) and the subtitle step aside, and the
+   tabs take their own row, so the title never clips (audit defect at 375 px, screenshot fl_AmO2E2fS).
+   Last in the file: it must out-order the base .prov/.tabs rules it overrides (equal specificity). */
+@media (max-width:760px) {
+  header { flex-wrap:wrap; height:auto; min-height:var(--head); padding:8px 16px; row-gap:2px; }
+  .prov, header h1 .dim { display:none; }
+  header .tabs { order:9; flex:1 1 100%; align-self:auto; height:34px; }
+}
+

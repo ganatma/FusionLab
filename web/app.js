@@ -1,5 +1,6 @@
-// FusionLab shell (tabs) + Sandbox tab: what-if sliders on the reduced 0D model.
-// Static file, no bundler. The Replay tab lives in replay.js and listens for 'fusionlab:tab'.
+// FusionLab shell + Explore workspace (the reduced 0D model): what-if sliders on device presets.
+// Static file, no bundler. Navigation lives in workspaces.js (the router, loaded first); the Replay
+// workspace lives in replay.js. Both listen for 'fusionlab:tab'.
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -10,15 +11,15 @@
   const GAUGE_SPAN = 1.25;                    // gauge full scale (the 1.0 tick sits at 80%, see style.css)
   let devices = {}, simSeq = 0, mapSeq = 0, mapReady = false;
 
-  // ---------------------------------------------------------------- tabs
+  // ---------------------------------------------------------------- workspaces
+  // The router (workspaces.js) owns which section is visible and the URL grammar. showTab keeps its
+  // name and event contract for guide.js / agent.js (they call it and listen for 'fusionlab:tab') —
+  // it is now a thin alias that writes the hash, the one navigation act.
   function showTab(name) {
-    document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-    document.querySelectorAll('section[id^="tab-"]').forEach((s) => { s.hidden = s.id !== 'tab-' + name; });
-    document.dispatchEvent(new CustomEvent('fusionlab:tab', { detail: name }));
+    window.FusionLabRouter.navigate(name);
   }
-  document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   document.addEventListener('fusionlab:tab', (e) => {
-    if (e.detail === 'sandbox' && mapReady && window.Plotly) Plotly.Plots.resize($('map'));
+    if (e.detail === 'explore' && mapReady && window.Plotly) Plotly.Plots.resize($('map'));
   });
 
   // ---------------------------------------------------------------- helpers
@@ -167,6 +168,6 @@
     },
   });
 
-  // Replay (real shots) is the landing tab; /#sandbox opens the what-if sliders directly.
-  if (location.hash !== '#sandbox') showTab('replay');
+  // Boot navigation is the router's job (workspaces.js): it applies the deep link or the
+  // landing workspace (last visited, else the welcome-modal pick, else Replay).
 })();

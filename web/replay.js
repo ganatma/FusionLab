@@ -21,21 +21,41 @@
   root.innerHTML = `
     <div class="cr">
       <div class="cr-bar" data-guide="bar">
-        <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
-        <input type="file" id="rp-import-file" accept=".npz" hidden>
-        <button type="button" id="rp-import" class="tool" title="Bring your own data: import a ShotBundle v1 npz (docs/DATA_CONTRACT.md) so it replays, compares and exports beside the archive's shots. The file's name, minus .npz, becomes its id.">⬆ Import bundle</button>
-        <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
-        <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
-          <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
-        <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
-        <span class="mono" id="rp-tlabel">–</span>
-        <button type="button" id="rp-whatif" class="tool" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">What-if</button>
-        <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD stage</button>
-        <button type="button" id="rp-csv" class="tool" title="Take-away export: every measured, model, learned and computed number this replay shows, one CSV row per slice and quantity, each labelled with its provenance. Opens in Excel, pandas or a notebook.">↓ CSV export</button>
-        <button type="button" id="rp-bench" class="tool" title="Measured timings for this install's compute path (replay, caching, IPB98, the learned correction, the 0D map), run through the compute provider with live section progress. The README's full table is make bench.">⏱ Bench</button>
-        <span class="status" id="rp-compute" title="Compute status">…</span>
-        <span class="status" id="rp-progress" hidden><span id="rp-progress-text"></span>
-          <button type="button" id="rp-progress-cancel" class="tool" hidden title="Stop this remote job: the worker cancels it cooperatively — immediately while queued, between task sections while running — and the work re-runs locally so you still get an answer. The banner and provenance say honestly where it ran.">Cancel</button></span>
+        <div class="cr-cluster cr-cluster-transport" role="group" aria-label="Transport">
+          <span class="cluster-label" aria-hidden="true">Transport</span>
+          <span class="cluster-body">
+            <select id="rp-shot" data-guide="shot" aria-label="Shot"></select>
+            <button type="button" id="rp-play" data-guide="play" class="tool" aria-label="Play the shot">▶ PLAY</button>
+            <span class="seg" id="rp-speed" role="group" aria-label="Playback speed">
+              <button type="button" data-v="0.5">0.5x</button><button type="button" data-v="1" class="on">1x</button><button type="button" data-v="2">2x</button></span>
+            <input type="range" id="rp-t" data-guide="time" min="0" max="0" step="1" value="0" aria-label="Time slice">
+            <span class="mono" id="rp-tlabel">–</span>
+          </span>
+        </div>
+        <div class="cr-cluster" role="group" aria-label="Shot actions">
+          <span class="cluster-label" aria-hidden="true">Shot actions</span>
+          <span class="cluster-body">
+            <button type="button" id="rp-whatif" class="tool" aria-haspopup="dialog" aria-expanded="false" title="Edit this shot's programme and re-fly it: a what-if anchored on the measurement, with the evidence behind every slider">Edit this shot</button>
+            <button type="button" id="rp-cmp-go" class="tool" title="Open the Compare workspace: this shot joins as the reference, and the catalog sits alongside it">Compare…</button>
+            <button type="button" id="rp-share" class="tool" title="Copy a link that reopens this view: the workspace, the shot, the slice">Share</button>
+            <input type="file" id="rp-import-file" accept=".npz" hidden>
+            <button type="button" id="rp-import" class="tool" title="Bring your own data: import a ShotBundle v1 npz (docs/DATA_CONTRACT.md) so it replays, compares and exports beside the archive's shots. The file's name, minus .npz, becomes its id.">⬆ Import bundle</button>
+            <button type="button" id="rp-usd" class="tool" title="OpenUSD export (Omniverse-compatible): real vessel and PF coils, plasma boundary and field lines time-sampled on every EFIT slice. Opens in usdview, Omniverse USD Composer or Blender.">↓ OpenUSD</button>
+            <button type="button" id="rp-csv" class="tool" title="Take-away export: every measured, model, learned and computed number this replay shows, one CSV row per slice and quantity, each labelled with its provenance. Opens in Excel, pandas or a notebook.">↓ CSV export</button>
+            <button type="button" id="rp-lines" class="tool on" aria-pressed="true" title="Trace magnetic field lines through the reconstructed flux map (NVIDIA Warp). The reconstruction is axisymmetric and lossy — read the lines as indicative.">Field lines</button>
+            <button type="button" id="rp-bench" class="tool" title="Measured timings for this install's compute path (replay, caching, IPB98, the learned correction, the 0D map), run through the compute provider with live section progress. The README's full table is make bench.">⏱ Bench</button>
+          </span>
+        </div>
+        <div class="cr-cluster cr-cluster-status" role="group" aria-label="Status">
+          <span class="cluster-label" aria-hidden="true">Status</span>
+          <span class="cluster-body">
+            <span class="status" id="rp-load" hidden aria-live="polite"></span>
+            <span class="status" id="rp-flash" role="status" aria-live="polite" hidden></span>
+            <span class="status" id="rp-progress" hidden><span id="rp-progress-text"></span>
+              <button type="button" id="rp-progress-cancel" class="tool" hidden title="Stop this remote job: the worker cancels it cooperatively — immediately while queued, between task sections while running — and the work re-runs locally so you still get an answer. The banner and provenance say honestly where it ran.">Cancel</button></span>
+            <span class="status" id="rp-compute" title="Compute status">…</span>
+          </span>
+        </div>
       </div>
 
       <div class="cr-hint small" id="rp-hint"><span><b>New here?</b> This is a real discharge of the MAST tokamak (UKAEA open data), not a simulation.
@@ -45,7 +65,6 @@
 
       <div class="cr-hint small fallback" id="rp-fallback" hidden><span id="rp-fallback-text"></span>
         <button type="button" id="rp-fallback-x" class="tool" aria-label="Dismiss this banner">Dismiss</button></div>
-      <div class="cr-hint small" id="rp-cmp-bar" hidden></div>
 
       <div class="cr-cell" id="cell-eq" data-guide="eq">
         <h2>Equilibrium ${TAG.meas} <span class="dim" id="rp-eq-sub">EFIT, real vessel</span></h2>
@@ -62,37 +81,24 @@
       <div class="cr-cell" id="cell-tr" data-guide="traces">
         <h2>Stored energy and drive ${TAG.meas} ${TAG.model} ${TAG.learn} <span class="dim" id="rp-tr-note">laws are fed the measured power</span></h2>
         <div class="strips">
-          ${strip('rp-w', 'W', 'kJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limit distance', '1.0 = limit', 'strip-lim')}
-          <div class="strip" id="rp-dw-strip" hidden><span class="strip-label" id="rp-dw-label">ΔW <span class="dim">kJ · computed</span></span><span class="strip-val" id="rp-dw-val"></span><div id="rp-dw" class="fill"></div></div>
+          ${strip('rp-w', 'W', 'MJ', 'strip-w')}${strip('rp-p', 'P', 'MW', 'strip-p')}${strip('rp-ip', 'I<sub>p</sub>', 'MA', 'strip-ip')}${strip('rp-lim', 'limits', '1.0 = limit', 'strip-lim')}
         </div>
       </div>
 
       <div class="cr-cell scroll" id="cell-st" data-guide="state">
-        <div id="rp-wi" hidden>
-          <h2>What-if on this shot ${TAG.model} ${TAG.learn} <span class="dim">the real programme, edited and re-flown · educational, not a prediction</span></h2>
-          <div class="wi-grid">
-            <div><div id="rp-wi-sliders"></div>
-              <p class="small muted" id="rp-wi-evidence"></p>
-              <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
-            <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
-                <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
-              <div class="wi-out small" id="rp-wi-out"></div>
-              <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
-          </div>
-        </div>
         <h2>Shot state ${TAG.meas} <span id="rp-head" class="dim"></span></h2>
         <div class="params" data-guide="params">
           <div><span>t</span><b id="rp-r-t">–</b><i>s</i></div>
           <div><span>I<sub>p</sub></span><b id="rp-r-ip">–</b><i>MA</i></div>
           <div><span>n̄<sub>e</sub></span><b id="rp-r-n">–</b><i>10²⁰ m⁻³</i></div>
           <div><span>T<sub>e0</sub></span><b id="rp-r-te">–</b><i>keV</i></div>
-          <div><span>W</span><b id="rp-r-w">–</b><i>kJ</i></div>
+          <div><span>W</span><b id="rp-r-w">–</b><i>MJ</i></div>
           <div><span>H<sub>98</sub></span><b id="rp-r-h">–</b><i>meas / IPB98</i></div>
         </div>
-        <h2 style="margin-top:8px" class="wi-keep">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span> <span class="dim">· a distance, never a forecast</span> <span class="tag abort" id="rp-abort" hidden title="The archive's own bookkeeping (cpf_abort) for this shot — context for reading these distances, never a forecast.">⚠ archive abort</span></h2>
-        <div class="gauge-row wi-keep" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
-        <div class="gauge-row wi-keep" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
+        <h2 style="margin-top:8px">Distance to the operating limits ${TAG.comp} <span class="dim" id="rp-lim-src">limit formulas on the measured values · 1.0 = limit</span> <span class="dim">· a distance, never a forecast</span> <span class="tag abort" id="rp-abort" hidden title="The archive's own bookkeeping (cpf_abort) for this shot — context for reading these distances, never a forecast.">⚠ archive abort</span></h2>
+        <div class="gauge-row" data-guide="gauge-greenwald"><span>Greenwald density</span><div class="gauge"><div class="bar" id="rp-g-greenwald"></div></div><span class="num" id="rp-g-greenwald-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-troyon"><span>Troyon β<sub>N</sub></span><div class="gauge"><div class="bar" id="rp-g-troyon"></div></div><span class="num" id="rp-g-troyon-num">–</span></div>
+        <div class="gauge-row" data-guide="gauge-kink"><span>Kink (q<sub>95</sub> &lt; 2)</span><div class="gauge"><div class="bar" id="rp-g-kink"></div></div><span class="num" id="rp-g-kink-num">–</span></div>
         <div class="cols">
           <div data-guide="insight"><h2>What the comparison shows ${TAG.comp}</h2><div id="rp-insight" class="small"></div></div>
           <div data-guide="logbook"><h2>Session leader's logbook ${TAG.meas}</h2><div id="rp-log" class="small"></div></div>
@@ -105,19 +111,55 @@
           <span class="seg" id="rp-view" data-guide="view" hidden><button type="button" data-v="cutaway" class="on">Cutaway</button><button type="button" data-v="port">Inside the vessel</button></span></h2>
         <div class="grow"><div id="rp-3d" class="fill"></div>
           <div class="chips" data-guide="q-chips"><span>q<sub>95</sub> traced <b id="rp-q-tr">–</b></span><span>q<sub>95</sub> EFIT <b id="rp-q-ef">–</b></span></div></div>
+        <p class="small muted cr-note">Magnetic-surface reconstruction is lossy (axisymmetric only: no islands, no 3D fields) — read the field lines as indicative.</p>
         <details class="small"><summary>What am I looking at?</summary>
           <p>The vessel and PF coils are the FAIR-MAST limiter contour and coil filaments revolved about the axis; the glowing shell is EFIT's last closed flux surface at this time slice, coloured by core T<sub>e</sub>. <span id="rp-3d-note"></span></p>
           <p class="muted">Each line is integrated through the EFIT flux map of this time slice (RK4 in toroidal angle, one GPU thread per line, every slice of the shot in one kernel launch). Counting toroidal turns per poloidal turn gives q without using EFIT's own q, so the agreement is a check of the whole chain: archive → units → interpolation → integrator. Axisymmetric reconstruction only: no islands, no 3D fields. Drag to rotate. The same lines are in the OpenUSD download.</p></details>
       </div>
-    </div>`;
+    </div>
+
+    <dialog id="rp-wi" class="wi-drawer" role="dialog" aria-modal="true" aria-labelledby="rp-wi-title">
+      <div class="wi-head">
+        <div class="wi-head-title">
+          <h2 id="rp-wi-title">Edit this shot ${TAG.model} ${TAG.learn}</h2>
+          <p class="small muted">The real programme, edited and re-flown · educational, not a prediction</p>
+        </div>
+        <button type="button" class="tool" id="rp-wi-x" aria-label="Close the editor">✕</button>
+      </div>
+      <div class="wi-scroll">
+        <div class="wi-grid">
+          <div><div id="rp-wi-sliders"></div>
+            <p class="small muted" id="rp-wi-evidence"></p>
+            <button type="button" class="tool" id="rp-wi-reset">Reset edits</button></div>
+          <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
+              <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
+            <div class="wi-out small" id="rp-wi-out"></div>
+            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+        </div>
+      </div>
+    </dialog>`;
 
   // Catalog search filter set (A1): the ranges the API exposes, one row each — [label, unit, url prefix].
   const SRCH_RANGES = [['I<sub>p</sub>', 'MA', 'ip'], ['B', 'T', 'bt'], ['P<sub>nbi</sub>', 'MW', 'pnbi'],
                        ['n<sub>e</sub>', '10²⁰ m⁻³', 'ne'], ['W', 'MJ', 'w'], ['q<sub>95</sub>', '', 'q95']];
 
-  const dbRoot = document.getElementById('tab-db');
+  const dbRoot = document.getElementById('tab-compare');
   if (dbRoot) dbRoot.innerHTML = `
     <div class="stack">
+      <div class="cr-hint small" id="cp-bar" hidden></div>
+
+      <div class="panel stack" id="cp-readout">
+        <h2>Side by side ${TAG.meas} ${TAG.comp} <span class="dim">one measured trace per shot · shared cursor</span></h2>
+        <p class="small muted" id="cp-empty">Nothing side by side yet. Tick 2–6 shots in the catalog below and they load here —
+          or press <b>Compare…</b> in the Replay room to bring the shot you are watching as the reference.</p>
+        <div id="cp-strips" hidden>
+          <div class="strip cp-strip"><span class="strip-label">W <span class="dim">MJ · measured (EFIT)</span></span><div id="cp-w" class="fill"></div></div>
+          <div class="strip cp-strip"><span class="strip-label">worst limit <span class="dim">1.0 = limit</span></span><div id="cp-lim" class="fill"></div></div>
+          <div class="strip cp-strip" id="cp-dw-strip" hidden><span class="strip-label" id="cp-dw-label">ΔW <span class="dim">MJ · computed</span></span><div id="cp-dw" class="fill"></div></div>
+          <div class="strip cp-strip"><span class="strip-label">T<sub>e</sub> at the cursor <span class="dim">keV vs R · nearest slice per shot</span></span><div id="cp-te" class="fill"></div></div>
+        </div>
+      </div>
+
       <div class="panel stack" id="rp-srch-panel">
         <h2>Search the catalog <span class="dim">every filter lives in the URL: share the view</span></h2>
         <div class="db-filter">
@@ -136,7 +178,7 @@
         <p class="small muted" id="rp-srch-attr"></p>
       </div>
 
-      <div class="panel stack">
+      <div class="panel stack" id="rp-clouds">
         <h2>The replayed shot among <span id="rp-db-n">…</span> real MAST shots (values at peak current)</h2>
         <div id="rp-sur" class="small" data-guide="holdout"></div>
         <div class="grid">
@@ -177,8 +219,11 @@
 
   const SEQ_BLUE = ['#9ec5f4', '#3987e5', '#184f95'];   // one hue, light → dark: psi_N 0.3, 0.6, 0.9
   let shot = null, db = null, lines3dOk = true, linesFail503 = 0, use3 = false, playTimer = null, speed = 1;
+  let linesOn = true;   // the Field lines toggle (shot actions): false stops line fetches and clears them from the 3D panel
   let initP = null, loadSeq = 0;
-  let wi = { on: false, gate: null, res: null, seq: 0, timer: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer
+  const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
+  let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
+  let wi = { on: false, gate: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
   const lineCache = new Map();
 
   // Per-job progress (HARN-1): an SSE relay of the selected provider's stream for one task's job,
@@ -235,11 +280,12 @@
   const linesNow = new Map();   // resolved field lines, for the synchronous path in scrub()
   let psiTimer = null;
 
-  // ---- multi-shot compare (A2) state. The reference (first id) keeps the single-shot panels (3D vessel,
-  // equilibrium, what-if, logbook); every other shot adds one measured trace per time panel. Payloads cache
-  // per shot id, so the compare fan-out and a single pick share one fetch.
+  // ---- multi-shot compare (A2) state. The comparison reads in the Compare workspace (side-by-side panel);
+  // the reference ALSO renders the Replay room on its own — it is the shot that pane is "on". Payloads cache
+  // per shot id, so the compare fan-out and a single pick share one fetch. Per-shot fetch state (queued /
+  // fetching / ready / error) lives in the shared machine (shotload.js) — the same one a single pick uses.
   const CMP_COLORS = ['#d95926', '#199e70', '#c98500', '#d55181', '#9a7fd6'];   // per-shot slots 2–6; the reference keeps the blue
-  const cmp = { on: false, ids: [], ref: null, data: new Map(), st: new Map(), err: new Map(), seq: 0, ctrls: new Map() };
+  const cmp = { on: false, ids: [], ref: null, data: new Map(), seq: 0 };
   const replayCache = new Map();
 
   const fmt = (v, nd = 2) => (v === null || v === undefined || !isFinite(v)) ? '–' : Number(v).toFixed(nd);
@@ -247,7 +293,7 @@
 
   // Take-away CSV download (FEAT-1): fetch the export route, then hand the blob to the browser the way
   // the USD stage does. The server names the file via Content-Disposition; `name` is only the fallback.
-  async function dlExport(url, name, btn) {
+  async function dlExport(url, name, btn, onErr) {
     btn?.setAttribute('aria-busy', 'true');
     try {
       const r = await fetch(url);
@@ -258,7 +304,8 @@
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
-      console.error('CSV export failed:', e);
+      console.error('CSV export failed:', e);   // dev visibility; the caller owns the user-facing surface
+      if (onErr) onErr(e);
     } finally {
       btn?.removeAttribute('aria-busy');
     }
@@ -303,6 +350,7 @@
       if (!shot) return;
       const id = shot.meta.shot_id;
       $('rp-usd').setAttribute('aria-busy', 'true');
+      flash('wait', 'Exporting the OpenUSD stage…', 0);   // sticks until the export settles
       try {
         const r = await fetch(`/replay/${id}/usd`, { method: 'POST' });
         if (!r.ok) throw new Error(`export failed: ${r.status}`);
@@ -311,8 +359,14 @@
         const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
         a.click();
         URL.revokeObjectURL(a.href);
+        flash('ok', `Exported ${name} — check your downloads`);
+        exportErr = null; renderFallback(lastCompute);   // a clean export re-arms the notice row for the next failure
       } catch (e) {
         console.error('USD export failed:', e);
+        exportErr = `<b>OpenUSD export of shot #${id} failed.</b> ${esc(String(e && e.message || e))} — the stage writer needs the FusionLab server. Check the compute status, then try again.`;
+        exportSeen = false;
+        renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, not console-only
+        flash('bad', 'OpenUSD export failed');
       } finally {
         $('rp-usd').removeAttribute('aria-busy');
       }
@@ -345,7 +399,12 @@
       }
     });
     $('rp-csv').addEventListener('click', () => {
-      if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'));
+      if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'), (e) => {
+        exportErr = `<b>CSV export of shot #${shot.meta.shot_id} failed.</b> ${esc(String(e && e.message || e))} — the export needs the FusionLab server. Check the compute status, then try again.`;
+        exportSeen = false;
+        renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, like a failed USD export
+        flash('bad', 'CSV export failed');
+      });
     });
     // Measured benchmark (HARN-1): runs through the compute provider (remote worker or local fallback)
     // and reports its sections live in the progress readout next to the compute chip.
@@ -390,6 +449,14 @@
     const seen = hintSeen;
     $('rp-hint').hidden = seen();
     $('rp-hint-x').addEventListener('click', () => { $('rp-hint').hidden = true; try { localStorage.setItem('fusionlab-hint', 'seen'); } catch (e) { /* private window */ } });
+    $('rp-load').addEventListener('click', e => {
+      const b = e.target.closest('[data-load]');
+      if (!b || watchId === null) return;
+      if (b.dataset.load === 'retry') { $('rp-shot').value = watchId; return void loadShot(watchId); }
+      SL.drop(watchId);   // Drop: give up on this pick — the chip goes away, the panels keep what they had
+      watchId = null;
+      paintLoadChip();
+    });
 
     // Compute chip (design §7): where compute runs, from a polled /compute status. Never blocks
     // anything — a failed or slow poll keeps the last known state; the next one retries.
@@ -416,16 +483,21 @@
     // re-arms it, so the next failure is announced again. Nothing here blocks replay interactions.
     // Both notices render in the same grid row, so the banner takes the row while it is up: the
     // operational status outranks the onboarding hint, and the hint comes back (per its own
-    // dismissed state) when the banner goes away.
-    let fallbackSeen = false;
+    // dismissed state) when the banner goes away. renderFallback is the single painter — the /compute
+    // poll and the USD export handler only set state — so a poll cannot overwrite a fresh export error.
+    let fallbackSeen = false, exportErr = null, exportSeen = false;
     function renderFallback(s) {
       if (s && !s.fallback) fallbackSeen = false;
-      const show = !!s && !!s.fallback && !fallbackSeen;
+      const compute = !!s && !!s.fallback && !fallbackSeen;   // the compute fallback outranks a failed export
+      const exportFail = !compute && !!exportErr && !exportSeen;
+      const show = compute || exportFail;   // one notice per grid row: it takes the row from the onboarding hint
       $('rp-fallback').hidden = !show;
+      $('rp-fallback').classList.toggle('error', exportFail);   // red edge for the export failure, amber for compute
       $('rp-hint').hidden = show ? true : hintSeen();
-      if (show) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (compute) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
+      if (exportFail) $('rp-fallback-text').innerHTML = exportErr;   // composed at set time, with esc() on the reason
     }
-    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; renderFallback(lastCompute); });
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; exportSeen = true; renderFallback(lastCompute); });
     async function pollCompute() {
       try {
         const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);
@@ -439,11 +511,37 @@
     seg('rp-view', v => { if (use3) window.Vessel3D.setView(v); document.dispatchEvent(new CustomEvent('fusionlab:view', { detail: { view: v } })); });
     $('rp-eq-on').addEventListener('change', () => drawPsi(+$('rp-t').value));
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
+    $('rp-wi-x').addEventListener('click', () => whatIf(false));
+    $('rp-wi').addEventListener('close', finishWhatIf);
+    // Share (audit seed 8): the URL is the state — copy a link that reproduces this view.
+    $('rp-share').addEventListener('click', async () => {
+      const url = await shareUrl();
+      let ok = false;
+      try { await navigator.clipboard.writeText(url); ok = true; }
+      catch (e) {   // clipboard API absent (non-secure context) or refused: fall back to a temp input
+        const inp = document.createElement('input');
+        inp.value = url; document.body.appendChild(inp); inp.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        inp.remove();
+      }
+      if (ok) flash('ok', 'Link copied — paste it to share this view');
+      else flash('bad', 'Copy refused — the address bar still holds this view');
+    });
+    // Field lines are an action, not a given: on by default, off with one click (setLines()).
+    $('rp-lines').addEventListener('click', () => setLines(!linesOn));
+    // Compare lives in its own workspace (spec Workspace 02): navigate there with the shot on screen
+    // preloaded as the reference — one chip in the bar, the prompt to add more beside it.
+    $('rp-cmp-go').addEventListener('click', () => {
+      const h = shot ? '#/compare/' + shot.meta.shot_id : '#/compare';
+      if (location.hash === h) return;
+      location.hash = h;
+      window.FusionLabRouter.route();   // applies the new route synchronously (the async hashchange becomes a no-op)
+    });
     $('rp-wi-reset').addEventListener('click', () => { $('rp-wi-sliders').querySelectorAll('input').forEach(el => { el.value = el.dataset.zero; }); askWhatIf(); });
     const fit = new ResizeObserver(es => es.forEach(e => e.target.data && e.target.offsetParent && Plotly.Plots.resize(e.target)));
-    [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw'].forEach(id => fit.observe($(id)));
+    [...TIME_PLOTS, 'rp-xs', 'rp-te', ...CP_PLOTS, 'cp-te'].forEach(id => fit.observe($(id)));
     fetch('/db').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => { db = j; drawDb(); })
-      .catch(() => { $('tab-db').innerHTML = '<p class="muted">The shot database needs the FusionLab server (/db). Reload to retry.</p>'; });
+      .catch(() => { const el = $('rp-clouds'); if (el) el.innerHTML = '<p class="muted">The shot catalog needs the FusionLab server (/db). Reload to retry.</p>'; });
     // Snapshot the shared link BEFORE initDbSearch(): its searchDb() rewrite canonicalizes ?compare= into
     // numeric order while no live compare exists yet, which silently re-points the reference — the first id
     // of a shared link is the reference and must survive the boot.
@@ -456,10 +554,15 @@
     // An uncached ?shot= id is replayable too — the dropdown list only knows the shipped cache.
     const want = list.shots.find(s => String(s.shot_id) === asked) || (asked ? { shot_id: asked } : null)
       || list.shots.find(s => String(s.shot_id) === '30166') || list.shots[0];
-    if (cmpIds.length >= 2) startCompare(cmpIds);   // compare drives the reference render itself
-    else {
-      if (want) { $('rp-shot').value = want.shot_id; await loadShot(want.shot_id); }
-      if (cmpIds.length === 1) startCompare(cmpIds);   // a one-id link: the prompt shows beside the shot
+    if (cmpIds.length) {
+      // A legacy ?compare= link canonicalizes into the hash grammar and mounts through the router: the
+      // comparison reads in the Compare workspace now, and the route owns Back/Forward and Share.
+      const qs = new URLSearchParams(location.search); qs.delete('shot'); qs.delete('compare');
+      const rest = qs.toString();
+      history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + '#/compare/' + [...new Set(cmpIds)].join(','));
+      window.FusionLabRouter.route();
+    } else if (want) {
+      $('rp-shot').value = want.shot_id; await loadShot(want.shot_id);
     }
     // deep link to a what-if: /?shot=30192&whatif=1&P_nbi=1.3&nbi_shift_s=-0.03 (edits the gate refuses are ignored)
     if (q.get('whatif')) {
@@ -485,7 +588,7 @@
     on = !!on && !!shot;   // nothing to play until a shot has loaded
     $('rp-play').textContent = on ? '❚❚ PAUSE' : '▶ PLAY';
     $('rp-play').classList.toggle('on', !!on);
-    if (!on && was && cmp.on) cmpThomson();   // on pause the compared shots' Thomson profiles catch up with the cursor
+    if (!on && was && cmp.on) cpThomson();   // on pause the compared shots' Thomson profiles catch up with the cursor
     if (!on || !shot) return;
     const slider = $('rp-t');
     if (+slider.value >= +slider.max) { slider.value = 0; scrub(0); }
@@ -528,7 +631,7 @@
     for (let k = 0; k < n; k++) {
       if (!shot || shot.meta.shot_id !== id) return;
       await getPsi(id, k);
-      if (lines3dOk) await getLines(id, k);
+      if (lines3dOk && linesOn) await getLines(id, k);
     }
   }
 
@@ -545,35 +648,69 @@
     } catch { /* offline or not in the archive: the original 404 message stands */ }
   }
 
-  async function loadShot(id) {
-    if (cmp.on) return cmpSetRef(id);   // in compare, every pick — dropdown, search row — re-points the reference
+  async function loadShot(id) {   // the single-shot path: a Replay pick never touches a live compare — the two workspaces are independent
     const seq = ++loadSeq;
+    watchId = id;                       // the status chip follows this pick through the machine's states
     let next;
     try {
-      next = await getReplay(id);
+      next = await SL.fetch(id, signal => getReplay(id, signal));
     } catch (e) {
-      if (seq === loadSeq) {
-        $('rp-shot').value = shot ? String(shot.meta.shot_id) : '';   // the select stays in sync with the panels
-        $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
-      }
-      if (e?.status === 404 && /^\d+$/.test(String(id))) void ensureImported(id);   // bring-your-own-data: a not-yet-imported archive shot imports itself once
+      if (seq !== loadSeq) return;      // a newer pick is in flight; it owns the panels and the chip
+      $('rp-shot').value = shot ? String(shot.meta.shot_id) : '';   // the select stays in sync with the panels
+      $('rp-head').textContent = `#${id} failed to load — ${e.message || 'fetch failed'}`;
+      // bring-your-own-data: a not-yet-imported archive shot imports itself once (only the owning
+      // pick triggers it — a superseded 404 must not re-point the panels mid-pick)
+      if (e?.status === 404 && /^\d+$/.test(String(id))) void ensureImported(id);
       return;
     }
     if (seq !== loadSeq) return;   // a newer pick is in flight: the last click wins, not the last response
-    renderShot(next);
+    if (next) renderShot(next);    // null = superseded: a newer fetch owns the panels
   }
 
+  // Single-shot load chip (spec V6): the machine's states, rendered for the pick a dropdown or deep link
+  // asked for. Fetching shows in the toolbar's status cluster; ready drops the chip away — the rendered
+  // panels are the signal then. An error chip states the reason and offers Retry · Drop.
+  function paintLoadChip() {
+    const chip = $('rp-load');
+    if (!chip) return;
+    const s = watchId === null ? null : SL.get(watchId);
+    if (s === 'fetching') {
+      chip.hidden = false;
+      chip.className = 'status wait';
+      chip.setAttribute('aria-busy', 'true');
+      chip.innerHTML = `loading shot #${watchId}…`;
+    } else if (s === 'error') {
+      chip.hidden = false;
+      chip.className = 'status bad';
+      chip.removeAttribute('aria-busy');
+      chip.innerHTML = `couldn't load #${watchId} — ${esc(SL.errorOf(watchId) || 'fetch failed')}`
+        + ` <button type="button" class="tool" data-load="retry">Retry</button>`
+        + ` <button type="button" class="tool" data-load="drop">Drop</button>`;
+    } else {
+      if (s === 'ready') watchId = null;   // the panels rendered; the chip's job is done
+      chip.hidden = true;
+      chip.removeAttribute('aria-busy');
+      chip.innerHTML = '';
+    }
+  }
+  // The machine repaints its watchers on every transition: the single-load chip here, and the compare
+  // bar's chips (cmpPaint). Both painters are idempotent innerHTML rebuilds.
+  SL.onChange(() => { paintLoadChip(); cmpPaint(); });
+
   // Shared replay payload cache: the compare fan-out and a single pick hit the same promise per shot id.
-  // A failed fetch is not cached — a retry refetches.
+  // A failed fetch is not cached — a retry refetches. Each promise is stored with the signal it was created
+  // under: a fetch under a NEW signal must not adopt an in-flight promise that an older signal is about to
+  // abort (the machine supersedes per shot), so a signal mismatch refetches.
   function getReplay(id, signal) {
     const cached = replayCache.get(id);
-    if (cached) return cached;
-    const p = fetch('/replay/' + id, { signal }).then(async r => {
+    if (cached && (!signal || !cached.signal || cached.signal === signal)) return cached.p;
+    const entry = { p: null, signal: signal || null };
+    entry.p = fetch('/replay/' + id, { signal }).then(async r => {
       if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => null))?.detail || 'HTTP ' + r.status), { status: r.status });
       return r.json();
-    }).catch(e => { replayCache.delete(id); throw e; });
-    replayCache.set(id, p);
-    return p;
+    }).catch(e => { if (replayCache.get(id) === entry) replayCache.delete(id); throw e; });
+    replayCache.set(id, entry);
+    return entry.p;
   }
 
   function renderShot(next) {
@@ -601,13 +738,11 @@
     slider.value = peak;
     document.dispatchEvent(new CustomEvent('fusionlab:shot', { detail: { shot_id: id, n: t.length, heating: m.heating || '' } }));
     scrub(peak);
-    if (cmp.on) { cmpTeSetup(); drawDw(); }   // the difference strip and the other shots' Thomson traces
     Promise.all([getPsi(id, peak), getLines(id, peak)]).then(() => prefetch(id, t.length));
   }
 
-  // The four time strips. P, Ip and — in single-shot mode — W and the limits are the shot's own measured +
-  // model traces; in compare mode W and limits become one measured trace per shot (per-shot colour, legend,
-  // unchanged units) and the reference's model curves step aside while the difference strip carries the rest.
+  // The Replay room's four time strips: the shot's own measured + model traces. The side-by-side compare
+  // read lives in the Compare workspace (drawCmpW/drawCmpLim/drawDw) — this room stays single-shot.
   function drawStrips() {
     const me = shot.measured, mo = shot.model, t = me.t_s;
     Plotly.react('rp-p', [
@@ -615,13 +750,12 @@
       line(t, me.P_nbi_MW, 'Beams (logged peak, box)', C.magenta, { line: { color: C.magenta, width: 2, shape: 'hv' } }),
     ], stripLayout(false), CFG);
     Plotly.react('rp-ip', [line(t, me.Ip_MA, 'Ip', C.blue)], stripLayout(false, { showlegend: false }), CFG);
-    if (cmp.on) { drawCmpW(); drawCmpLim(); return; }
     const ood = shot.domain_bands || [];   // the server's own coordinates: virtual.py's guard on the measured inputs
     Plotly.react('rp-w', [
-      line(t, scale(me.W_MJ, 1e3), 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
-      line(t, scale(mo.W_L_MJ, 1e3), 'ITER89-P (L-mode law)', C.orange),
-      line(t, scale(mo.W_H_MJ, 1e3), 'IPB98(y,2) (H-mode law)', C.yellow),
-      ...(mo.W_hybrid_MJ ? [line(t, scale(mo.W_hybrid_MJ, 1e3), 'IPB98 × PhysicsNeMo correction', C.aqua,
+      line(t, me.W_MJ, 'Measured (EFIT)', C.blue, { line: { color: C.blue, width: 3 } }),
+      line(t, mo.W_L_MJ, 'ITER89-P (L-mode law)', C.orange),
+      line(t, mo.W_H_MJ, 'IPB98(y,2) (H-mode law)', C.yellow),
+      ...(mo.W_hybrid_MJ ? [line(t, mo.W_hybrid_MJ, 'IPB98 × PhysicsNeMo correction', C.aqua,
                                  { line: { color: C.aqua, width: 2, dash: 'dot' } })] : []),
       // the shading's legend label, present exactly when there is something shaded
       // (a [null] point draws nothing but keeps the legend entry — Plotly skips fully-empty traces)
@@ -647,9 +781,11 @@
     if (q.H98_median !== null)
       out.push(`Over ${q.n_steady} near-steady slices the measured confinement time is <b>${fmt(q.H98_median)}×</b> the IPB98(y,2) H-mode law and <b>${fmt(q.H89_median)}×</b> the ITER89-P L-mode law.`);
     const name = LIMIT_LABEL[q.peak_limit] || q.peak_limit;
+    // Limit proximity is drawn twice already — gauges for the instant, the limits strip for the run —
+    // so the prose names the limit and points at them instead of restating the same numbers a third time.
     out.push(q.peak_limit_fraction >= 1
-      ? `<b>${name}</b> limit exceeded: ${fmt(q.peak_limit_fraction)}× at t = ${fmt(q.peak_limit_t_s, 3)} s.`
-      : `Closest approach to a limit: <b>${name}</b> at ${fmt(q.peak_limit_fraction)}× (t = ${fmt(q.peak_limit_t_s, 3)} s).`);
+      ? `The <b>${name}</b> limit is crossed during this shot — its gauge reads red at the crossing, and the limits strip shows when.`
+      : `Closest approach to a limit: <b>${name}</b>. Watch its gauge as you scrub, and read the approach off the limits strip.`);
     if (s.archive?.abort)
       out.push(`The archive flags this shot <b>aborted</b> (catalog bookkeeping) — context for the limit distances above, never a forecast.`);
     // Only claimed for ohmic shots: with beams the energy holds fast ions and the late phase may well be H-mode.
@@ -696,7 +832,7 @@
     const me = shot.measured, mo = shot.model, t = me.t_s[i];
     $('rp-tlabel').textContent = `t = ${fmt(t, 3)} s · ${i + 1}/${me.t_s.length}`;
     const worst = Math.max(...[mo.f_greenwald[i], mo.troyon[i], mo.kink[i]].filter(v => v !== null && isFinite(v)), 0);
-    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 0) + ' kJ';
+    $('rp-w-val').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 2) + ' MJ';
     $('rp-p-val').textContent = fmt((me.P_ohm_MW[i] || 0) + (me.P_nbi_MW[i] || 0), 2) + ' MW';
     $('rp-ip-val').textContent = fmt(me.Ip_MA[i]) + ' MA';
     $('rp-lim-val').textContent = fmt(worst) + '×';
@@ -705,7 +841,7 @@
     $('rp-r-ip').textContent = fmt(me.Ip_MA[i]);
     $('rp-r-n').textContent = fmt(me.n_e20[i], 3);
     $('rp-r-te').textContent = fmt(me.Te0_keV?.[i]);
-    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i] * 1e3, 1);
+    $('rp-r-w').textContent = fmt(me.W_MJ[i] === null ? null : me.W_MJ[i], 3);
     $('rp-r-h').textContent = fmt(mo.H98[i]);
     const L = wi.on && wi.res && !wi.res.is_identity ? wi.res.limits : { greenwald: mo.f_greenwald, troyon: mo.troyon, kink: mo.kink };
     gauge('greenwald', L.greenwald[i]); gauge('troyon', L.troyon[i]); gauge('kink', L.kink[i]);
@@ -716,9 +852,9 @@
     if (shot.lcfs) Plotly.restyle('rp-xs', { x: [shot.lcfs.R[i]], y: [shot.lcfs.Z[i]] }, [n - 2]);
     if (me.R_mag_m) Plotly.restyle('rp-xs', { x: [[me.R_mag_m[i]]], y: [[me.Z_mag_m[i]]] }, [n - 1]);
     if (db) markDb(i);
-    if (use3) window.Vessel3D.setSlice(i, linesNow.get(shot.meta.shot_id + ':' + i));   // boundary follows the slider at once
+    if (use3) window.Vessel3D.setSlice(i, linesOn ? linesNow.get(shot.meta.shot_id + ':' + i) : null);   // boundary follows the slider at once
     clearTimeout(psiTimer);
-    psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); cmpThomson(); }, 40);   // cmpThomson: the compared shots' profiles follow the cursor
+    psiTimer = setTimeout(() => { drawPsi(i); drawLines(i); cpThomsonSoon(); }, 40);   // cpThomson: the compared shots' profiles follow the cursor
     document.dispatchEvent(new CustomEvent('fusionlab:slice', { detail: sliceState(i) }));
   }
 
@@ -740,9 +876,14 @@
 
   async function whatIf(on) {
     const want = !!on && !!shot;
-    if (want && !wi.gate) {
+    if (!want) {   // close: Esc, the ✕ button and programmatic calls (guide.js entering guided) all land here
+      if ($('rp-wi').open) $('rp-wi').close();   // the 'close' listener runs finishWhatIf
+      else finishWhatIf();
+      return;
+    }
+    if (!wi.gate) {
       // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
-      // leave the panel half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
+      // leave the drawer half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
       // refetch on every later click and keep what-if broken until reload.
       let gate = null;
       try {
@@ -751,9 +892,11 @@
         if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
       } catch (e) { /* network failure: the error render just below carries it */ }
       if (!gate) {
-        $('rp-wi').hidden = false;   // open the panel just enough to carry the one-line error
+        $('rp-wi-out').innerHTML = '<p class="muted">The anchored editor needs the FusionLab server (/virtual/gate). <button type="button" class="tool" id="rp-wi-retry">Retry</button></p>';
+        $('rp-wi-retry').addEventListener('click', () => whatIf(true));
         $('rp-whatif').classList.remove('on');
-        $('rp-wi-out').innerHTML = '<p class="muted">What-if needs the FusionLab server (/virtual/gate). Click What-if again to retry.</p>';
+        $('rp-whatif').setAttribute('aria-expanded', 'false');
+        showEditDrawer();   // open the drawer just enough to carry the one-line error and its Retry
         return;
       }
       wi.gate = gate;
@@ -769,12 +912,55 @@
       $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
       $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
-    wi.on = want;
-    $('rp-whatif').classList.toggle('on', wi.on);
-    $('rp-wi').hidden = !wi.on;
-    [...$('cell-st').children].forEach(el => { if (el.id !== 'rp-wi') el.style.display = wi.on && !el.classList.contains('wi-keep') ? 'none' : ''; });   // the limit gauges stay: they follow the what-if
-    if (!wi.on) { wi.res = null; drawWhatIf(); scrub(+$('rp-t').value); return; }
+    wi.on = true;
+    $('rp-whatif').classList.add('on');
+    $('rp-whatif').setAttribute('aria-expanded', 'true');
+    showEditDrawer();
     askWhatIf();
+  }
+
+  // The anchored editor is a modal drawer over the Replay room (spec L2): the state cell, gauges and
+  // logbook underneath stay live — every edit re-flies the model and repaints them. showModal puts it
+  // on the top layer: Esc closes natively (cancel → close) and the rest of the page is inert meanwhile.
+  // Sliders start from the measured programme (data-zero); edits persist across close/reopen because the
+  // drawer's DOM and the memoized gate survive; "Reset edits" restores the measured programme.
+  function showEditDrawer() {
+    if ($('rp-wi').open) return;
+    wi.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;   // focus returns here on close
+    $('rp-wi').showModal();
+  }
+
+  function finishWhatIf() {   // runs from the dialog 'close' event and from whatIf(false) while closed
+    if (wi.on) {
+      wi.on = false;
+      $('rp-whatif').classList.remove('on');
+      $('rp-whatif').setAttribute('aria-expanded', 'false');
+      wi.res = null;
+      if (shot) { drawWhatIf(); scrub(+$('rp-t').value); }   // the strips read the measured programme again
+    }
+    const op = wi.opener; wi.opener = null;
+    if (op && op.isConnected) op.focus();
+  }
+
+  // Transient status chip in the status cluster (role=status): share feedback, USD export progress/result.
+  // ms=0 sticks until the next flash — an in-flight export keeps its chip up while the request runs.
+  let flashTimer = null;
+  function flash(cls, text, ms = 4000) {
+    const el = $('rp-flash');
+    clearTimeout(flashTimer);
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = text;
+    el.hidden = false;
+    if (ms) flashTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  // Share (audit seed 8): the URL is the state — copy a link that reproduces this view. An explicit hash
+  // route reproduces itself; on the bare landing, build the canonical route from the loaded shot and slice.
+  async function shareUrl() {
+    if (/^#\//.test(location.hash)) return location.href;
+    if (!shot) return location.origin + location.pathname;
+    const t = shot.measured.t_s[+$('rp-t').value] || 0;
+    return location.origin + location.pathname + '#/replay/' + shot.meta.shot_id + '?t=' + Number(t.toFixed(3));
   }
   function labelsWhatIf() { WI.forEach(([k, , , , , , f]) => { $('rp-wi-' + k + '-out').textContent = f(+$('rp-wi-' + k).value); }); }
 
@@ -808,13 +994,13 @@
     Plotly.relayout(W, { shapes: (W.layout.shapes || []).filter(s => s.name !== 'ood') });
     $('rp-lim-src').textContent = wi.on && r && !r.is_identity ? 'scaled from the measured values by the what-if · 1.0 = limit' : 'limit formulas on the measured values · 1.0 = limit';
     if (!wi.on || !r) { $('rp-wi-out').innerHTML = ''; return; }
-    const t = r.t_s, k = a => scale(a, 1e3), dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
+    const t = r.t_s, dash = (x, y, name, color, d = 'dash') => line(x, y, name, color, { line: { color, width: 2, dash: d } });
     const band = r.timing_edit ? 0.10 : 0.28;   // a timing edit keeps the real shot's events at their old times: the anchored band is shown faint
     Plotly.addTraces(W, [
-      line(t, k(r.anchored.lo), WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
-      line(t, k(r.anchored.hi), WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
-      Object.assign(dash(t, k(r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2)), WI_TRACES[2], C.magenta), { showlegend: false }),
-      Object.assign(dash(t, k(r.W_refly_MJ), WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
+      line(t, r.anchored.lo, WI_TRACES[0], C.magenta, { line: { color: C.magenta, width: 0 }, showlegend: false, hoverinfo: 'skip' }),
+      line(t, r.anchored.hi, WI_TRACES[1], C.magenta, { fill: 'tonexty', fillcolor: `rgba(213,81,129,${band})`, line: { color: C.magenta, width: 1 }, showlegend: false }),
+      Object.assign(dash(t, r.blind.hi.map((v, i) => v === null ? null : (v + r.blind.lo[i]) / 2), WI_TRACES[2], C.magenta), { showlegend: false }),
+      Object.assign(dash(t, r.W_refly_MJ, WI_TRACES[3], C.ink, 'dot'), { showlegend: false })]);
     // shade the stretches where the learned correction is outside the range it was trained on (ramps, big edits)
     Plotly.relayout(W, { shapes: [...(W.layout.shapes || []), ...oodShapes(oodRuns(t, r.in_distribution), 'ood')] });
     if (!r.is_identity) {
@@ -869,7 +1055,7 @@
   }
 
   async function drawLines(i) {
-    if (!lines3dOk) return;
+    if (!lines3dOk || !linesOn) return;
     const id = shot.meta.shot_id, f = await getLines(id, i);
     if (!f) {
       // Transient failures (a network blip, one 503) leave lines3dOk true and retry on the next scrub; only a
@@ -887,6 +1073,21 @@
     $('rp-q-tr').textContent = fmt(f.q95_traced); $('rp-q-ef').textContent = fmt(f.q95_efit);
     const c = f.shot_check;
     $('rp-3d-note').innerHTML = `Over all ${c.n_compared} slices of this shot the traced q<sub>95</sub> differs from EFIT's by a median <b>${(c.median_rel_err * 100).toFixed(2)}%</b> (95th percentile ${(c.p95_rel_err * 100).toFixed(2)}%), and a line drifts off its flux surface by at most ${c.psi_n_drift_max.toExponential(1)} in ψ<sub>N</sub>. Traced on ${esc(f.device)}.${f.computed_on ? ` <span class="muted">Computed on ${esc(f.computed_on)}.</span>` : ''}`;
+  }
+
+  // Field lines are an action, not a given (shot actions cluster): on by default, off with one click —
+  // the vessel and boundary stay, the lines (and their fetches) stop, and the q95 chips go quiet with them.
+  function setLines(on) {
+    linesOn = !!on;
+    const b = $('rp-lines');
+    b.classList.toggle('on', linesOn);
+    b.setAttribute('aria-pressed', String(linesOn));
+    if (!shot) return;
+    const i = +$('rp-t').value;
+    if (linesOn) { drawLines(i); return; }   // cached slices repaint at once
+    if (use3) window.Vessel3D.setSlice(i, null);
+    else if ($('rp-3d').data) Plotly.restyle('rp-3d', { x: [[]], y: [[]], z: [[]] }, [2, 3, 4, 5, 6]);   // the five line traces; vessel and LCFS stay
+    $('rp-q-tr').textContent = '–'; $('rp-q-ef').textContent = '–';
   }
 
   async function drawPsi(i) {
@@ -907,7 +1108,7 @@
     if (p.thomson) Plotly.restyle('rp-te', { x: [p.thomson.R], y: [p.thomson.Te_keV] }, [0]);
   }
 
-  // ---- shot database: where this shot sits among the others
+  // ---- the catalog: where this shot sits among the others
   function drawDb() {
     const c = db.columns, nbi = c.P_nbi_MW.map(p => p > 0.3);
     $('rp-db-n').textContent = db.n.toLocaleString();
@@ -1001,7 +1202,7 @@
       shared.set('compare', (ref != null ? [ref, ...sel.filter(x => x !== ref)] : sel).join(','));   // selection order: tick order, or the shared link's reference-first order
     }
     const qs = shared.toString();
-    history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+    history.replaceState(null, '', (qs ? '?' + qs : location.pathname) + location.hash);   // the hash is the route — never strip it
   }
 
   function srchReadUrl() {   // a shared link restores the filters, the page and the selection
@@ -1068,12 +1269,9 @@
         || `<tr><td colspan="12" class="muted">No shots match. <button type="button" class="tool" id="rp-srch-empty-clear">Clear the filters</button></td></tr>`}</tbody>`;
   }
 
-  function openReplay(id) {   // a search result clicked: the replay tab already deep-links on ?shot=
-    const shared = new URLSearchParams(location.search);
-    shared.set('shot', id);
-    history.replaceState(null, '', `?${shared}`);
-    window.FusionLab.showTab('replay');
-    window.FusionLab.replay.select(id);
+  function openReplay(id) {   // a search result clicked: the hash grammar owns the route — mount the shot through the router
+    location.hash = '#/replay/' + id;
+    window.FusionLabRouter.route();   // applies the new route synchronously (the async hashchange becomes a no-op)
   }
 
   function srchClear() {
@@ -1102,7 +1300,7 @@
         return searchDb();
       }
       if (e.target.id === 'rp-srch-next') { srchOffset += SRCH_PAGE; return searchDb(); }
-      if (e.target.id === 'rp-srch-cmp') { window.FusionLab.showTab('replay'); return startCompare([...srchSel]); }
+      if (e.target.id === 'rp-srch-cmp') return startCompare([...srchSel]);   // already in the Compare workspace
       const a = e.target.closest('a[data-shot]');
       if (a) { e.preventDefault(); openReplay(a.dataset.shot); }
     });
@@ -1128,14 +1326,14 @@
   // existing per-shot endpoints — the server stays stateless. The reference (first id) keeps the single-shot
   // panels: 3D vessel, equilibrium, what-if, logbook, per-slice psi fetches. Every other shot adds one
   // measured trace per time panel; psi and fieldline fetches stay reference-scoped so the payload stays bounded.
-  function cmpData(id) { return cmp.data.get(id) || (shot && shot.meta.shot_id === id ? shot : null); }
+  function cmpData(id) { return cmp.data.get(id) || (shot && String(shot.meta.shot_id) === String(id) ? shot : null); }
 
   function cmpColor(id) {   // the reference keeps the blue; the rest take the palette slots in selection order
     if (id === cmp.ref) return C.blue;
     return CMP_COLORS[Math.max(0, cmp.ids.filter(x => x !== cmp.ref).indexOf(id)) % CMP_COLORS.length];
   }
 
-  const cmpReadyIds = () => cmp.ids.filter(id => cmp.st.get(id) === 'ready' && cmpData(id));
+  const cmpReadyIds = () => cmp.ids.filter(id => SL.get(id) === 'ready' && cmpData(id));
 
   const cmpUrlParam = () => [cmp.ref, ...cmp.ids.filter(id => id !== cmp.ref)].join(',');
 
@@ -1143,7 +1341,7 @@
     const shared = new URLSearchParams(location.search);
     if (cmp.on && cmp.ref != null && cmp.ids.length) shared.set('compare', cmpUrlParam());
     else shared.delete('compare');
-    history.replaceState(null, '', shared.toString() ? '?' + shared : location.pathname);
+    history.replaceState(null, '', (shared.toString() ? '?' + shared : location.pathname) + location.hash);   // the hash is the route — never strip it
   }
 
   function cmpSyncSel() {   // the db-view checkboxes mirror the live compare selection
@@ -1152,131 +1350,121 @@
     srchPaint();
   }
 
-  function cmpChrome() {   // bar, difference strip and the W-strip note swap on entering/leaving compare
-    const showing = cmp.on && cmp.ids.length >= 2;
-    $('rp-cmp-bar').hidden = !cmp.on;
-    $('rp-dw-strip').hidden = !showing;
-    document.querySelector('#cell-tr .strips').classList.toggle('cmp-on', showing);
-    $('rp-tr-note').textContent = cmp.on ? 'one measured trace per shot' : 'laws are fed the measured power';
-    if (showing) $('rp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">kJ · dashed W/W<sub>ref</sub> · computed</span>`;
+  // The Compare workspace's chrome follows the compare state: the bar, the read panel (vs its empty-state
+  // prompt) and the ΔW strip (only when a difference exists to read — two or more shots).
+  function cpChrome() {
+    $('cp-bar').hidden = !cmp.on;
+    $('cp-empty').hidden = cmp.on;
+    $('cp-strips').hidden = !cmp.on;
+    $('cp-dw-strip').hidden = cmp.ids.length < 2;
   }
 
   async function startCompare(idsIn) {
     cmp.seq++;
-    cmp.ctrls.forEach(c => c.abort());
-    cmp.ctrls.clear();
+    SL.cancelAll();
+    cmp.ids.forEach(id => SL.drop(id));   // the machine forgets the previous batch's per-shot state
     cmp.ids = [...new Set((idsIn || []).map(String).filter(Boolean))].slice(0, SRCH_MAX);   // ids stay strings — imported bundles are not numbers
     cmp.ref = cmp.ids[0] ?? null;
     cmp.on = true;
-    cmp.st.clear(); cmp.err.clear();
-    cmpChrome(); cmpUrl(); cmpSyncSel();
-    if (cmp.ids.length < 2) { cmpPaint(); return; }   // Empty: a prompt with a shortcut back to the catalog
-    // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
-    if (shot && String(shot.meta.shot_id) === String(cmp.ref)) { cmp.st.set(cmp.ref, 'ready'); drawStrips(); scrub(+$('rp-t').value); }
-    for (const id of cmp.ids) {
-      if (cmp.st.get(id) === 'ready') continue;
-      cmp.st.set(id, 'fetching');
-      cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
-    }
-    cmpPaint();
-  }
-
-  // One payload per shot: on resolve, a non-reference shot redraws the overlays; the reference goes through
-  // renderShot like any single pick. An error (or a cancel) lands in the per-shot error list.
-  async function cmpFetch(id, my, onReady) {
-    const ctrl = new AbortController();
-    cmp.ctrls.set(id, ctrl);
-    // Fetch and render are separate try-scopes: a rendering exception must surface as an error in the
-    // console, never masquerade as a fetch failure on the shot.
-    let payload;
-    try {
-      payload = await getReplay(id, ctrl.signal);
-    } catch (e) {
-      if (my !== cmp.seq) return;
-      cmp.st.set(id, 'error');
-      cmp.err.set(id, e?.name === 'AbortError' ? 'fetch cancelled' : (e?.message || 'fetch failed'));
-      cmp.ctrls.delete(id);
-      cmpPaint();
+    watchId = null; paintLoadChip();      // the compare bar owns per-shot state now; the single chip stands down
+    cpChrome(); cmpUrl(); cmpSyncSel();
+    if (cmp.ids.length < 2) {
+      cmpPaint();   // Empty: a prompt with a shortcut back to the catalog
+      // A one-shot compare (the Replay "Compare…" preload, a one-id deep link): the read panel shows
+      // the reference's own measured curves; the bar prompts for more shots to layer in.
+      if (shot && String(shot.meta.shot_id) === String(cmp.ref)) { SL.markReady(cmp.ref); drawCmpAll(); scrub(+$('rp-t').value); }
+      else if (cmp.ref != null) cmpFetch(cmp.ref, p => renderShot(p));
       return;
     }
-    if (my !== cmp.seq) return;
-    cmp.data.set(id, payload);
-    cmp.st.set(id, 'ready');
-    cmp.err.delete(id);
-    cmp.ctrls.delete(id);
-    if (onReady) onReady(payload);
-    else if (id !== cmp.ref) { drawCmpW(); drawCmpLim(); drawDw(); cmpThomson(); }
-    if (my === cmp.seq) cmpPaint();
+    // The reference renders through the same path as a single pick; it may already be on screen (?shot= deep link).
+    if (shot && String(shot.meta.shot_id) === String(cmp.ref)) { SL.markReady(cmp.ref); drawCmpAll(); scrub(+$('rp-t').value); }
+    for (const id of cmp.ids) {
+      if (SL.get(id) === 'ready') continue;
+      cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null);
+    }
+    cmpPaint();
   }
 
-  async function cmpSetRef(id) {   // chips, dropdown picks and search rows all land here
-    if (!cmp.ids.includes(id)) {   // a pick from outside the set: back to the single-shot view, selection kept
-      exitCompare();
-      return loadShot(id);
+  // One payload per shot, fetched under the shared machine — supersede and honest errors are its to record.
+  // On resolve the side-by-side read repaints around the new shot; the reference ALSO goes through
+  // renderShot like any single pick. Fetch and render stay separate try-scopes: a rendering exception must
+  // surface as an error in the console, never masquerade as a fetch failure on the shot.
+  async function cmpFetch(id, onReady) {
+    let payload;
+    try {
+      payload = await SL.fetch(id, signal => getReplay(id, signal));
+    } catch (e) {
+      return;   // the machine recorded the error; the onChange listener repainted the bar with Retry/Drop
     }
+    if (payload === null || !cmp.on) return;   // superseded, or compare exited while the fetch was in flight
+    cmp.data.set(id, payload);
+    if (onReady) onReady(payload);
+    drawCmpAll();
+    cmpPaint();
+  }
+
+  async function cmpSetRef(id) {   // the compare chips land here (a Replay pick never re-points the compare)
+    if (!cmp.ids.includes(id)) return null;   // chips are always in the set; a stray call re-points nothing
     const my = ++loadSeq;          // the same last-click-wins guard the single-shot pick uses
-    if (id !== cmp.ref) { cmp.ref = id; cmpUrl(); cmpChrome(); }
+    if (id !== cmp.ref) { cmp.ref = id; cmpUrl(); }
     if (shot && String(shot.meta.shot_id) === String(id)) {
-      drawStrips(); drawDw(); scrub(+$('rp-t').value);
-      cmpPaint();
+      drawCmpAll(); scrub(+$('rp-t').value);
+      cmpPaint();   // repaint NOW: a reference move must not leave a stale failure header over the new state
       return sliceState(+$('rp-t').value);
     }
-    if (cmp.st.get(id) === 'ready') { renderShot(cmpData(id)); return sliceState(+$('rp-t').value); }
-    cmp.st.set(id, 'fetching');    // the reference itself still has to arrive (the Failed state retries through here)
-    cmp.err.delete(id);
-    cmpPaint();
-    await cmpFetch(id, cmp.seq, p => { if (my === loadSeq) renderShot(p); });
-    return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+    if (SL.get(id) === 'ready') { renderShot(cmpData(id)); cmpPaint(); return sliceState(+$('rp-t').value); }
+    // the reference itself still has to arrive (the Failed state retries through here); the machine paints
+    // 'fetching' on entry
+    await cmpFetch(id, p => { if (my === loadSeq) renderShot(p); });
+    return shot && String(shot.meta.shot_id) === String(id) ? sliceState(+$('rp-t').value) : null;
   }
 
   function cmpDrop(id) {   // from the Partial/Failed error list, or when the selection drops below two
     cmp.ids = cmp.ids.filter(x => x !== id);
-    cmp.st.delete(id); cmp.err.delete(id); cmp.data.delete(id);
-    const ctrl = cmp.ctrls.get(id);
-    if (ctrl) { ctrl.abort(); cmp.ctrls.delete(id); }
+    cmp.data.delete(id);
+    SL.drop(id);           // the machine aborts a still-in-flight fetch and forgets the shot's state
     if (cmp.ref === id) {
-      cmp.ref = (cmp.ids.find(x => cmp.st.get(x) === 'ready') ?? cmp.ids[0]) ?? null;
-      cmpChrome();
+      cmp.ref = (cmp.ids.find(x => SL.get(x) === 'ready') ?? cmp.ids[0]) ?? null;
       const next = cmpData(cmp.ref);
-      if (next && shot && shot.meta.shot_id !== cmp.ref) renderShot(next);
-      else if (next) { drawStrips(); drawDw(); scrub(+$('rp-t').value); }
+      if (next && shot && String(shot.meta.shot_id) !== String(cmp.ref)) renderShot(next);
+      else if (next) { drawCmpAll(); scrub(+$('rp-t').value); }
     }
-    cmpChrome(); cmpUrl(); cmpSyncSel(); cmpTeSetup(); drawCmpW(); drawCmpLim(); drawDw(); cmpPaint();
+    cpChrome(); cmpUrl(); cmpSyncSel(); cmpPaint();
+    drawCmpAll();
   }
 
   function exitCompare() {
     if (!cmp.on) return;
     cmp.seq++;
-    cmp.ctrls.forEach(c => c.abort());
-    cmp.ctrls.clear();
+    SL.cancelAll();
+    cmp.ids.forEach(id => SL.drop(id));   // the machine forgets this batch
     cmp.on = false;
-    cmp.ids = []; cmp.ref = null; cmp.st.clear(); cmp.err.clear(); cmp.data.clear();
-    cmpUrl(); cmpChrome();
-    srchPaint();               // the checkboxes stay; the compare button can re-enter
-    if (shot) { drawStrips(); drawSection(); scrub(+$('rp-t').value); }
+    cmp.ids = []; cmp.ref = null; cmp.data.clear();
+    cmpUrl(); cpChrome(); cmpSyncSel();   // the checkboxes stay; the selection can be rebuilt from the catalog
   }
 
   function cmpPaint() {   // the compare bar: per-shot chips, the state, and the actions the state allows
     if (!cmp.on) return;
     const n = cmp.ids.length;
-    const readyN = cmp.ids.filter(id => cmp.st.get(id) === 'ready').length;
-    const fetching = cmp.ids.some(id => (cmp.st.get(id) || 'queued') !== 'ready' && cmp.st.get(id) !== 'error');
-    const failed = cmp.ids.filter(id => cmp.st.get(id) === 'error');
+    const readyN = cmp.ids.filter(id => SL.get(id) === 'ready').length;
+    const fetching = cmp.ids.some(id => (SL.get(id) || 'queued') !== 'ready' && SL.get(id) !== 'error');
+    const failed = cmp.ids.filter(id => SL.get(id) === 'error');
     const STATE = { queued: 'queued', fetching: 'fetching from the archive…', ready: 'ready', error: 'failed' };
     const chips = n ? cmp.ids.map(id => {
-      const s = cmp.st.get(id) || 'queued';
+      const s = SL.get(id) || 'queued';
       const cls = s === 'ready' ? 'ok' : s === 'error' ? 'bad' : 'wait';
       const ref = id === cmp.ref;
       return `<button type="button" class="cmp-chip ${cls}${ref ? ' ref' : ''}" data-ref="${id}" ${ref ? '' : 'title="Make this the reference"'}>`
         + `<b>#${id}</b>${ref ? ' · reference' : ''} — ${STATE[s]}</button>`;
     }).join('') : '<span class="muted">no shots selected</span>';
-    const errs = failed.map(id => `<div class="cmp-err"><b>#${id}</b> — ${esc(cmp.err.get(id) || 'failed')}
+    const errs = failed.map(id => `<div class="cmp-err"><b>#${id}</b> — ${esc(SL.errorOf(id) || 'failed')}
       <button type="button" class="tool" data-retry="${id}">Retry</button>
       <button type="button" class="tool" data-drop="${id}">Drop</button></div>`).join('');
-    $('rp-cmp-bar').innerHTML =
+    $('cp-bar').innerHTML =
       `<span class="cmp-title">Compare ${readyN}/${n}</span><span class="cmp-chips">${chips}</span>`
       + `<span class="cmp-actions">${fetching ? '<button type="button" class="tool" data-act="cancel">Cancel</button>' : ''}`
       + `${failed.length ? '<button type="button" class="tool" data-act="retry">Retry failed</button>' : ''}`
+      + '<button type="button" class="tool" data-act="share" title="Copy a link that reopens this comparison: the route, the filters, the selection">Share</button>'
       + `${readyN && !fetching ? '<button type="button" class="tool" data-act="export" title="Take-away export of every ready shot: one CSV, one row per shot, slice and quantity, each labelled with its provenance.">↓ CSV export</button>' : ''}`
       + '<button type="button" class="tool" data-act="exit">Exit compare</button></span>'
       + (n < 2 ? '<span class="cmp-note">Pick 2–6 shots — tick them in <button type="button" class="tool" data-act="search">the catalog</button> and they join this compare.</span>'
@@ -1284,55 +1472,79 @@
       + (failed.includes(cmp.ref) ? '<div class="cmp-err">The reference failed, so the overlays are incomplete — retry it or click a ready shot to make it the reference.</div>' : '');
   }
 
-  $('rp-cmp-bar').addEventListener('click', e => {
+  // The compare view IS its URL (route + filters + selection): Share copies it, with the same clipboard
+  // fallback as the Replay share — non-secure contexts refuse the async API.
+  async function shareCompare(button) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(location.href); ok = true; }
+    catch (e) {
+      const inp = document.createElement('input');
+      inp.value = location.href; document.body.appendChild(inp); inp.select();
+      try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+      inp.remove();
+    }
+    button.textContent = ok ? 'Copied ✓' : 'Copy refused';
+    setTimeout(() => { button.textContent = 'Share'; }, 1500);
+  }
+
+  $('cp-bar').addEventListener('click', e => {
     const chip = e.target.closest('[data-ref]');
     if (chip) return void cmpSetRef(chip.dataset.ref);
     const b = e.target.closest('[data-act],[data-retry],[data-drop]');
     if (!b) return;
-    if (b.dataset.act === 'cancel') { cmp.ctrls.forEach(c => c.abort()); return; }   // fetched shots stay plotted
+    if (b.dataset.act === 'cancel') return SL.cancelAll();   // fetched shots stay plotted
     if (b.dataset.act === 'exit') return exitCompare();
-    if (b.dataset.act === 'search') return window.FusionLab.showTab('db');
+    if (b.dataset.act === 'search') return $('rp-srch-panel').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    if (b.dataset.act === 'share') return void shareCompare(b);
     if (b.dataset.act === 'export') {   // every ready shot, reference first (cmp.ids order)
       const ids = cmpReadyIds();
-      return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b);
+      return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b, () => {
+        b.textContent = 'Export failed';   // the bar's own idiom: Share shows 'Copy refused' the same way
+        setTimeout(() => { b.textContent = '↓ CSV export'; }, 2500);
+      });
     }
+    if (b.dataset.act === 'retry')   // "Retry failed": every failed chip refetches under the shared machine
+      return void cmp.ids.filter(x => SL.get(x) === 'error').forEach(id => cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null));
     if (b.dataset.retry) {
       const id = b.dataset.retry;
-      cmp.st.set(id, 'fetching'); cmp.err.delete(id); cmpPaint();
-      return void cmpFetch(id, cmp.seq, id === cmp.ref ? p => renderShot(p) : null);
+      return void cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null);   // the machine paints 'fetching' on entry
     }
     if (b.dataset.drop) return cmpDrop(b.dataset.drop);
   });
 
-  // rp-te carries one trace per compared shot: index 0 is the reference's, as in single-shot mode.
-  const cmpTeIdx = id => 1 + cmp.ids.filter(x => x !== cmp.ref).indexOf(id);
+  let cpTimer = null;
+  const cpThomsonSoon = () => { clearTimeout(cpTimer); cpTimer = setTimeout(cpThomson, 150); };
 
-  function cmpTeSetup() {
-    const el = $('rp-te');
-    if (!el.data || !cmp.on) return;
-    const want = 1 + cmp.ids.filter(id => id !== cmp.ref).length;
-    while (el.data.length > want) Plotly.deleteTraces(el, el.data.length - 1);
-    while (el.data.length < want) Plotly.addTraces(el, { x: [], y: [], mode: 'markers', name: '', hoverinfo: 'skip', marker: { size: 5 } });
-  }
-
-  // The compared shots' Thomson profiles follow the shared cursor (the reference's own slice fetch is the
-  // existing drawPsi path). Uncached slices arrive from the server's per-slice cache — no new endpoints.
-  async function cmpThomson() {
-    if (!cmp.on || !shot) return;
-    const tCursor = shot.measured.t_s[+$('rp-t').value] ?? 0;
+  // The compared shots' Thomson profiles, on ONE plot in the Compare workspace: one profile per shot at
+  // its nearest slice to the shared cursor, the reference included (in its own blue). Uncached slices
+  // arrive from the server's per-slice cache — no new endpoints. Playback skips the per-shot fetches;
+  // the pause handler catches up.
+  async function cpThomson() {
+    if (!cmp.on || !shot || playTimer) return;
+    const ref = cmpData(cmp.ref);
+    if (!ref) return;
+    const tCursor = (cursorT !== null && isFinite(cursorT) ? cursorT : null) ?? ref.measured.t_s[+$('rp-t').value] ?? 0;
+    const traces = [];
     for (const id of cmp.ids) {
-      if (id === cmp.ref) continue;
       const d = cmpData(id);
-      if (!d || cmp.st.get(id) !== 'ready') continue;
-      if (playTimer) continue;   // playback: the reference's profile follows the slider; the others catch up on pause
+      if (!d || SL.get(id) !== 'ready') continue;
       const t = d.measured.t_s;
       let k = 0;
       for (let j = 1; j < t.length; j++) if (Math.abs(t[j] - tCursor) < Math.abs(t[k] - tCursor)) k = j;
       const p = await getPsi(id, k);
-      if (!p || !p.thomson || !cmp.on) continue;
-      Plotly.restyle('rp-te', { x: [p.thomson.R], y: [p.thomson.Te_keV], name: [`#${id} Te (measured)`],
-                                marker: { size: 5, color: cmpColor(id) } }, [cmpTeIdx(id)]);
+      if (!p || !p.thomson || !cmp.on) continue;   // compare exited mid-fetch: drop the stale paint
+      const c = cmpColor(id), refShot = id === cmp.ref;
+      traces.push({ x: p.thomson.R, y: p.thomson.Te_keV, mode: 'markers',
+                    name: `#${id} measured${refShot ? ' · reference' : ''}`, marker: { size: 5, color: c } });
     }
+    Plotly.react('cp-te', traces, base({ hovermode: 'closest', margin: { l: 44, r: 12, t: 18, b: 28 },
+      xaxis: { gridcolor: C.grid, zeroline: false, range: [0.2, 1.5], title: { text: 'R (m)', standoff: 2 } },
+      yaxis: { gridcolor: C.grid, zeroline: false, rangemode: 'tozero', title: { text: 'T<sub>e</sub> (keV)' } } }), CFG);
+  }
+
+  // The side-by-side read: W, limits, ΔW and the T_e profiles — every compare repaint funnels here.
+  function drawCmpAll() {
+    drawCmpW(); drawCmpLim(); drawDw(); cpThomsonSoon();
   }
 
   // W and limits: one measured trace per shot, per-shot colour, legend, unchanged units. The limits panel
@@ -1340,10 +1552,10 @@
   function drawCmpW() {
     const traces = cmpReadyIds().map(id => {
       const d = cmpData(id), c = cmpColor(id), ref = id === cmp.ref;
-      return line(d.measured.t_s, scale(d.measured.W_MJ, 1e3), `#${id} measured${ref ? ' · reference' : ''}`, c,
+      return line(d.measured.t_s, d.measured.W_MJ, `#${id} measured${ref ? ' · reference' : ''}`, c,
                   { line: { color: c, width: ref ? 3 : 2 } });
     });
-    Plotly.react('rp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);
+    Plotly.react('cp-w', traces, stripLayout(false, { margin: { l: 44, r: 64, t: 32, b: 4 } }), CFG);   // four legend entries: two rows
     redrawCursor();
   }
 
@@ -1354,7 +1566,7 @@
         { line: { color: c, width: ref ? 3 : 2 }, customdata: d.model.binding.map(b => LIMIT_LABEL[d.limit_names[b]] || ''),
           hovertemplate: '%{customdata} at %{x:.3f} s: %{y:.2f}× limit<extra>#' + id + '</extra>' });
     });
-    Plotly.react('rp-lim', traces, stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
+    Plotly.react('cp-lim', traces, stripLayout(true, { yaxis: { gridcolor: C.grid, zeroline: false, range: [0, 1.3] },
               shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 1, y1: 1, line: { color: C.muted, width: 1, dash: 'dash' } }] }), CFG);
     redrawCursor();
   }
@@ -1374,27 +1586,28 @@
     return out;
   }
 
-  // The difference strip: ΔW(t) in kJ (solid) and W/W_ref (dotted, right axis), both computed from the
+  // The difference strip: ΔW(t) in MJ (solid) and W/W_ref (dotted, right axis), both computed from the
   // measured EFIT stored energies relative to the reference shot.
   function drawDw() {
     if (!cmp.on) return;
     const ref = cmpData(cmp.ref);
     if (!ref) return;
+    $('cp-dw-label').innerHTML = `ΔW vs #${cmp.ref} <span class="dim">MJ · dashed W/W<sub>ref</sub> · computed</span>`;
     const t0 = ref.measured.t_s, W0 = ref.measured.W_MJ;
     const traces = [];
     for (const id of cmp.ids) {
       if (id === cmp.ref) continue;
       const d = cmpData(id);
       if (!d) continue;
-      const Wi = cmp.st.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
+      const Wi = SL.get(id) === 'ready' ? interpOnto(t0, d.measured.t_s, d.measured.W_MJ) : null;
       const c = cmpColor(id);
-      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i]) * 1e3) : [],
+      traces.push(line(t0, Wi ? Wi.map((w, i) => w == null || W0[i] == null ? null : (w - W0[i])) : [],
                        `ΔW #${id} − #${cmp.ref} (computed)`, c, { line: { color: c, width: 2 } }));
       traces.push(line(t0, Wi ? Wi.map((w, i) => (!w || W0[i] == null) ? null : w / W0[i]) : [],
                        `#${id} / #${cmp.ref} W (computed)`, c,
                        { line: { color: c, width: 1.5, dash: 'dot' }, yaxis: 'y2', showlegend: false }));
     }
-    Plotly.react('rp-dw', traces, stripLayout(true, {
+    Plotly.react('cp-dw', traces, stripLayout(true, {
       margin: { l: 44, r: 64, t: 18, b: 30 },
       yaxis: { gridcolor: C.grid, zeroline: true, zerolinecolor: C.muted, tickfont: { size: 10 } },
       yaxis2: { overlaying: 'y', side: 'right', showgrid: false, zeroline: false, tickfont: { size: 10, color: C.muted } },
@@ -1406,20 +1619,22 @@
   // scrub and by hover on any panel — the panel-to-panel sync the compare view is read through.
   // The compare re-draws (Plotly.react) rebuild each panel and wipe the cursor shape, so the cursor
   // time is tracked and re-drawn after every overlay update.
+  const CP_PLOTS = ['cp-w', 'cp-lim', 'cp-dw'];
   let cursorT = null;
   function drawCursor(tSec) {
     cursorT = tSec;
     const cursor = { type: 'line', xref: 'x', yref: 'paper', x0: tSec, x1: tSec, y0: 0, y1: 1, line: { color: C.ink, width: 1 } };
-    [...TIME_PLOTS, ...($('rp-dw').data ? ['rp-dw'] : [])].forEach(id => {
+    [...TIME_PLOTS, ...(cmp.on ? CP_PLOTS : [])].forEach(id => {
       if (!$(id).layout) return;   // a panel mid-boot: no shapes to preserve, skip it
       const keep = ($(id).layout.shapes || []).filter(s => s.xref === 'paper' || (s.name || '').endsWith('ood'));   // persistent refs + both shadings
       Plotly.relayout(id, { shapes: [...keep, cursor] });
     });
   }
-  [...TIME_PLOTS, 'rp-dw'].forEach(id => {
+  [...TIME_PLOTS, ...CP_PLOTS].forEach(id => {
     // Hover moves the shared cursor and leaves it at the last hovered time — no unhover redraw: a
     // relayout under the mouse fires a spurious plotly_unhover, which would race the sync loop.
-    $(id).addEventListener('plotly_hover', e => { const x = e?.points?.[0]?.x; if (x != null) drawCursor(x); });
+    // Hovering either workspace's time panels also re-points the compared T_e profiles (cpThomson).
+    $(id).addEventListener('plotly_hover', e => { const x = e?.points?.[0]?.x; if (x != null) { drawCursor(x); cpThomsonSoon(); } });
   });
 
   // A Plotly.react rebuild (any compare overlay update) wipes cursor shapes — every compare re-draw
@@ -1435,9 +1650,9 @@
     if (use3) { $('rp-3d-panel').hidden = false; scrub(+$('rp-t').value); }
   });
   document.addEventListener('fusionlab:tab', e => {
-    if (e.detail !== 'replay' && e.detail !== 'db') return;
+    if (e.detail !== 'replay' && e.detail !== 'compare') return;
     init().then(() => {
-      [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-dw', 'rp-3d', 'rp-db-tau', 'rp-db-ops'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
+      [...TIME_PLOTS, 'rp-xs', 'rp-te', 'rp-3d', 'rp-db-tau', 'rp-db-ops', ...CP_PLOTS, 'cp-te'].forEach(id => $(id).data && $(id).offsetParent && Plotly.Plots.resize(id));
       if (use3) window.Vessel3D.resize();
     }).catch(() => { /* the failure is already rendered in the replay cell; the next tab entry retries */ });
   });
@@ -1446,9 +1661,9 @@
     async select(id) {   // resolves once the shot is drawn; a no-op when it is already up
       try {
         await init();
-        if (shot && shot.meta.shot_id === id) return sliceState(+$('rp-t').value);
+        if (shot && String(shot.meta.shot_id) === String(id)) return sliceState(+$('rp-t').value);
         play(false); $('rp-shot').value = id; await loadShot(id);
-        return shot && shot.meta.shot_id === id ? sliceState(+$('rp-t').value) : null;
+        return shot && String(shot.meta.shot_id) === String(id) ? sliceState(+$('rp-t').value) : null;
       } catch (e) {
         return null;   // a failed init/load renders its own error in the replay cell; the guide gets null, not a rejection
       }
@@ -1464,6 +1679,9 @@
     view(v) { const b = $('rp-view').querySelector(`button[data-v="${v}"]`); if (b && !$('rp-view').hidden) b.click(); },
     state: () => (shot ? sliceState(+$('rp-t').value) : null),
     whatIf: on => whatIf(on),
+    compare(ids) {   // public hook for the router's #/compare/{ids} deep links (workspaces.js)
+      return init().then(() => startCompare(ids));
+    },
   } });
 
   if (!root.hidden) init().catch(() => { /* rendered in the replay cell; retried on the next tab entry */ });

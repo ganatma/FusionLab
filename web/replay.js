@@ -293,7 +293,7 @@
 
   // Take-away CSV download (FEAT-1): fetch the export route, then hand the blob to the browser the way
   // the USD stage does. The server names the file via Content-Disposition; `name` is only the fallback.
-  async function dlExport(url, name, btn) {
+  async function dlExport(url, name, btn, onErr) {
     btn?.setAttribute('aria-busy', 'true');
     try {
       const r = await fetch(url);
@@ -304,7 +304,8 @@
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
-      console.error('CSV export failed:', e);
+      console.error('CSV export failed:', e);   // dev visibility; the caller owns the user-facing surface
+      if (onErr) onErr(e);
     } finally {
       btn?.removeAttribute('aria-busy');
     }
@@ -359,11 +360,11 @@
         a.click();
         URL.revokeObjectURL(a.href);
         flash('ok', `Exported ${name} — check your downloads`);
-        usdErr = null; renderFallback(lastCompute);   // a clean export re-arms the notice row for the next failure
+        exportErr = null; renderFallback(lastCompute);   // a clean export re-arms the notice row for the next failure
       } catch (e) {
         console.error('USD export failed:', e);
-        usdErr = `<b>OpenUSD export of shot #${id} failed.</b> ${esc(String(e && e.message || e))} — the stage writer needs the FusionLab server. Check the compute status, then try again.`;
-        usdSeen = false;
+        exportErr = `<b>OpenUSD export of shot #${id} failed.</b> ${esc(String(e && e.message || e))} — the stage writer needs the FusionLab server. Check the compute status, then try again.`;
+        exportSeen = false;
         renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, not console-only
         flash('bad', 'OpenUSD export failed');
       } finally {
@@ -398,7 +399,12 @@
       }
     });
     $('rp-csv').addEventListener('click', () => {
-      if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'));
+      if (shot) dlExport(`/export/${shot.meta.shot_id}`, `fusionlab_shot_${shot.meta.shot_id}.csv`, $('rp-csv'), (e) => {
+        exportErr = `<b>CSV export of shot #${shot.meta.shot_id} failed.</b> ${esc(String(e && e.message || e))} — the export needs the FusionLab server. Check the compute status, then try again.`;
+        exportSeen = false;
+        renderFallback(lastCompute);   // surfaced in the fallback banner + status chip, like a failed USD export
+        flash('bad', 'CSV export failed');
+      });
     });
     // Measured benchmark (HARN-1): runs through the compute provider (remote worker or local fallback)
     // and reports its sections live in the progress readout next to the compute chip.
@@ -479,19 +485,19 @@
     // operational status outranks the onboarding hint, and the hint comes back (per its own
     // dismissed state) when the banner goes away. renderFallback is the single painter — the /compute
     // poll and the USD export handler only set state — so a poll cannot overwrite a fresh export error.
-    let fallbackSeen = false, usdErr = null, usdSeen = false;
+    let fallbackSeen = false, exportErr = null, exportSeen = false;
     function renderFallback(s) {
       if (s && !s.fallback) fallbackSeen = false;
       const compute = !!s && !!s.fallback && !fallbackSeen;   // the compute fallback outranks a failed export
-      const usd = !compute && !!usdErr && !usdSeen;
-      const show = compute || usd;   // one notice per grid row: it takes the row from the onboarding hint
+      const exportFail = !compute && !!exportErr && !exportSeen;
+      const show = compute || exportFail;   // one notice per grid row: it takes the row from the onboarding hint
       $('rp-fallback').hidden = !show;
-      $('rp-fallback').classList.toggle('error', usd);   // red edge for the export failure, amber for compute
+      $('rp-fallback').classList.toggle('error', exportFail);   // red edge for the export failure, amber for compute
       $('rp-hint').hidden = show ? true : hintSeen();
       if (compute) $('rp-fallback-text').innerHTML = `<b>Remote compute unavailable — running on Local CPU.</b> ${esc(s.reason || '')}`;
-      if (usd) $('rp-fallback-text').innerHTML = usdErr;   // composed at set time, with esc() on the reason
+      if (exportFail) $('rp-fallback-text').innerHTML = exportErr;   // composed at set time, with esc() on the reason
     }
-    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; usdSeen = true; renderFallback(lastCompute); });
+    $('rp-fallback-x').addEventListener('click', () => { fallbackSeen = true; exportSeen = true; renderFallback(lastCompute); });
     async function pollCompute() {
       try {
         const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), COMPUTE_TIMEOUT_MS);
@@ -1492,7 +1498,10 @@
     if (b.dataset.act === 'share') return void shareCompare(b);
     if (b.dataset.act === 'export') {   // every ready shot, reference first (cmp.ids order)
       const ids = cmpReadyIds();
-      return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b);
+      return dlExport(`/export?shots=${ids.join(',')}`, `fusionlab_shots_${ids.join('_')}.csv`, b, () => {
+        b.textContent = 'Export failed';   // the bar's own idiom: Share shows 'Copy refused' the same way
+        setTimeout(() => { b.textContent = '↓ CSV export'; }, 2500);
+      });
     }
     if (b.dataset.act === 'retry')   // "Retry failed": every failed chip refetches under the shared machine
       return void cmp.ids.filter(x => SL.get(x) === 'error').forEach(id => cmpFetch(id, id === cmp.ref ? p => renderShot(p) : null));

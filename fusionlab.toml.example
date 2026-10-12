@@ -1,7 +1,9 @@
 # FusionLab compute configuration (optional). Copy to fusionlab.toml at the repo root, beside .env.
 # Every value can also be set with a FUSIONLAB_* environment variable (see .env.example); the env
 # var wins over this file. Neither place ever holds a key, password, or token — the connection uses
-# the user's own SSH config, agent, and keys (design §8).
+# the user's own SSH config, agent, and keys (design §8). The worker's shared token is env-only by
+# design (FUSIONLAB_WORKER_TOKEN in .env, both ends); a credential-shaped key in this file is a
+# loud config error, never a silently-carried option.
 
 [compute]
 # "local" (default): compute runs in this process — zero config, works offline.

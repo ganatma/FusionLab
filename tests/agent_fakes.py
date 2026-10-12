@@ -1,10 +1,12 @@
 """Shared scripted fakes for the agent tests: a stub Messages client standing in behind the
-fusionlab.agent._client seam, and the SSE reader a browser would run. No SDK, no network."""
+fusionlab.agent._client seam, the SSE reader a browser would run, and the one-time recording
+client that captures a live session into a golden fixture. No SDK, no network (imported here)."""
 
 from __future__ import annotations
 
 import copy
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -73,6 +75,48 @@ class ExplodingClient:
 
     def stream(self, **kwargs: Any) -> FakeStream:
         raise RuntimeError("api down")
+
+
+class RecordingClient(FakeClient):
+    """The capture half of the golden-trace harness (tests/test_agent_golden.py): wraps a real
+    Messages client, writes down every round it streams — the deltas and the final blocks — and
+    serializes the session into the golden fixture format via to_trace(). Recording is a one-time,
+    key-bearing operation done by hand (monkeypatch fusionlab.agent._client with a lambda that
+    wraps the real client); CI only replays the committed fixtures and never constructs this class.
+
+    The wrapped client only needs the slice the loop uses: .messages.stream(**kwargs) as a context
+    manager exposing text_stream and get_final_message() — the real SDK client, or FakeClient in a
+    test. Nothing here imports the SDK; the wrapper is duck-typed.
+    """
+
+    def __init__(self, wrapped: Any) -> None:
+        super().__init__([])
+        self.wrapped = wrapped
+
+    def stream(self, **kwargs: Any) -> FakeStream:
+        # override the replay pop: recording appends what the wrapped client actually returned
+        with self.wrapped.messages.stream(**kwargs) as stream:
+            deltas = list(stream.text_stream)
+            final = stream.get_final_message()
+        blocks = [b if isinstance(b, dict) else b.model_dump() for b in final.content]
+        self.script.append((deltas, blocks))
+        self.calls.append(copy.deepcopy(kwargs))
+        return FakeStream(deltas, blocks)
+
+    def to_trace(self, message: str, history: list[dict[str, str]],
+                 recorded_at: str | None = None) -> dict[str, Any]:
+        """The fixture format: {message, history, script: [{deltas, blocks}], recorded_model,
+        recorded_at}. recorded_model comes from the first recorded call — the model that actually
+        ran. Recording nothing first is an IndexError on purpose: no session, no trace."""
+        if not self.calls:
+            raise IndexError("nothing was recorded; to_trace needs a streamed session")
+        return {
+            "message": message,
+            "history": [dict(m) for m in history],
+            "script": [{"deltas": list(d), "blocks": [dict(b) for b in blocks]} for d, blocks in self.script],
+            "recorded_model": str(self.calls[0]["model"]),
+            "recorded_at": recorded_at or datetime.now(UTC).isoformat(),
+        }
 
 
 def parse_sse(text: str) -> list[dict[str, Any]]:

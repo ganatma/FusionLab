@@ -1,0 +1,35 @@
+{
+  "message": "Roughly how big is the archive, and how close does shot 30166 come to its operating limits? Work from the catalog, not memory.",
+  "history": [],
+  "script": [
+    {
+      "deltas": ["Let me size the catalog first."],
+      "blocks": [
+        {"type": "text", "text": "Let me size the catalog first."},
+        {"type": "tool_use", "id": "tu_1", "name": "search_shots", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["Found it. Now the shot itself."],
+      "blocks": [
+        {"type": "text", "text": "Found it. Now the shot itself."},
+        {"type": "tool_use", "id": "tu_2", "name": "load_shot", "input": {"shot_id": "30166"}}
+      ]
+    },
+    {
+      "deltas": ["And its limit distances."],
+      "blocks": [
+        {"type": "text", "text": "And its limit distances."},
+        {"type": "tool_use", "id": "tu_3", "name": "limit_distances", "input": {"shot_id": 30166}}
+      ]
+    },
+    {
+      "deltas": ["The catalog holds 15,969 shots; the search page shows the first 200 in ascending shot_id order — the archive has no sort control. Shot 30166's closest approaches over its time base: Greenwald density 0.243× at t = 0.365 s, Troyon β_N 0.096× and kink (q95 < 2) 0.167× at t = 0.03 s, and no operating limit is crossed — a distance, never a forecast of a disruption. As ever, the twin is compared with MAST data, not a prediction."],
+      "blocks": [
+        {"type": "text", "text": "The catalog holds 15,969 shots; the search page shows the first 200 in ascending shot_id order — the archive has no sort control. Shot 30166's closest approaches over its time base: Greenwald density 0.243× at t = 0.365 s, Troyon β_N 0.096× and kink (q95 < 2) 0.167× at t = 0.03 s, and no operating limit is crossed — a distance, never a forecast of a disruption. As ever, the twin is compared with MAST data, not a prediction."}
+      ]
+    }
+  ],
+  "recorded_model": "claude-opus-5-5",
+  "recorded_at": "2026-10-12T00:00:00Z"
+}

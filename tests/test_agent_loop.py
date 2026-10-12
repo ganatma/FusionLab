@@ -1,9 +1,10 @@
 """The agent loop over a scripted fake client, standing in at the one seam (fusionlab.agent._client).
 
 The blueprint's loop-level outcomes live here: the model call carries the configured model, the
-honesty system prompt, and the eight allowlisted definitions; tool results are fed back with their
-data truncated; proposals reach the sink instead of being acted on; the tool budget is 6 rounds;
-and an SDK failure becomes an error event rather than a raise.
+honesty system prompt, and the allowlisted definitions (asserted by name — a hardcoded count
+drifted once already); tool results are fed back with their data truncated; proposals reach the
+sink instead of being acted on; the tool budget is 6 rounds; and an SDK failure becomes an error
+event rather than a raise.
 """
 
 from __future__ import annotations

@@ -1,0 +1,50 @@
+{
+  "message": "List the sandbox devices, then compare each one's worst operating limit, then rank them for me.",
+  "history": [],
+  "script": [
+    {
+      "deltas": ["Starting the device walk."],
+      "blocks": [
+        {"type": "text", "text": "Starting the device walk."},
+        {"type": "tool_use", "id": "tu_1", "name": "list_devices", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["Next device."],
+      "blocks": [
+        {"type": "text", "text": "Next device."},
+        {"type": "tool_use", "id": "tu_2", "name": "list_devices", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["And the next."],
+      "blocks": [
+        {"type": "text", "text": "And the next."},
+        {"type": "tool_use", "id": "tu_3", "name": "list_devices", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["Continuing."],
+      "blocks": [
+        {"type": "text", "text": "Continuing."},
+        {"type": "tool_use", "id": "tu_4", "name": "list_devices", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["Still ranking."],
+      "blocks": [
+        {"type": "text", "text": "Still ranking."},
+        {"type": "tool_use", "id": "tu_5", "name": "list_devices", "input": {}}
+      ]
+    },
+    {
+      "deltas": ["One more pass."],
+      "blocks": [
+        {"type": "text", "text": "One more pass."},
+        {"type": "tool_use", "id": "tu_6", "name": "list_devices", "input": {}}
+      ]
+    }
+  ],
+  "recorded_model": "claude-opus-5-5",
+  "recorded_at": "2026-10-12T00:00:00Z"
+}

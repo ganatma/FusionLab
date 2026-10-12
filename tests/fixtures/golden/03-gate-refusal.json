@@ -1,0 +1,21 @@
+{
+  "message": "Bump the toroidal field on shot 30166 up by 10% — what does that do to confinement?",
+  "history": [],
+  "script": [
+    {
+      "deltas": ["Let me put that past the gate."],
+      "blocks": [
+        {"type": "text", "text": "Let me put that past the gate."},
+        {"type": "tool_use", "id": "tu_1", "name": "run_whatif", "input": {"shot_id": "30166", "bt_scale": 1.1}}
+      ]
+    },
+    {
+      "deltas": ["I can't propose that edit: the archive has 3 matched pairs for toroidal-field edits, too few to test any response law — the gate refuses it rather than guessing, so I won't retry it or substitute a guess. Density, beam power and beam timing edits are testable on this shot if you want a what-if I can stand behind. Remember the twin is compared with MAST data, never a prediction."],
+      "blocks": [
+        {"type": "text", "text": "I can't propose that edit: the archive has 3 matched pairs for toroidal-field edits, too few to test any response law — the gate refuses it rather than guessing, so I won't retry it or substitute a guess. Density, beam power and beam timing edits are testable on this shot if you want a what-if I can stand behind. Remember the twin is compared with MAST data, never a prediction."}
+      ]
+    }
+  ],
+  "recorded_model": "claude-opus-5-5",
+  "recorded_at": "2026-10-12T00:00:00Z"
+}

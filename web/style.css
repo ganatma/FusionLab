@@ -47,7 +47,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .cr { display:grid; height:calc(100vh - var(--head) - var(--dock, 0px)); min-height:600px; gap:1px; background:var(--line);
       grid-template-columns:minmax(250px, .85fr) 1.7fr 1.55fr; grid-template-rows:auto auto 1.1fr 1fr;
       grid-template-areas:"bar bar bar" "hint hint hint" "eq tr v3" "eq st v3"; }
-.cr-hint { grid-area:hint; display:flex; align-items:center; gap:16px; padding:7px 12px; background:#17120c; border-left:2px solid var(--accent); }
+.cr-hint { grid-area:hint; display:flex; flex-wrap:wrap; align-items:center; gap:16px; padding:7px 12px; background:#17120c; border-left:2px solid var(--accent); }
 .cr-hint.fallback { border-left-color:var(--warn); background:#1c150a; }
 .cr-hint.error { border-left-color:var(--bad); background:#1c0f0c; }
 .cr-hint span { flex:1; }
@@ -111,7 +111,7 @@ section[id^="tab-"]:not(#tab-replay) { padding:16px; }
 .cmp-chip.ref, .cmp-chip.ok { border-color:#2a4f80; }
 .cmp-chip.ok { color:var(--fg); }
 .cmp-chip.bad { border-color:var(--bad); color:var(--bad); }
-.cmp-actions { display:flex; gap:6px; margin-left:auto; }
+.cmp-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
 .cmp-note { color:var(--muted); }
 .cmp-errs { display:flex; flex-direction:column; gap:4px; }
 .cmp-err { display:flex; align-items:center; gap:8px; color:var(--bad); font-family:var(--mono); font-size:12px; }

@@ -20,15 +20,14 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from fusionlab.atomicio import atomic_write
 
@@ -38,8 +37,10 @@ router = APIRouter()
 
 STUDY_ID_PATTERN = re.compile(r"s_[0-9a-f]{12}")
 # A study's route is a view the workspace router (web/workspaces.js) owns: replay/compare/explore.
-# `#/study/…` is deliberately absent — a study points at a view, never at another study link.
-ROUTE_RE = re.compile(r"^#/(replay|compare|explore)(?:/[^?#]*)?(?:\?.*)?$")
+# `#/study/…` is deliberately absent — a study points at a view, never at another study link. The
+# path parameter is only ever shot ids and compare's comma list (`[0-9,]*`), so traversal-shaped
+# strings ("//../..") cannot ride in as a stored route.
+ROUTE_RE = re.compile(r"^#/(replay|compare|explore)(?:/[0-9,]*)?(?:\?.*)?$")
 
 STUDIES_DIR = Path(__file__).resolve().parent.parent / "data" / "studies"
 MAX_NOTE_CHARS = 20_000  # a page-length note; a bound on the field, checked by the schema
@@ -68,7 +69,7 @@ class StudyProvenance(BaseModel):
 class StudyIn(BaseModel):
     """The client's fields of a new study. Ids, timestamps, workspace and provenance are
     server-built: a request body cannot mint an id, forge a stamp, or point a study at another
-    study link."""
+    study link. Non-finite numbers are rejected one layer down, at the route door."""
 
     name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
     route: str = Field(min_length=1, max_length=MAX_ROUTE_CHARS)
@@ -78,17 +79,6 @@ class StudyIn(BaseModel):
     explore: dict[str, float | str] | None = Field(default=None, max_length=32)
     notes_md: str = Field(default="", max_length=MAX_NOTE_CHARS)
     created_from: str = Field(default="palette", max_length=40)
-
-    @field_validator("what_if", "explore")
-    @classmethod
-    def _finite_values(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        # JSON cannot carry inf — but a hand-built request can (Python's json reads `Infinity`),
-        # and a non-finite value would break the store's strict-JSON dump at write time.
-        if v is not None and not all(
-            math.isfinite(x) for x in v.values() if isinstance(x, float)
-        ):
-            raise ValueError("study parameters must be finite numbers")
-        return v
 
 
 class StudyUpdate(BaseModel):
@@ -102,15 +92,6 @@ class StudyUpdate(BaseModel):
     what_if: dict[str, float] | None = Field(default=None, max_length=16)
     explore: dict[str, float | str] | None = Field(default=None, max_length=32)
     notes_md: str | None = Field(default=None, max_length=MAX_NOTE_CHARS)
-
-    @field_validator("what_if", "explore")
-    @classmethod
-    def _finite_values(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        if v is not None and not all(
-            math.isfinite(x) for x in v.values() if isinstance(x, float)
-        ):
-            raise ValueError("study parameters must be finite numbers")
-        return v
 
 
 class Study(BaseModel):
@@ -233,6 +214,22 @@ def update_study(study_id: str, payload: StudyUpdate) -> Study:
 
 
 # ---------------------------------------------------------------- routes
+def _assert_standard_json(body: bytes) -> None:
+    """Python's json.loads silently accepts Infinity/NaN literals, but this store's dump refuses
+    them (allow_nan=False) — and a validation-error reply cannot even echo an unserializable value
+    without crashing. So non-standard bodies are rejected at the door, before pydantic sees them:
+    a clean 422 that never echoes the value. Malformed JSON cannot reach here — pydantic 422s it
+    during body binding."""
+
+    def reject(lit: str) -> Any:
+        raise ValueError(lit)
+
+    try:
+        json.loads(body, parse_constant=reject)
+    except ValueError as e:
+        raise HTTPException(422, "study parameters must be finite numbers") from e
+
+
 @router.get("/studies")
 def studies_list() -> dict[str, Any]:
     """Every stored study, newest-updated first — the palette's Studies source (and its recent
@@ -254,9 +251,11 @@ def studies_get(study_id: str) -> dict[str, Any]:
 
 
 @router.post("/studies", status_code=201)
-def studies_create(payload: StudyIn) -> dict[str, Any]:
+async def studies_create(request: Request, payload: StudyIn) -> dict[str, Any]:
     """Save the current view as a named study. Caps are schema bounds (a note over the cap is a
-    422, nothing written); the route must be one of the app's own hash views."""
+    422, nothing written); the route must be one of the app's own hash views; non-finite numbers
+    are rejected at the door."""
+    _assert_standard_json(await request.body())
     try:
         study = create_study(payload)
     except InvalidStudy as e:
@@ -265,10 +264,11 @@ def studies_create(payload: StudyIn) -> dict[str, Any]:
 
 
 @router.patch("/studies/{study_id}")
-def studies_update(study_id: str, payload: StudyUpdate) -> dict[str, Any]:
+async def studies_update(study_id: str, request: Request, payload: StudyUpdate) -> dict[str, Any]:
     """Update a study's fields (the note after another look, a renamed study). Unknown ids are 404
     before any write; malformed ids are 422; an oversized note is a 422 that leaves the stored
     study untouched."""
+    _assert_standard_json(await request.body())
     try:
         study = update_study(study_id, payload)
     except StudyIdError as e:

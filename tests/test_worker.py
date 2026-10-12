@@ -31,10 +31,10 @@ def client(monkeypatch, tmp_path):
     worker._HANDSHAKE = None
 
 
-def _wait_result(client, job_id: str, tries: int = 240):
+def _wait_result(client, job_id: str, tries: int = 240, headers: dict | None = None):
     """Poll until the job is terminal; returns the 200 (frames) or 500 (error JSON) response."""
     for _ in range(tries):
-        r = client.get(f"/v1/jobs/{job_id}/result")
+        r = client.get(f"/v1/jobs/{job_id}/result", headers=headers)
         if r.status_code in (200, 500):
             return r
         assert r.status_code == 409, f"unexpected: {r.status_code} {r.text[:300]}"
@@ -335,3 +335,90 @@ def test_task_body_exception_becomes_error_state(client, monkeypatch):
     job_id = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}}).json()["job_id"]
     r = client.get(f"/v1/jobs/{job_id}/result")
     assert r.status_code == 500 and r.json()["error_type"] == "ZeroDivisionError" and "boom" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------- auth (opt-in shared token, #45)
+AUTH_ROUTES = [   # (method, path, body): every /v1/* route — the 401 matrix walks all of them
+    ("get", "/v1/capabilities", None),
+    ("post", "/v1/jobs", {"task": "model_metrics", "inputs": {"model": "surrogate"}}),
+    ("get", "/v1/jobs/ghost", None),
+    ("get", "/v1/jobs/ghost/events", None),
+    ("get", "/v1/jobs/ghost/result", None),
+    ("post", "/v1/jobs/ghost/cancel", None),
+    ("post", f"/v1/artifacts/{'0' * 64}", b"x"),
+]
+_AUTH_IDS = [f"{m.upper()} {p}" for m, p, _ in AUTH_ROUTES]
+
+
+def _call(client, method: str, path: str, body, headers: dict | None = None):
+    if isinstance(body, bytes):
+        return client.request(method, path, content=body, headers=headers)
+    if body is not None:
+        return client.request(method, path, json=body, headers=headers)
+    return client.request(method, path, headers=headers)
+
+
+def test_token_unset_is_todays_behavior(client):
+    """Opt-in by absence: with no FUSIONLAB_WORKER_TOKEN, /v1 routes answer requests that carry no
+    Authorization header at all — the pre-token worker, pinned here (the other tests pin the rest)."""
+    assert worker.worker_token() == ""
+    assert client.get("/v1/capabilities").status_code == 200
+    assert client.post("/v1/jobs", json={"task": "model_metrics",
+                                         "inputs": {"model": "surrogate"}}).status_code == 201
+
+
+def test_handshake_advertises_the_auth_mode(client, monkeypatch):
+    assert client.get("/v1/capabilities").json()["auth"] == "open"
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    r = client.get("/v1/capabilities", headers={"Authorization": "Bearer tk"})
+    assert r.json()["auth"] == "token"
+
+
+@pytest.mark.parametrize(("method", "path", "body"), AUTH_ROUTES, ids=_AUTH_IDS)
+def test_401_when_the_token_header_is_missing(client, monkeypatch, method, path, body):
+    """Auth runs before routing, validation, and queue state: a tokenless request to any /v1 route
+    is a 401 with WWW-Authenticate — never the 404/422/201 that route itself would have answered."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    r = _call(client, method, path, body)
+    assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize(("method", "path", "body"), AUTH_ROUTES, ids=_AUTH_IDS)
+def test_401_when_the_token_is_wrong(client, monkeypatch, method, path, body):
+    """Same matrix, wrong Bearer value: still a 401 before the route ever sees the request."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    r = _call(client, method, path, body, headers={"Authorization": "Bearer not-the-token"})
+    assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
+
+
+def test_a_401_submission_never_touches_the_queue(client, monkeypatch):
+    """The gate sits before body parsing and the depth-1 book: a rejected submit leaves no job state
+    behind and the slot is free for the next (correctly authed) one."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    r = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}},
+                    headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+    assert worker._JOBS._jobs == {}
+    ok = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}},
+                     headers={"Authorization": "Bearer tk"})
+    assert ok.status_code == 201
+
+
+def test_health_stays_open_with_a_token_set(client, monkeypatch):
+    """The tunnel/autostart probe sends no token: /health must answer it even when the worker is
+    token-gated, or a running worker reads as absent and autostart starts a doomed second one."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    assert client.get("/health").json() == {"ok": True}
+
+
+def test_the_correct_token_passes_end_to_end(client, monkeypatch):
+    """The happy path with the gate on: handshake and a full job roundtrip, every call bearing the
+    Bearer header."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "tk")
+    headers = {"Authorization": "Bearer tk"}
+    assert client.get("/v1/capabilities", headers=headers).json()["auth"] == "token"
+    job_id = client.post("/v1/jobs", json={"task": "model_metrics", "inputs": {"model": "surrogate"}},
+                         headers=headers).json()["job_id"]
+    rr = _wait_result(client, job_id, headers=headers)
+    assert rr.status_code == 200
+    assert "block_size" in frames.unpack_result(rr.content)

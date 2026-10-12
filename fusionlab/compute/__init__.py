@@ -36,6 +36,10 @@ _SSH_ENV_VARS: dict[str, str] = {   # FUSIONLAB_SSH_* overrides; keys map to Ssh
     "remote_port": "FUSIONLAB_SSH_REMOTE_PORT",
 }
 
+# The worker's shared token (#45) is env-only: FUSIONLAB_WORKER_TOKEN is deliberately absent from the
+# override map above, and a credential-shaped key in the toml is a loud error, never a carried option.
+_CREDENTIAL_KEYS = ("token", "worker_token", "password", "secret", "api_key")
+
 
 def _ssh_table(cfg: dict[str, Any]) -> dict[str, Any]:
     """The base ssh table for the selected host — raw [compute.ssh]-shaped keys, no env merging yet.
@@ -70,7 +74,8 @@ def ssh_options() -> dict[str, Any]:
     from fusionlab.toml, merged with FUSIONLAB_SSH_* env overrides (env wins).
 
     Returns kwargs ready for SshProvider(**...). Never contains credentials — the connection uses the
-    user's own SSH agent, keys, and ~/.ssh/config (design §8).
+    user's own SSH agent, keys, and ~/.ssh/config (design §8), and a credential-shaped key in the
+    toml is a loud ValueError, never a silently-carried option (the worker token is env-only, #45).
     """
     opts: dict[str, Any] = {}
     if _TOML_PATH.exists():
@@ -88,6 +93,11 @@ def ssh_options() -> dict[str, Any]:
             opts[key] = int(raw)
         else:
             opts[key] = raw
+    leaked = sorted(set(opts) & set(_CREDENTIAL_KEYS))
+    if leaked:
+        raise ValueError(f"fusionlab.toml holds credential key(s) {leaked} — config never holds a key, "
+                         "password, or token (see fusionlab.toml.example): the worker token is the "
+                         "FUSIONLAB_WORKER_TOKEN environment variable")
     return opts
 
 

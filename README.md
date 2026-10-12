@@ -93,6 +93,11 @@ autostart = true            # start the worker over SSH when none is answering
 More than one GPU box? Define a `[compute.hosts.<name>]` profile per host (same keys) and switch
 with `FUSIONLAB_COMPUTE_HOST` — see [docs/COMPUTE.md](docs/COMPUTE.md).
 
+By default the worker binds loopback on the remote host and trusts the tunnel. If it might be
+reachable by more than your own tunnel, set `FUSIONLAB_WORKER_TOKEN` to the same value on both ends
+(`.env` here, the worker's environment there) and every `/v1` route on the worker demands a Bearer
+token — same file, no new services; details in [docs/COMPUTE.md](docs/COMPUTE.md).
+
 Full guide — prerequisites, what the chip and banner mean, and a first-run checklist against a real
 host: [docs/COMPUTE.md](docs/COMPUTE.md).
 

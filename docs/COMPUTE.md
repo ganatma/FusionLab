@@ -9,7 +9,8 @@ streams results back.
 
 The compute side of the connection is your machine, your account, your SSH setup. FusionLab adds no
 credentials of its own: it uses your keys, agent, and `~/.ssh/config` exactly as they are, and
-neither `fusionlab.toml` nor `.env` ever holds a key, password, or token.
+neither `fusionlab.toml` nor `.env` ever holds a key, password, or token. (The one deliberate
+exception is the optional worker token below — env-only, on both ends; never in `fusionlab.toml`.)
 
 ## Quick start
 
@@ -129,7 +130,8 @@ checklist is the real-host path that remains.
   remote jobs only.
 - **The worker executes a fixed registry of named tasks** — field-line tracing, the two
   surrogates, the model-metrics readout, benchmarks. It is not a shell: schema-checked inputs, no
-  command execution, payload-size caps. It binds loopback only, reachable through the tunnel.
+  command execution, payload-size caps. It binds loopback only, reachable through the tunnel — and
+  if you expose it further, an optional shared token covers the whole `/v1` surface (below).
 - **Shot data** is read by the worker through the same FAIR-MAST path as everywhere else, from its
   own clone (which ships the same small showcase cache; other shots fetch on demand). Compact
   inputs — EFIT equilibria, signal arrays — ride inside the job itself. So the compute host needs
@@ -137,6 +139,15 @@ checklist is the real-host path that remains.
 - **Version drift** between your laptop's clone and the worker's is surfaced, not hidden: the
   handshake reports the worker's version and the chip warns on mismatch. The fix is the usual one
   on the remote side — `git pull` and `uv sync`.
-- **Not in this version**: SLURM/PBS submission, multi-user queues or auth, training jobs, Windows
-  remotes, and anything that opens a port on your network. If you cannot install software on the
-  compute target, this design does not fit it — that is its one real prerequisite.
+- **An optional shared token locks the worker's `/v1` surface** (issue #45): if the worker might be
+  reachable by more than your own tunnel, set `FUSIONLAB_WORKER_TOKEN` to the same value on both
+  ends (the laptop's `.env` and the worker host's environment) and every `/v1` route on the worker
+  demands `Authorization: Bearer` — constant-time compare, 401 before any request is parsed or
+  queued — while `/health` stays open so the tunnel probe and autostart keep working. Unset (the
+  default), the worker is exactly as open as before. When the two ends disagree, the fallback
+  banner names the token mismatch instead of a generic "unreachable", and the handshake advertises
+  the mode (`"auth": "token" | "open"`) so the two sides can see the disagreement coming.
+- **Not in this version**: SLURM/PBS submission, multi-user queues or per-user accounts (the token
+  is one shared secret, not an account system), training jobs, Windows remotes, and anything that
+  opens a port on your network. If you cannot install software on the compute target, this design
+  does not fit it — that is its one real prerequisite.

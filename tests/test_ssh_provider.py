@@ -508,3 +508,124 @@ def test_loopback_cancel_reaches_the_worker_and_frees_the_slot(worker_url, monke
     with pytest.raises(RemoteComputeError, match="cancelled"):
         p.result(nxt)
     p.close()
+
+
+# ---------------------------------------------------------------- auth (opt-in shared token, #45)
+def test_long_lived_client_carries_the_configured_token(monkeypatch):
+    """The provider's one long-lived httpx.Client is built with the env token's Authorization header —
+    and with none at all when the token is unset (opt-in by absence, not an empty header)."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "unit-token")
+    p = SshProvider(session=FakeSession("http://worker.test"))
+    assert p._http.headers.get("authorization") == "Bearer unit-token"
+    p.close()
+    monkeypatch.delenv("FUSIONLAB_WORKER_TOKEN")
+    p2 = SshProvider(session=FakeSession("http://worker.test"))
+    assert "authorization" not in p2._http.headers
+    p2.close()
+
+
+def test_401_on_submit_becomes_the_actionable_auth_error():
+    p = make_provider(json_handler({"GET /v1/capabilities": handshake_response(),
+                                    "POST /v1/jobs": httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})}))
+    with pytest.raises(RemoteComputeError) as ei:
+        p.submit("benchmark", {"profile": "quick"})
+    assert ei.value.phase == "auth"
+    assert "FUSIONLAB_WORKER_TOKEN" in ei.value.message and "differs" in ei.value.message
+    p.close()
+
+
+def test_401_on_the_handshake_becomes_the_auth_error():
+    """A tokenless backend against a token-gated worker: the handshake is the first /v1 call to
+    fail, and it fails with the token message — the banner's wording, not a generic connect error."""
+    p = make_provider(json_handler({"GET /v1/capabilities": httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})}))
+    with pytest.raises(RemoteComputeError) as ei:
+        p.capabilities()
+    assert ei.value.phase == "auth" and "FUSIONLAB_WORKER_TOKEN" in ei.value.message
+    p.close()
+
+
+def test_401_on_the_stream_becomes_the_auth_error(monkeypatch):
+    """stream() builds its own AsyncClient, so the fake transport rides that construction (the same
+    patch the probe test uses) — then a 401 on the events route maps to the auth error, not the
+    generic 'event stream broke'."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/events"):
+            return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+        return httpx.Response(200, json=handshake_response())
+
+    real_cls = httpx.AsyncClient
+
+    def with_mock_transport(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        return real_cls(*a, **kw)
+
+    monkeypatch.setattr(ssh_mod.httpx, "AsyncClient", with_mock_transport)
+    p = make_provider(handler)
+    with pytest.raises(RemoteComputeError) as ei:
+        asyncio.run(collect(p.stream(JobHandle(job_id="j1", task="benchmark", provider="ssh"))))
+    assert ei.value.phase == "auth"
+    p.close()
+
+
+def test_health_probe_client_rides_the_token_too(fake_asyncssh, worker_url, monkeypatch):
+    """The autostart probe is the third httpx client: it carries the header as well — harmless on
+    the always-open /health, correct if a future worker ever gates it."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "probe-token")
+    captured: dict = {}
+    real = ssh_mod.httpx.AsyncClient
+
+    def spy(*a, **kw):
+        captured["headers"] = kw.get("headers")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(ssh_mod.httpx, "AsyncClient", spy)
+    session = _session(local_port=_free_url_port(worker_url))
+    session.ensure()
+    assert captured["headers"] == {"Authorization": "Bearer probe-token"}
+    session.close()
+
+
+def test_loopback_token_end_to_end(worker_url, monkeypatch, tmp_path):
+    """The loopback acceptance with a shared token: handshake, submit, stream, result, upload and
+    cancel all green through the real token-gated worker, every call bearing the Bearer header."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "loopback-token")
+    p = SshProvider(session=FakeSession(worker_url))
+    caps = p.capabilities()                                   # GET /v1/capabilities
+    assert caps["remote"]["auth"] == "token"
+    weight = tmp_path / "loopback-weight.pt"                  # POST /v1/artifacts/{sha}
+    weight.write_bytes(b"loopback-token-e2e")
+    p._upload(weight, hashlib.sha256(weight.read_bytes()).hexdigest())
+    job = p.submit("model_metrics", {"model": "surrogate"})   # POST /v1/jobs
+    events = asyncio.run(collect(p.stream(job)))              # the SSE client
+    assert events[-1]["event"] == "completed"
+    out = p.result(job)                                       # poll + result fetch
+    assert "block_size" in out
+
+    from dataclasses import replace as dc_replace
+
+    def slow(_inputs, progress):
+        for _ in range(40):
+            progress({"section": "waiting"})
+            time.sleep(0.05)
+        return {}
+
+    monkeypatch.setitem(worker.TASKS, "model_metrics", dc_replace(worker.TASKS["model_metrics"], run=slow))
+    slow_job = p.submit("model_metrics", {"model": "surrogate"})
+    p.cancel(slow_job)                                        # POST cancel
+    with pytest.raises(RemoteComputeError, match="cancelled"):
+        p.result(slow_job)
+    p.close()
+
+
+def test_loopback_token_mismatch_is_an_actionable_auth_error(worker_url, monkeypatch):
+    """Two ends, two environments — simulated by re-pointing the shared env after the provider
+    captured its header: the worker rejects the token with 401 and the provider raises the
+    actionable auth error run_task's fallback banner renders."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "the-worker-expects")
+    p = SshProvider(session=FakeSession(worker_url))           # sends Bearer the-worker-expects
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "the-provider-sends")   # the worker now demands this
+    with pytest.raises(RemoteComputeError) as ei:
+        p.capabilities()
+    assert ei.value.phase == "auth"
+    assert "FUSIONLAB_WORKER_TOKEN" in ei.value.message and "differs" in ei.value.message
+    p.close()

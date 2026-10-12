@@ -225,7 +225,7 @@
   let initP = null, loadSeq = 0;
   const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
   let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
-  let wi = { on: false, gate: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
+  let wi = { on: false, gate: null, gateP: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, gateP = the in-flight first open (shared), res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
   const lineCache = new Map();
 
   // Per-job progress (HARN-1): an SSE relay of the selected provider's stream for one task's job,
@@ -887,16 +887,39 @@
       return;
     }
     if (!wi.gate) {
-      // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
-      // leave the drawer half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
-      // refetch on every later click and keep what-if broken until reload.
-      let gate = null;
-      try {
-        const r = await fetch('/virtual/gate');
-        const j = await r.json();
-        if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
-      } catch (e) { /* network failure: the error render just below carries it */ }
-      if (!gate) {
+      // One fetch and one render, however many callers race the first open (the route's own ?edit=1
+      // and a study restore's apply both land here): the memo is the in-flight promise until a
+      // validated gate exists, so a second caller rides the first caller's render instead of
+      // re-rendering the sliders over values an earlier caller just applied. A failed or malformed
+      // gate is not memoized — a Retry (or a later call) refetches; a poisoned wi.gate would skip
+      // this refetch on every later click and keep what-if broken until reload.
+      if (!wi.gateP) {
+        wi.gateP = (async () => {
+          let gate = null;
+          try {
+            const r = await fetch('/virtual/gate');
+            const j = await r.json();
+            if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
+          } catch (e) { /* network failure: the error render just below carries it */ }
+          if (!gate) { wi.gateP = null; return null; }
+          wi.gate = gate;
+          // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
+          const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
+          $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
+              <input type="range" id="rp-wi-${k}" data-zero="${zero}" min="${min}" max="${max}" step="${step}" value="${zero}"${G[k].enabled ? '' : ' disabled'}>
+              <output id="rp-wi-${k}-out"></output></label>`).join('');
+          $('rp-wi-evidence').innerHTML = (wi.gate.validated ? 'Evidence, from matched pairs of real shots (same session, one input changed by > 20%, the rest within 5%): ' +
+              open.filter(([k]) => k !== 'nbi_shift_s').map(([k, label]) => `${label.toLowerCase()} ${G[k].n_pairs.toLocaleString()} pairs (${esc(G[k].admissible.join(', '))})`).join('; ') + '. '
+            : 'Not validated on this machine yet: run scripts/validate_virtual.py. ') +
+            (shut.length ? `<b>No slider</b> for ${shut.map(([k, label]) => `${label.toLowerCase()} (${G[k].n_pairs} pairs)`).join(' or ')}: too few pairs in 6,353 shots to test any law.` : '');
+          $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
+          $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
+          return gate;
+        })();
+        wi.gateP.catch(() => { wi.gateP = null; });   // a rejected open (fetches are caught above; guard anyway) clears the memo
+      }
+      const opened = await wi.gateP;
+      if (!opened) {
         $('rp-wi-out').innerHTML = '<p class="muted">The anchored editor needs the FusionLab server (/virtual/gate). <button type="button" class="tool" id="rp-wi-retry">Retry</button></p>';
         $('rp-wi-retry').addEventListener('click', () => whatIf(true));
         $('rp-whatif').classList.remove('on');
@@ -904,18 +927,6 @@
         showEditDrawer();   // open the drawer just enough to carry the one-line error and its Retry
         return;
       }
-      wi.gate = gate;
-      // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
-      const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
-      $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
-          <input type="range" id="rp-wi-${k}" data-zero="${zero}" min="${min}" max="${max}" step="${step}" value="${zero}"${G[k].enabled ? '' : ' disabled'}>
-          <output id="rp-wi-${k}-out"></output></label>`).join('');
-      $('rp-wi-evidence').innerHTML = (wi.gate.validated ? 'Evidence, from matched pairs of real shots (same session, one input changed by > 20%, the rest within 5%): ' +
-          open.filter(([k]) => k !== 'nbi_shift_s').map(([k, label]) => `${label.toLowerCase()} ${G[k].n_pairs.toLocaleString()} pairs (${esc(G[k].admissible.join(', '))})`).join('; ') + '. '
-        : 'Not validated on this machine yet: run scripts/validate_virtual.py. ') +
-        (shut.length ? `<b>No slider</b> for ${shut.map(([k, label]) => `${label.toLowerCase()} (${G[k].n_pairs} pairs)`).join(' or ')}: too few pairs in 6,353 shots to test any law.` : '');
-      $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
-      $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
     wi.on = true;
     $('rp-whatif').classList.add('on');

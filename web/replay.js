@@ -1691,18 +1691,22 @@
     // — only sliders the gate enabled, set like a hand on them, then the debounced re-run. A
     // snapshot exists only while the editor is open (the drawn strips are what a study restores).
     whatIfValues(values) {
-      const inputs = WI.map(([k]) => [k, $('rp-wi-' + k)]).filter((pair) => pair[1] && !pair[1].disabled);
+      // read live: the sliders exist only once the editor has opened and the gate has rendered them —
+      // a snapshot reads them now; an apply reads them after whatIf(true) resolves (a fresh restore has
+      // no sliders yet, and a list captured earlier would silently set nothing)
+      const live = () => WI.map(([k]) => [k, $('rp-wi-' + k)]).filter((pair) => pair[1] && !pair[1].disabled);
       if (!values) {
         if (!wi.on) return null;
         const out = {};
-        inputs.forEach(([k, el]) => { out[k] = +el.value; });
+        live().forEach(([k, el]) => { out[k] = +el.value; });
         return out;
       }
       return whatIf(true).then(() => {   // opens the editor; the sliders exist once it resolves
-        let last = null;
-        inputs.forEach(([k, el]) => { if (Object.prototype.hasOwnProperty.call(values, k)) { el.value = values[k]; last = el; } });
-        if (last) { labelsWhatIf(); last.dispatchEvent(new Event('input', { bubbles: true })); }
-        return true;
+        if (!wi.on) return Promise.reject(new Error('the anchored editor could not open — no shot is drawn, or the what-if gate is unavailable'));
+        let applied = 0;
+        live().forEach(([k, el]) => { if (Object.prototype.hasOwnProperty.call(values, k)) { el.value = values[k]; applied++; } });
+        if (applied) { labelsWhatIf(); askWhatIf(); }   // one re-run of the debounced edit, not one per slider
+        return applied;
       });
     },
     // The drawer's study-note field, set on restore (the server copy is the truth, so the local

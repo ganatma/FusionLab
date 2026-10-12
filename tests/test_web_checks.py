@@ -234,6 +234,7 @@ def test_study_restore_fetch_has_the_error_discipline():
     assert "(replay|compare|explore|study)" in ws                        # the grammar grew a fourth entry
     apply_fn = ws.split("function applyStudy")[1].split("function restoreExplore")[0]
     assert "FusionLabShotLoad" in apply_fn and "L.onChange(check)" in apply_fn
+    assert "the rest have no slider on this machine" in ws   # a partial what-if apply is said out loud
     assert "compared with MAST data, never predictive" in ws
 
 

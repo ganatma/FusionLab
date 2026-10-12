@@ -115,26 +115,49 @@
     const isReplay = /^#\/replay\//.test(route);
     const finish = () => {
       if (isReplay) {
-        if (s.what_if && F.replay.whatIfValues) F.replay.whatIfValues(s.what_if);
+        // what-if edits apply through the drawer's own setter (opens it, sets what the gate enabled);
+        // it resolves to how many keys landed. A partial or failed apply is said out loud — the study
+        // must not look identical to the author's view when it is not.
         if (typeof s.notes_md === 'string' && s.notes_md && F.replay.setNote) F.replay.setNote(s.notes_md);
+        const total = s.what_if ? Object.keys(s.what_if).length : 0;
+        const say = (applied) => {
+          let missed = '';
+          if (applied < 0) missed = ' — its what-if edits could not be applied (the view is partial)';
+          else if (applied < total) missed = ' — what-if edits applied: ' + applied + ' of ' + total + '; the rest have no slider on this machine';
+          status('Study "' + (s.name || '') + '" opened' + missed + ' — compared with MAST data, never predictive.');
+        };
+        const p = (s.what_if && F.replay.whatIfValues) ? F.replay.whatIfValues(s.what_if) : Promise.resolve(total ? -1 : 0);
+        p.then((applied) => say(typeof applied === 'number' ? applied : -1)).catch(() => say(-1));
       } else if (/^#\/explore/.test(route) && s.explore) {
         restoreExplore(s.explore);
-      }
-      status('Study "' + (s.name || '') + '" opened — compared with MAST data, never predictive.');
+        status('Study "' + (s.name || '') + '" opened — compared with MAST data, never predictive.');
+      } else status('Study "' + (s.name || '') + '" opened — compared with MAST data, never predictive.');
     };
     const L = window.FusionLabShotLoad;
     const shotId = Array.isArray(s.shot_ids) && s.shot_ids.length ? Number(s.shot_ids[0]) : null;
     if (isReplay && shotId && L && L.onChange) {
+      // Finish on the DRAW (fusionlab:shot), not on fetch-ready: the anchored editor can only open
+      // once the shot is on screen (the replay module's `shot` is set), and the draw event is that
+      // moment's public signal. Fetch-ready alone fires a beat earlier and a what-if apply in the
+      // gap would silently no-op (the drawer's whatIf(true) sees no shot and takes its close path).
       let settled = false, off = null;
-      const settle = (fn) => { if (!settled) { settled = true; clearTimeout(giveUp); if (off) off(); fn(); } };
+      const settle = (fn) => {
+        if (!settled) {
+          settled = true; clearTimeout(giveUp); if (off) off();
+          document.removeEventListener('fusionlab:shot', onDraw);
+          fn();
+        }
+      };
+      const onDraw = (e) => { if (e && e.detail && Number(e.detail.shot_id) === shotId) settle(finish); };
       const check = () => {
         const st = L.get(shotId);
-        if (st === 'ready') settle(finish);
-        else if (st === 'error') settle(() => status('The study opened, but shot #' + shotId + " didn't load — the view is partial."));
+        if (st === 'error') settle(() => status('The study opened, but shot #' + shotId + " didn't load — the view is partial."));
+        else if (st === 'ready' && F.replay && typeof F.replay.state === 'function' && F.replay.state() != null) settle(finish);   // already drawn
       };
       const giveUp = setTimeout(() => settle(() => status('The study opened, but the shot never finished loading — the view is partial.')), 20000);
       off = L.onChange(check);
-      check();   // already up: the machine will not fire again
+      document.addEventListener('fusionlab:shot', onDraw);
+      check();   // already up: the draw event will not fire again
     } else finish();
   }
 

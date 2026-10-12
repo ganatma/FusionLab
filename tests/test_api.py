@@ -721,6 +721,63 @@ def test_compare_export_groups_rows_by_shot_and_validates():
     assert client.get("/export/30420", params={"fmt": "parquet"}).status_code == 422
 
 
+# ---- IMAS-shaped export (issue #49): export-only, values equal the replay bundle path-for-path
+
+
+def test_imas_export_equals_the_replay_bundle_at_imas_paths():
+    """The export serves the replay's own values at IMAS dictionary paths — units converted
+    once at this edge, never recomputed (the /export ground rule, applied to the IMAS edge)."""
+    replay = client.get("/replay/30420").json()
+    r = client.get("/replay/30420/imas")
+    assert r.headers["content-type"].startswith("application/json")
+    assert 'filename="imas_30420.json"' in r.headers["content-disposition"]
+    body = r.json()
+
+    def finite(node):   # strict JSON: no NaN/inf leaked into the attachment (allow_nan=False enforces it)
+        if isinstance(node, float):
+            assert math.isfinite(node), "non-finite float in the IMAS attachment"
+        if isinstance(node, dict):
+            for v in node.values():
+                finite(v)
+        if isinstance(node, list):
+            for v in node:
+                finite(v)
+
+    finite(body)
+    eq, side = body["imas"]["equilibrium"], body["fusionlab_annotations"]
+    ts = eq["time_slice"][len(replay["measured"]["t_s"]) // 2]
+
+    def at(node, path):
+        for part in path.split("/"):
+            node = node[part]
+        return node
+
+    expect = {"q95": "global_quantities/q_95", "beta_N": "global_quantities/beta_tor_norm",
+              "kappa": "boundary/elongation", "a_m": "boundary/minor_radius",
+              "R_mag_m": "global_quantities/magnetic_axis/r",
+              "Z_mag_m": "global_quantities/magnetic_axis/z", "Ip_MA": "global_quantities/ip"}
+    for name, path in expect.items():
+        got, want = at(ts, path), replay["measured"][name][len(replay["measured"]["t_s"]) // 2]
+        if name == "Ip_MA":
+            assert got == pytest.approx(want * 1e6, rel=1e-3), name   # MA -> A, rounded at the edge
+        else:
+            assert got == want, name   # factor 1: the replay's own rounded number, untouched
+    assert eq["time"] == replay["measured"]["t_s"]
+    assert ts["boundary"]["outline"]["r"] == pytest.approx(replay["lcfs"]["R"][len(replay["measured"]["t_s"]) // 2], abs=1e-3)
+    assert ts["profiles_2d"][0]["grid"]["dim1"] == pytest.approx(replay["psi_grid"]["R"], abs=1e-3)
+    assert [c["geometry"]["rectangle"]["r"] for c in body["imas"]["pf_active"]["coil"]] \
+        == pytest.approx(replay["coils"]["R"], abs=1e-3)
+    assert side["archive_flags"] == replay["archive"]
+    assert side["provenance"] == api_replay._export_provenance_map(replay)
+    assert set(side["provenance"].values()) == {"measured", "model", "learned", "computed"}
+    assert side["attribution"] == replay["attribution"]
+
+
+def test_imas_export_is_get_only_and_resolves_ids():
+    assert client.post("/replay/30420/imas").status_code == 405   # a read: pure serialization, never a write
+    assert client.get("/replay/nope/imas").status_code == 404
+
+
 # ---- domain shading on the measured replay (FEAT-2): the bundle carries the virtual path's own guard
 # and the band coordinates are exactly the flags' out-of-domain runs — one shared source, no copied numbers.
 

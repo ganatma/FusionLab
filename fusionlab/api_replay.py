@@ -248,6 +248,32 @@ def replay_usd(shot_id: str, fmt: str = "usdc"):
     return FileResponse(out, filename=out.name, media_type="application/octet-stream")
 
 
+@router.get("/replay/{shot_id}/imas")
+async def replay_imas(shot_id: str, H: float = 1.0):
+    """IMAS-shaped export of the replay (export-only; IMAS is never the internal data spine — DATA_CONTRACT).
+
+    An attachment beside the USD export: the same bundle /replay serves at IMAS
+    data-dictionary paths, with units converted once at this edge, plus a sibling
+    fusionlab_annotations for what the dictionary has no home for (archive flags, provenance
+    labels, logbook meta). GET, unlike the USD POST: pure serialization of served values —
+    nothing is written or recomputed (audit F1 applies to writes, not reads)."""
+    from fusionlab.imas_export import export_imas, fusionlab_annotations
+    bundle = await run_compute_async(partial(_replay_bundle, shot_id, H))   # the same dict /replay serves
+    s, src = _shot(shot_id)
+    body = json.dumps(
+        {
+            "imas": export_imas(s),
+            "fusionlab_annotations": fusionlab_annotations(
+                s, archive_flags=bundle["archive"], provenance=_export_provenance_map(bundle),
+                attribution=_attribution(s, src),
+            ),
+        },
+        allow_nan=False,   # strict JSON: a NaN would fail loudly here, not emit invalid JSON
+    )
+    return Response(content=body, media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="imas_{shot_id}.json"'})
+
+
 @lru_cache(maxsize=8)   # process-lifetime cache: a refetched or retrained artifact on disk is not seen until restart
 def _lines(shot_id: str):
     """Field lines for every slice of a shot in one Warp launch, plus traced q at psi_N = 0.95 beside EFIT's q95."""

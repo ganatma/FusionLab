@@ -13,6 +13,7 @@
 | `fusionlab/eq_surrogate.py` | PhysicsNeMo flux-map surrogate: 93 magnetics signals → ψ(R,Z) 65×65 |
 | `fusionlab/fieldlines.py` | NVIDIA Warp RK4 field-line tracer + q95 check vs EFIT |
 | `fusionlab/usd_export.py` | Time-sampled OpenUSD stage export (vessel, PF coils, plasma, field lines) |
+| `fusionlab/imas_export.py` | IMAS-shaped JSON export of the replay bundle (units converted once at the edge) + annotations sidecar |
 | `fusionlab/virtual.py` | Virtual-shot engine: blind + anchored 0D re-fly, matched-pair gating |
 | `web/` | Static frontend, no bundler, works offline |
 | `web/index.html`, `app.js`, `replay.js` | App shell, tabs, replay panel |

@@ -47,7 +47,7 @@ No external services (no Postgres/Redis/etc.). The only setup prerequisite is `u
 See [codebase-map.md](codebase-map.md) for the folder-level table.
 
 Key entry points: `fusionlab/api.py` (app + `/health /devices /simulate /map /reactivity /`),
-`fusionlab/api_replay.py` (`/shots /replay/{id}[/psi|/usd|/fieldlines] /db /surrogate /eq_surrogate`),
+`fusionlab/api_replay.py` (`/shots /replay/{id}[/psi|/usd|/imas|/fieldlines] /db /surrogate /eq_surrogate`),
 `fusionlab/api_virtual.py` (`/virtual/gate`, `POST /virtual/{id}`), `fusionlab/physics.py` (0D engine).
 Optional agent (off unless `FUSIONLAB_AGENT_ENABLED` + `ANTHROPIC_API_KEY`): `fusionlab/api_agent.py`
 (`/agent/health /agent/chat /agent/actions/{id}/confirm /agent/protocol/ingest /agent/protocols/{id}/accept`),

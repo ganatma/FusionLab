@@ -209,6 +209,23 @@ def test_run_fallback_survives_a_healthy_probe_until_a_remote_run_succeeds(clean
     assert status.snapshot(0.0)["fallback"] is False
 
 
+def test_token_mismatch_falls_back_with_the_token_banner(clean):
+    """A worker that rejects the token (401 → the auth error): run_task falls back locally and the
+    banner reason names the token — the operator reads 'the two ends disagree', not 'unreachable'."""
+    class TokenMismatchRemote(StubRemote):
+        def submit(self, task: str, inputs: dict) -> JobHandle:
+            raise RemoteComputeError(
+                "auth", "worker rejected the token — FUSIONLAB_WORKER_TOKEN differs between this "
+                        "machine and the worker host (or is set on one side only)")
+
+    compute._provider = TokenMismatchRemote()
+    out = status.run_task("model_metrics", {"model": "surrogate"})   # the local re-run answers
+    assert "block_size" in out
+    fb = status.fallback_state()
+    assert fb["fallback"] is True
+    assert "FUSIONLAB_WORKER_TOKEN" in fb["reason"] and "(auth)" in fb["reason"]
+
+
 # ---------------------------------------------------------------- job progress (HARN-1)
 def test_run_task_exposes_the_remote_job_while_it_runs(clean, monkeypatch):
     """run_task's remote job is visible to active_job() from submit until result returns — the seam

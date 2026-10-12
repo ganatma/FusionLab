@@ -169,3 +169,36 @@ def test_unknown_host_fails_at_get_provider(no_env, monkeypatch, tmp_path):
     monkeypatch.setenv("FUSIONLAB_COMPUTE_HOST", "lab-c")
     with pytest.raises(ValueError, match="unknown compute host 'lab-c'"):
         compute.get_provider()
+
+
+# -- worker token is env-only (#45) ------------------------------------------------------------
+
+
+def test_a_token_in_the_toml_fails_loudly_and_is_never_carried(no_env, monkeypatch, tmp_path):
+    """The twice-documented no-secrets rule, enforced at runtime: a credential-shaped key in the
+    toml — either spelling someone might try, in [compute.ssh] or a host profile — is a loud
+    ValueError naming FUSIONLAB_WORKER_TOKEN, never a silently-carried ssh option."""
+    toml = tmp_path / "fusionlab.toml"
+    toml.write_text('[compute.ssh]\nhost = "gpu-lab"\ntoken = "from-the-toml"\n')
+    monkeypatch.setattr(compute, "_TOML_PATH", toml)
+    with pytest.raises(ValueError, match=r"credential key\(s\) \['token'\].*FUSIONLAB_WORKER_TOKEN"):
+        compute.ssh_options()
+    toml.write_text('[compute.hosts.lab]\nhost = "gpu-lab"\nworker_token = "from-the-toml"\n')
+    monkeypatch.setenv("FUSIONLAB_COMPUTE_HOST", "lab")
+    with pytest.raises(ValueError, match="FUSIONLAB_WORKER_TOKEN"):
+        compute.ssh_options()
+
+
+def test_worker_token_env_var_is_never_an_ssh_option(no_env, monkeypatch, tmp_path):
+    """FUSIONLAB_WORKER_TOKEN is deliberately absent from the FUSIONLAB_SSH_* override map and never
+    rides ssh_options() — the token reaches the worker through the provider's own header builder,
+    not the ssh kwargs."""
+    monkeypatch.setenv("FUSIONLAB_WORKER_TOKEN", "s3cret-env-token")
+    monkeypatch.setattr(compute, "_TOML_PATH", tmp_path / "absent.toml")
+    assert compute.ssh_options() == {}
+    toml = tmp_path / "fusionlab.toml"
+    toml.write_text('[compute.ssh]\nhost = "gpu-lab"\n')
+    monkeypatch.setattr(compute, "_TOML_PATH", toml)
+    opts = compute.ssh_options()
+    assert opts == {"host": "gpu-lab"}
+    assert "s3cret-env-token" not in str(opts)

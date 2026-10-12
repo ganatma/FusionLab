@@ -40,6 +40,18 @@
   <section id="tab-replay" role="tabpanel" aria-labelledby="tabbtn-replay" tabindex="0" hidden></section>
   <section id="tab-compare" role="tabpanel" aria-labelledby="tabbtn-compare" tabindex="0" hidden></section>
 
+  <!-- A study is a saved view (backlog #44): the landing below is transient — it names the study,
+       carries the restore status, and hands off to the workspace the study's own route points at. -->
+  <section id="tab-study" role="tabpanel" aria-labelledby="study-title" tabindex="0" hidden>
+    <div class="grid">
+      <div class="panel wide stack">
+        <h2 id="study-title">Study</h2>
+        <p class="small muted" id="study-status">Open a study from the command palette, or follow a #/study/… link — a study reopens the view it was saved from, with its note and what-if values.</p>
+        <p class="small muted">A study is a comparison record: compared with MAST data, never predictive.</p>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-explore" role="tabpanel" aria-labelledby="tabbtn-explore" tabindex="0" hidden>
     <div class="grid">
       <div class="panel">

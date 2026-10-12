@@ -134,7 +134,9 @@
           <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
               <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
             <div class="wi-out small" id="rp-wi-out"></div>
-            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details>
+            <label class="small muted" for="rp-wi-note" style="display:block;margin-top:10px;">Study note — what you saw at this slice (saved with a study)</label>
+            <textarea id="rp-wi-note" rows="4" placeholder="Markdown note, anchored to this slice…"></textarea></div>
         </div>
       </div>
     </dialog>`;
@@ -513,6 +515,9 @@
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
     $('rp-wi-x').addEventListener('click', () => whatIf(false));
     $('rp-wi').addEventListener('close', finishWhatIf);
+    // The study-note draft (backlog #44): localStorage is a draft only — the saved study's server
+    // copy is the truth, and restoring a study consumes the draft (setNote).
+    $('rp-wi-note').addEventListener('input', () => { try { localStorage.setItem('fusionlab-study-note', $('rp-wi-note').value); } catch (e) { /* no storage: the note just doesn't draft */ } });
     // Share (audit seed 8): the URL is the state — copy a link that reproduces this view.
     $('rp-share').addEventListener('click', async () => {
       const url = await shareUrl();
@@ -926,6 +931,8 @@
   // drawer's DOM and the memoized gate survive; "Reset edits" restores the measured programme.
   function showEditDrawer() {
     if ($('rp-wi').open) return;
+    const note = $('rp-wi-note');
+    if (note && !note.value) { try { note.value = localStorage.getItem('fusionlab-study-note') || ''; } catch (e) { /* no storage: the note just doesn't draft */ } }
     wi.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;   // focus returns here on close
     $('rp-wi').showModal();
   }
@@ -1679,6 +1686,33 @@
     view(v) { const b = $('rp-view').querySelector(`button[data-v="${v}"]`); if (b && !$('rp-view').hidden) b.click(); },
     state: () => (shot ? sliceState(+$('rp-t').value) : null),
     whatIf: on => whatIf(on),
+    // Study seam (backlog #44): snapshot or apply the anchored editor's scale factors, keyed like
+    // the drawer's sliders. Applying opens the editor and follows the ?whatif= deep-link discipline
+    // — only sliders the gate enabled, set like a hand on them, then the debounced re-run. A
+    // snapshot exists only while the editor is open (the drawn strips are what a study restores).
+    whatIfValues(values) {
+      const inputs = WI.map(([k]) => [k, $('rp-wi-' + k)]).filter((pair) => pair[1] && !pair[1].disabled);
+      if (!values) {
+        if (!wi.on) return null;
+        const out = {};
+        inputs.forEach(([k, el]) => { out[k] = +el.value; });
+        return out;
+      }
+      return whatIf(true).then(() => {   // opens the editor; the sliders exist once it resolves
+        let last = null;
+        inputs.forEach(([k, el]) => { if (Object.prototype.hasOwnProperty.call(values, k)) { el.value = values[k]; last = el; } });
+        if (last) { labelsWhatIf(); last.dispatchEvent(new Event('input', { bubbles: true })); }
+        return true;
+      });
+    },
+    // The drawer's study-note field, set on restore (the server copy is the truth, so the local
+    // draft is consumed); the palette reads the field when saving a study.
+    setNote(text) {
+      const el = $('rp-wi-note');
+      if (!el) return;
+      el.value = String(text == null ? '' : text);
+      try { localStorage.removeItem('fusionlab-study-note'); } catch (e) { /* no storage */ }
+    },
     compare(ids) {   // public hook for the router's #/compare/{ids} deep links (workspaces.js)
       return init().then(() => startCompare(ids));
     },

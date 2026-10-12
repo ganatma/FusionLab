@@ -15,6 +15,7 @@ from fusionlab.agent_config import agent_settings
 from fusionlab.api_agent import router as agent_router
 from fusionlab.api_replay import router as replay_router
 from fusionlab.api_replay import start_warm_up
+from fusionlab.api_studies import router as studies_router
 from fusionlab.api_virtual import router as virtual_router
 from fusionlab.physics import DEVICES, Controls, sigmav_dt, simulate
 
@@ -219,6 +220,7 @@ def index():
 app.include_router(replay_router)
 app.include_router(virtual_router)
 app.include_router(agent_router)
+app.include_router(studies_router)
 
 
 @app.get("/static/agent.js", include_in_schema=False)

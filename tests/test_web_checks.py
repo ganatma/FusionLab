@@ -217,3 +217,48 @@ def test_abort_overlay_is_conditional_on_the_catalog_flag():
     assert "a distance, never a forecast" in replay             # the house wording, on the panel itself
     ins_fn = replay.split("function insight(s)")[1].split("const ohmic")[0]
     assert "flags this shot <b>aborted</b>" in ins_fn and "catalog bookkeeping" in ins_fn
+
+
+def test_study_restore_fetch_has_the_error_discipline():
+    """#44: the study mount fetches the stored study with the house discipline — the id is
+    encodeURIComponent'd, a non-OK reply throws (the failure names itself in the study landing,
+    never silent), the stored route is re-checked against the app's own views before it is
+    navigated to, and the replay half of the restore rides the shared load machine so the chip
+    stays truthful. The house words ride the restore status."""
+    ws = _served("workspaces.js")
+    mount = ws.split("study(param) {")[1].split("function rememberStudy")[0]
+    assert "fetch('/studies/' + encodeURIComponent(param))" in mount
+    assert "if (!r.ok) throw new Error" in mount
+    assert "Couldn't open the study" in mount
+    assert "/^#\\/(replay|compare|explore)\\b/.test(s.route)" in mount   # the route is re-checked, not trusted
+    assert "(replay|compare|explore|study)" in ws                        # the grammar grew a fourth entry
+    apply_fn = ws.split("function applyStudy")[1].split("function restoreExplore")[0]
+    assert "FusionLabShotLoad" in apply_fn and "L.onChange(check)" in apply_fn
+    assert "the rest have no slider on this machine" in ws   # a partial what-if apply is said out loud
+    assert "compared with MAST data, never predictive" in ws
+
+
+def test_study_save_flow_has_the_error_discipline():
+    """#44: the palette's save posts the capture with the fetch discipline — a non-OK reply is
+    unwrapped to the server's own detail, a failure says nothing was written, and the studies list
+    degrades to recent pointers when the server list is unavailable (named, never silent)."""
+    pal = _served("palette.js")
+    save = pal.split("saveForm.addEventListener('submit'")[1]
+    assert "fetch('/studies', { method: 'POST'" in save
+    assert "if (!r.ok) return r.json().catch(() => null).then" in save
+    assert "Couldn't save" in save and "nothing was written" in save
+    assert "store.del(NOTE_KEY)" in save          # the draft is consumed once the server holds the note
+    refresh = pal.split("function refreshDynamic")[1].split("let opener = null")[0]
+    assert "recent studies still work" in refresh
+
+
+def test_study_note_draft_is_consumed_on_restore():
+    """#44: the drawer's note field drafts to localStorage but a restore overwrites it from the
+    server's copy (setNote) and consumes the draft — pointers and drafts only, the server store is
+    the source of truth."""
+    replay = _served("replay.js")
+    assert 'id="rp-wi-note"' in replay                                  # the field lives in the drawer
+    assert "localStorage.getItem('fusionlab-study-note')" in replay     # the draft loads into an empty field
+    assert "localStorage.setItem('fusionlab-study-note'" in replay      # keyed on the input event
+    assert "localStorage.removeItem('fusionlab-study-note')" in replay  # restore consumes the draft
+

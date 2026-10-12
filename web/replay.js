@@ -134,7 +134,9 @@
           <div><div class="keyline small"><span><i class="sw band"></i> what-if, anchored on the measurement</span> <span><i class="sw dashm"></i> what-if, blind</span>
               <span><i class="sw dotg"></i> blind re-fly of the real programme</span> <span><i class="sw ood"></i> outside the training range</span></div>
             <div class="wi-out small" id="rp-wi-out"></div>
-            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details></div>
+            <details class="small"><summary>How this works, and what it leaves out</summary><div id="rp-wi-notes"></div></details>
+            <label class="small muted" for="rp-wi-note" style="display:block;margin-top:10px;">Study note — what you saw at this slice (saved with a study)</label>
+            <textarea id="rp-wi-note" rows="4" placeholder="Markdown note, anchored to this slice…"></textarea></div>
         </div>
       </div>
     </dialog>`;
@@ -223,7 +225,7 @@
   let initP = null, loadSeq = 0;
   const SL = window.FusionLabShotLoad;   // the shared shot-load machine (shotload.js): one fetch lifecycle for every shot
   let watchId = null;                    // the shot the single-load chip watches (dropdown or deep-link pick)
-  let wi = { on: false, gate: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
+  let wi = { on: false, gate: null, gateP: null, res: null, seq: 0, timer: null, opener: null };   // what-if: gate = /virtual/gate, gateP = the in-flight first open (shared), res = last /virtual/{id} answer, opener = the control focus returns to on close. The edited values live in the drawer's sliders (persistent DOM), so close/reopen keeps them.
   const lineCache = new Map();
 
   // Per-job progress (HARN-1): an SSE relay of the selected provider's stream for one task's job,
@@ -513,6 +515,9 @@
     $('rp-whatif').addEventListener('click', () => whatIf(!wi.on));
     $('rp-wi-x').addEventListener('click', () => whatIf(false));
     $('rp-wi').addEventListener('close', finishWhatIf);
+    // The study-note draft (backlog #44): localStorage is a draft only — the saved study's server
+    // copy is the truth, and restoring a study consumes the draft (setNote).
+    $('rp-wi-note').addEventListener('input', () => { try { localStorage.setItem('fusionlab-study-note', $('rp-wi-note').value); } catch (e) { /* no storage: the note just doesn't draft */ } });
     // Share (audit seed 8): the URL is the state — copy a link that reproduces this view.
     $('rp-share').addEventListener('click', async () => {
       const url = await shareUrl();
@@ -882,16 +887,39 @@
       return;
     }
     if (!wi.gate) {
-      // Fetch and validate the gate into a local before any UI mutation: a failed or malformed gate must not
-      // leave the drawer half-open, and only a validated gate is memoized — a poisoned wi.gate would skip this
-      // refetch on every later click and keep what-if broken until reload.
-      let gate = null;
-      try {
-        const r = await fetch('/virtual/gate');
-        const j = await r.json();
-        if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
-      } catch (e) { /* network failure: the error render just below carries it */ }
-      if (!gate) {
+      // One fetch and one render, however many callers race the first open (the route's own ?edit=1
+      // and a study restore's apply both land here): the memo is the in-flight promise until a
+      // validated gate exists, so a second caller rides the first caller's render instead of
+      // re-rendering the sliders over values an earlier caller just applied. A failed or malformed
+      // gate is not memoized — a Retry (or a later call) refetches; a poisoned wi.gate would skip
+      // this refetch on every later click and keep what-if broken until reload.
+      if (!wi.gateP) {
+        wi.gateP = (async () => {
+          let gate = null;
+          try {
+            const r = await fetch('/virtual/gate');
+            const j = await r.json();
+            if (r.ok && j && j.sliders && Array.isArray(j.caveats) && WI.every(([k]) => j.sliders[k] && typeof j.sliders[k].enabled === 'boolean')) gate = j;
+          } catch (e) { /* network failure: the error render just below carries it */ }
+          if (!gate) { wi.gateP = null; return null; }
+          wi.gate = gate;
+          // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
+          const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
+          $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
+              <input type="range" id="rp-wi-${k}" data-zero="${zero}" min="${min}" max="${max}" step="${step}" value="${zero}"${G[k].enabled ? '' : ' disabled'}>
+              <output id="rp-wi-${k}-out"></output></label>`).join('');
+          $('rp-wi-evidence').innerHTML = (wi.gate.validated ? 'Evidence, from matched pairs of real shots (same session, one input changed by > 20%, the rest within 5%): ' +
+              open.filter(([k]) => k !== 'nbi_shift_s').map(([k, label]) => `${label.toLowerCase()} ${G[k].n_pairs.toLocaleString()} pairs (${esc(G[k].admissible.join(', '))})`).join('; ') + '. '
+            : 'Not validated on this machine yet: run scripts/validate_virtual.py. ') +
+            (shut.length ? `<b>No slider</b> for ${shut.map(([k, label]) => `${label.toLowerCase()} (${G[k].n_pairs} pairs)`).join(' or ')}: too few pairs in 6,353 shots to test any law.` : '');
+          $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
+          $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
+          return gate;
+        })();
+        wi.gateP.catch(() => { wi.gateP = null; });   // a rejected open (fetches are caught above; guard anyway) clears the memo
+      }
+      const opened = await wi.gateP;
+      if (!opened) {
         $('rp-wi-out').innerHTML = '<p class="muted">The anchored editor needs the FusionLab server (/virtual/gate). <button type="button" class="tool" id="rp-wi-retry">Retry</button></p>';
         $('rp-wi-retry').addEventListener('click', () => whatIf(true));
         $('rp-whatif').classList.remove('on');
@@ -899,18 +927,6 @@
         showEditDrawer();   // open the drawer just enough to carry the one-line error and its Retry
         return;
       }
-      wi.gate = gate;
-      // a slider only where the archive can test the edit; the rest are named with the reason, not drawn
-      const G = wi.gate.sliders, open = WI.filter(([k]) => G[k].enabled), shut = WI.filter(([k]) => !G[k].enabled);
-      $('rp-wi-sliders').innerHTML = WI.map(([k, label, min, max, step, zero]) => `<label class="wi-row"${G[k].enabled ? '' : ' hidden'}><span>${label}</span>
-          <input type="range" id="rp-wi-${k}" data-zero="${zero}" min="${min}" max="${max}" step="${step}" value="${zero}"${G[k].enabled ? '' : ' disabled'}>
-          <output id="rp-wi-${k}-out"></output></label>`).join('');
-      $('rp-wi-evidence').innerHTML = (wi.gate.validated ? 'Evidence, from matched pairs of real shots (same session, one input changed by > 20%, the rest within 5%): ' +
-          open.filter(([k]) => k !== 'nbi_shift_s').map(([k, label]) => `${label.toLowerCase()} ${G[k].n_pairs.toLocaleString()} pairs (${esc(G[k].admissible.join(', '))})`).join('; ') + '. '
-        : 'Not validated on this machine yet: run scripts/validate_virtual.py. ') +
-        (shut.length ? `<b>No slider</b> for ${shut.map(([k, label]) => `${label.toLowerCase()} (${G[k].n_pairs} pairs)`).join(' or ')}: too few pairs in 6,353 shots to test any law.` : '');
-      $('rp-wi-sliders').addEventListener('input', () => { clearTimeout(wi.timer); wi.timer = setTimeout(askWhatIf, 120); labelsWhatIf(); });
-      $('rp-wi-notes').innerHTML = wi.gate.caveats.map(c => `<p>${esc(c)}</p>`).join('');
     }
     wi.on = true;
     $('rp-whatif').classList.add('on');
@@ -926,6 +942,8 @@
   // drawer's DOM and the memoized gate survive; "Reset edits" restores the measured programme.
   function showEditDrawer() {
     if ($('rp-wi').open) return;
+    const note = $('rp-wi-note');
+    if (note && !note.value) { try { note.value = localStorage.getItem('fusionlab-study-note') || ''; } catch (e) { /* no storage: the note just doesn't draft */ } }
     wi.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;   // focus returns here on close
     $('rp-wi').showModal();
   }
@@ -1679,6 +1697,37 @@
     view(v) { const b = $('rp-view').querySelector(`button[data-v="${v}"]`); if (b && !$('rp-view').hidden) b.click(); },
     state: () => (shot ? sliceState(+$('rp-t').value) : null),
     whatIf: on => whatIf(on),
+    // Study seam (backlog #44): snapshot or apply the anchored editor's scale factors, keyed like
+    // the drawer's sliders. Applying opens the editor and follows the ?whatif= deep-link discipline
+    // — only sliders the gate enabled, set like a hand on them, then the debounced re-run. A
+    // snapshot exists only while the editor is open (the drawn strips are what a study restores).
+    whatIfValues(values) {
+      // read live: the sliders exist only once the editor has opened and the gate has rendered them —
+      // a snapshot reads them now; an apply reads them after whatIf(true) resolves (a fresh restore has
+      // no sliders yet, and a list captured earlier would silently set nothing)
+      const live = () => WI.map(([k]) => [k, $('rp-wi-' + k)]).filter((pair) => pair[1] && !pair[1].disabled);
+      if (!values) {
+        if (!wi.on) return null;
+        const out = {};
+        live().forEach(([k, el]) => { out[k] = +el.value; });
+        return out;
+      }
+      return whatIf(true).then(() => {   // opens the editor; the sliders exist once it resolves
+        if (!wi.on) return Promise.reject(new Error('the anchored editor could not open — no shot is drawn, or the what-if gate is unavailable'));
+        let applied = 0;
+        live().forEach(([k, el]) => { if (Object.prototype.hasOwnProperty.call(values, k)) { el.value = values[k]; applied++; } });
+        if (applied) { labelsWhatIf(); askWhatIf(); }   // one re-run of the debounced edit, not one per slider
+        return applied;
+      });
+    },
+    // The drawer's study-note field, set on restore (the server copy is the truth, so the local
+    // draft is consumed); the palette reads the field when saving a study.
+    setNote(text) {
+      const el = $('rp-wi-note');
+      if (!el) return;
+      el.value = String(text == null ? '' : text);
+      try { localStorage.removeItem('fusionlab-study-note'); } catch (e) { /* no storage */ }
+    },
     compare(ids) {   // public hook for the router's #/compare/{ids} deep links (workspaces.js)
       return init().then(() => startCompare(ids));
     },

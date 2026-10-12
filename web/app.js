@@ -162,6 +162,9 @@
       device(k, reset) { if (!(k in devices) || ($('device').value === k && !reset)) return; $('device').value = k; loadDevice(); },
       set(k, v) { if (!SLIDERS.includes(k)) return; $(k).value = v; $(k).dispatchEvent(new Event('input')); },
       get: (k) => (k === 'device' ? $('device').value : val(k)),
+      // The whole control surface, for a study's explore snapshot (workspaces.js saves it, then
+      // re-applies it through device()/set()): plain numbers, the same ones the readouts show.
+      values: () => ({ device: $('device').value, ...Object.fromEntries(SLIDERS.map((k) => [k, val(k)])) }),
       // lock(['Ip']) leaves one knob live; lock(null) frees them all
       lock(keys) { LOCKABLE.forEach((k) => { $(k).disabled = !!keys && !keys.includes(k); }); },
       ready: () => ready,   // resolves once /devices has filled the controls

@@ -321,6 +321,18 @@ dialog.palette::backdrop { background:rgba(8,10,13,.72); backdrop-filter:blur(2p
 .pal-status { margin:6px 2px 0; min-height:1em; color:var(--accent); font:12px/1.5 var(--mono); }
 @media (max-width:760px) { dialog.palette { margin-top:6vh; } #pal-list { max-height:60vh; } }
 
+/* save-study dialog (web/palette.js) and the anchored editor's study note (web/replay.js): the
+   palette's dialog idiom (class="palette save-study") with #pal-q's input look. */
+dialog.save-study { padding:14px 16px; }
+dialog.save-study form { display:grid; gap:10px; width:100%; }
+dialog.save-study h2 { margin:0; }
+dialog.save-study input[type="text"], #rp-wi-note { width:100%; background:var(--bg); color:var(--fg);
+  border:1px solid var(--line); padding:8px 10px; font:13px/1.4 var(--mono); }
+#rp-wi-note { resize:vertical; min-height:70px; }
+#study-save-status { min-height:1em; margin:0; }
+.save-actions { display:flex; justify-content:flex-end; gap:8px; }
+.save-actions .tool { padding:6px 14px; }
+
 /* Reduced motion: the gauge bars' width tween and the guided-study spotlight dim are orientation
    aids only — under the user's preference they apply instantly. The two JS smooth scrolls
    (guide.js spotlight, the catalog panel jump) gate on the same query at their call sites. */

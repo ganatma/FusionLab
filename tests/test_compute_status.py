@@ -226,6 +226,28 @@ def test_token_mismatch_falls_back_with_the_token_banner(clean):
     assert "FUSIONLAB_WORKER_TOKEN" in fb["reason"] and "(auth)" in fb["reason"]
 
 
+def test_worker_without_the_qlknn_weight_falls_back_and_still_answers(clean):
+    """The QLKNN closure's fallback promise: a worker that cannot satisfy the qlknn.pt artifact ref
+    dies at submit, run_task re-runs the same body locally (this checkout ships the weight), and the
+    per-slice (K, alpha) answer arrives anyway — with the banner saying why."""
+    class WeightlessRemote(StubRemote):
+        def submit(self, task: str, inputs: dict) -> JobHandle:
+            if task == "run_qlknn":
+                raise RemoteComputeError("submit", "artifact ref not satisfied: qlknn.pt is neither "
+                                                   "cached on this worker nor shipped in models/")
+            return super().submit(task, inputs)
+
+    from fusionlab import mast
+    from fusionlab.physics import replay
+
+    compute._provider = WeightlessRemote()
+    shot = mast.load_shot(30166)
+    out = status.run_task("run_qlknn", {"shot": shot, "P_loss_MW": replay(shot)["P_loss_MW"]})
+    assert out["n_unresolved"] == 0 and "K" in out and "alpha" in out
+    fb = status.fallback_state()
+    assert fb["fallback"] is True and "qlknn.pt" in fb["reason"]
+
+
 # ---------------------------------------------------------------- job progress (HARN-1)
 def test_run_task_exposes_the_remote_job_while_it_runs(clean, monkeypatch):
     """run_task's remote job is visible to active_job() from submit until result returns — the seam

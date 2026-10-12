@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fusionlab import eq_surrogate, mast, surrogate
+from fusionlab import eq_surrogate, mast, qlknn, surrogate
 from fusionlab.compute import JobHandle, LocalProvider, get_provider, provider_name
 from fusionlab.physics import replay
 
@@ -68,7 +68,8 @@ def test_capabilities_reports_tasks_and_model_availability():
     assert caps["surrogate_available"] == surrogate.available()
     assert caps["eq_surrogate_available"] == eq_surrogate.MODEL_FILE.exists()
     assert set(caps["tasks"]) == {"trace_fieldlines", "run_surrogate", "run_surrogate_shot", "run_eq_surrogate",
-                                  "model_metrics", "benchmark"}
+                                  "model_metrics", "benchmark", "run_qlknn"}
+    assert caps["qlknn_available"] == qlknn.MODEL_FILE.exists()
 
 
 def test_unknown_task_is_rejected():
@@ -226,7 +227,7 @@ def test_trace_fieldlines_passthrough_matches_direct_calls():
 
 
 # ---------------------------------------------------------------- the seam's core constraint, pinned statically
-_GPU_MODULES = {"torch", "warp", "fieldlines", "surrogate", "eq_surrogate"}
+_GPU_MODULES = {"torch", "warp", "fieldlines", "surrogate", "eq_surrogate", "qlknn"}
 
 
 def _enclosing_function(parents: dict, node) -> str | None:
@@ -256,3 +257,22 @@ def test_routers_reach_gpu_compute_only_through_the_provider():
             offenders += [n for n in names if n.split(".")[-1] in _GPU_MODULES
                           and _enclosing_function(parents, node) != "replay_usd"]
         assert offenders == [], f"{name} imports GPU modules outside the provider seam: {offenders}"
+
+
+needs_qlknn = pytest.mark.skipif(not qlknn.MODEL_FILE.exists(),
+                                 reason="models/qlknn.pt missing: run scripts/convert_qlknn_weights.py")
+
+
+@needs_qlknn
+def test_run_qlknn_passthrough_matches_direct_call():
+    """The qlknn rails: the provider passthrough equals the in-process module call, key for key —
+    the same equivalence the surrogate paths pin above, now for the vendored-flux closure."""
+    s = mast.load_shot(30166)
+    p_loss = replay(s)["P_loss_MW"]
+    provider = LocalProvider()
+    out = provider.result(provider.submit("run_qlknn", {"shot": s, "P_loss_MW": p_loss}))
+    direct = qlknn.confinement_coeff(s, p_loss)
+    assert set(out) == set(direct)
+    assert np.array_equal(out["K"], direct["K"])
+    assert np.array_equal(out["alpha"], direct["alpha"])
+    assert out["n_unresolved"] == direct["n_unresolved"] and out["n_clipped"] == direct["n_clipped"]

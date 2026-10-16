@@ -5,7 +5,7 @@ description = "FusionLab: an open-data tokamak digital twin. Real MAST shots, Ph
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "numpy>=2.4.6",
-  "fastapi>=0.142.2",
+  "fastapi>=0.143.0",
   "uvicorn[standard]>=0.54.0",
   "torch>=2.14.1",
   "nvidia-physicsnemo>=1.0",
